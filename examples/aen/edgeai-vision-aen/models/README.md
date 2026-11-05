@@ -23,8 +23,8 @@ in here for v0.2.
 
 3. The Vela compiler emits `mobilenet_v2_1.0_224_quant_vela.tflite`
    with the Ethos-U command stream embedded.  Drop that here as
-   `mobilenet_v2_224.vela.tflite` (the example loads the file by
-   that exact name).
+   `mobilenet_v2_224.vela.tflite`. The example does not read this file
+   yet; it uses a built-in placeholder until the model-load stage lands.
 
 ## Licensing
 

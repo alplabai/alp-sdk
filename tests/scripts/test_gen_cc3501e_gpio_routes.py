@@ -130,6 +130,7 @@ def test_discover_targets_matches_proxy_kconfig_examples(gen_module):
         "aen-cc3501e-bringup",
         "aen-cc3501e-companion-tour",
         "aen-cc3501e-gpio",
+        "aen-sdcard-file",
     }
     # aen-cc3501e-ble-gatt / aen-cc3501e-gatt-register also open gpio on the
     # same SoM but never set CONFIG_ALP_SDK_GPIO_CC3501E_PROXY=y -- they
@@ -250,7 +251,7 @@ def test_real_generation_is_idempotent(gen_module, tmp_path, monkeypatch):
     rc = gen_module.main()
     assert rc == 0
     generated = {p: p.read_bytes() for p in sorted(tmp_path.rglob("cc3501e_gpio_routes.c"))}
-    assert len(generated) == 3
+    assert len(generated) == 4
     rev_dependent_path = tmp_path / "cc3501e_rev_dependent_pins.c"
     assert rev_dependent_path.is_file()
 

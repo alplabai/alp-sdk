@@ -27,6 +27,8 @@ the fused subgraph onto the Ethos-U85 (256-MAC) via the Arm Ethos-U core driver
 Silicon-only example. It needs the alp-sdk, hal_alif, hal/ethos_u, and
 lib/tflite-micro modules plus the Vela toolchain at build time:
 
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. For E1M-AEN803, use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` and `boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay` in place of the AEN801 ones below.
+
 ```sh
 west build -p always \
   -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \

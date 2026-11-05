@@ -384,17 +384,19 @@ alp_status_t rv3028c7_alarm_arm(rv3028c7_t                   *ctx,
 alp_status_t rv3028c7_alarm_clear(rv3028c7_t *ctx);
 
 /** Wake flags reported by @ref rv3028c7_wake_service (bit masks). */
-#define RV3028C7_WAKE_TF 0x08u /**< Countdown timer expired (Status bit 3). */
-#define RV3028C7_WAKE_AF 0x04u /**< Alarm matched (Status bit 2). */
-#define RV3028C7_WAKE_UF 0x10u /**< Periodic update (Status bit 4). */
+#define RV3028C7_WAKE_EVF 0x02u /**< External event on EVI (Status bit 1); needs EIE. */
+#define RV3028C7_WAKE_TF  0x08u /**< Countdown timer expired (Status bit 3). */
+#define RV3028C7_WAKE_AF  0x04u /**< Alarm matched (Status bit 2). */
+#define RV3028C7_WAKE_UF  0x10u /**< Periodic update (Status bit 4). */
 
 /**
  * @brief Interrupt service for the wake path: read Status and Control 2,
  *        report the enabled wake sources that are latched, and clear
- *        every latched TF / AF / UF flag.
+ *        every latched TF / AF / UF flag (and EVF while EIE is on).
  *
  * Reported (@p flags) is only a source whose interrupt enable is on:
- * TF needs TIE, AF needs AIE, UF needs UIE (Control 2, p.24).  UF in
+ * TF needs TIE, AF needs AIE, UF needs UIE, EVF needs EIE (Control 2,
+ * p.24; EIE is set with rv3028c7_set_int_enable(RV3028C7_SRC_EXT_EVENT)).  UF in
  * particular latches every second regardless of UIE (p.22, Sec. 4.9),
  * so it is never a wake cause unless UIE is set.  A latched but
  * unreported flag is still cleared.
@@ -402,8 +404,8 @@ alp_status_t rv3028c7_alarm_clear(rv3028c7_t *ctx);
  * The acknowledge is a constant-mask STATUS write, not a
  * read-modify-write: 0 for the flags being cleared and 1 for every
  * other latchable flag.  The same convention as
- * rv3028c7_alarm_check_and_clear().  PORF, EVF, BSF and CLKF are
- * therefore preserved, and EEbusy (read-only) is never written.  No
+ * rv3028c7_alarm_check_and_clear().  PORF, BSF and CLKF (and EVF
+ * while EIE is off) are therefore preserved, and EEbusy (read-only) is never written.  No
  * handlers are invoked.
  *
  * @note Writing 1 to a STATUS flag has no effect and only writing 0

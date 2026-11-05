@@ -5,7 +5,7 @@
   "description": "Validates metadata/bootstrap.json -- the single source of truth for the Zephyr-workspace-assembly FACTS scripts/bootstrap.sh, scripts/bootstrap.ps1, and Python Tan read today (issue #917). Facts only; control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor -- this schema deliberately has no step/action shape. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, west.yml's zephyr revision, and each CI workflow's own Zephyr pin in lockstep (see that script's own module docstring for the full list of checks it runs).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["_comment", "schemaVersion", "zephyr", "venv", "prerequisites", "artifactProvenance", "west", "pip", "verdict", "env", "nativeLibHints", "manualInstallHints"],
+  "required": ["_comment", "schemaVersion", "zephyr", "halAlif", "venv", "prerequisites", "artifactProvenance", "west", "pip", "verdict", "env", "nativeLibHints", "manualInstallHints"],
   "properties": {
     "_comment": {
       "type": "string",
@@ -36,6 +36,18 @@
         }
       }
     },
+    "halAlif": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "The hal_alif revision alp-sdk is verified against -- MUST equal the `revision:` under `- name: hal_alif` in west.yml (check_bootstrap_manifest.py enforces this; --fix rewrites west.yml from this value). hal_alif is a top-level west project pinned from Alif's GitHub, not carried by Zephyr's own west.yml, so no Zephyr bump moves it implicitly: it is bumped deliberately, only after it builds and bench-passes against the pinned Zephyr."
+        }
+      }
+    },
     "venv": {
       "type": "object",
       "additionalProperties": false,
@@ -49,13 +61,14 @@
     "prerequisites": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["posix", "macos", "windows", "pythonMinVersion", "install"],
+      "required": ["posix", "macos", "windows", "pythonMinVersion", "cmakeMinVersion", "install"],
       "description": "Mirrors the CURRENT scripts' own prereq checks (bootstrap.sh checks the posix list on Linux, which includes ninja since #971 -- Zephyr's default CMake generator on every host, not just Windows -- and the narrower macos list on Darwin, see that key's own description below; bootstrap.ps1 checks the windows list, plus a separate python >= pythonMinVersion check) -- recorded faithfully, not silently unified, since the scripts genuinely check different tool sets today (posix and windows track different binary names for the same interpreter -- python3 vs python). Neither script can read THIS list to perform its own prereq check (that would be circular: the check exists to confirm python/jsonschema-free tooling is present before this JSON can be parsed with confidence) -- instead scripts/check_bootstrap_manifest.py asserts each script's hardcoded copy agrees with the list it's declared against byte-for-byte (bootstrap.sh's canonical REQUIRED_BINS against posix, its Darwin-branch REQUIRED_BINS reassignment against macos, bootstrap.ps1's $Prereqs against windows), so a drift on any of the three fails the gate instead of going unnoticed.",
       "properties": {
         "posix": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "macos": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "The EFFECTIVE macOS prerequisite set -- a narrower subset of `posix` (drops `xz`/`wget`: bsdtar decompresses .xz in-process on macOS, and the pinned Zephyr SDK's setup.sh only hard-checks for `wget` on its linux-* host branch -- see scripts/bootstrap.sh's Darwin-branch REQUIRED_BINS comment for the full rationale). A separate declared key, not `posix` minus a hardcoded exclusion list, so bootstrap.sh's Darwin-branch REQUIRED_BINS reassignment has its own byte-for-byte comparison target -- without one, that reassignment could silently drift (add or drop a tool) with nothing to catch it, the same hole prerequisites.posix/windows close for the non-Darwin lists." },
         "windows": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "pythonMinVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+        "cmakeMinVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "Minimum CMake the SDK's documented Zephyr path needs. Raised to 3.28 ahead of the Zephyr 4.5 bump (4.5 requires CMake >= 3.28; the pinned v4.4.1 itself still configures with 3.20). Neither bootstrap script enforces it (they only check `cmake` is on PATH); scripts/check_bootstrap_manifest.py asserts docs/getting-started.md's CMake row states this same floor. There is no runtime consumer yet (tan doctor only checks `cmake` is on PATH)." },
         "install": {
           "type": "object",
           "additionalProperties": false,

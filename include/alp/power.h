@@ -140,7 +140,7 @@ typedef enum {
  *  separate accessor from @ref alp_power_capabilities -- that one's
  *  @c flags field is the cross-class @c alp_instance_cap_t bitmap
  *  every peripheral class shares -- e.g. @c ALP_INSTANCE_CAP_DMA is
- *  bit 0, the same numeric value as @c ALP_POWER_WAKE_RTC below --
+ *  bit 1, the same numeric value as @c ALP_POWER_WAKE_GPIO below --
  *  so wake-arm capability gets its own uint32_t rather than aliasing
  *  that one.) */
 #define ALP_POWER_WAKE_NONE       0x00000000u
@@ -152,6 +152,10 @@ typedef enum {
 #define ALP_POWER_WAKE_ETH_LINK   0x00000020u /**< Ethernet link-up / WoL packet. */
 #define ALP_POWER_WAKE_COMPARATOR 0x00000040u /**< Analog comparator threshold (e.g. LPCMP). */
 #define ALP_POWER_WAKE_BROWNOUT   0x00000080u /**< Brown-out / under-voltage detect. */
+#define ALP_POWER_WAKE_EXT_EVENT \
+	0x00000100u /**< External-event input of the on-module RTC (a carrier / radio
+                                                   signal on the RV-3028 EVI pin), reported separately from
+                                                   @ref ALP_POWER_WAKE_RTC.  Alif SoM backend only. */
 
 /** Information returned by @ref alp_power_request_sleep about how the
  *  sleep round-trip resolved. */
@@ -380,7 +384,7 @@ const alp_capabilities_t *alp_power_capabilities(const alp_power_t *handle);
  * shared @c alp_capabilities_t -- that struct's @c flags is the
  * cross-class @c alp_instance_cap_t bitmap, whose bit values collide
  * numerically with @c ALP_POWER_WAKE_* (e.g. @c ALP_INSTANCE_CAP_DMA
- * == @c ALP_POWER_WAKE_RTC == bit 0).
+ * == @c ALP_POWER_WAKE_GPIO == bit 1).
  *
  * @param handle  Handle from @ref alp_power_open, or NULL.
  * @return Bitmap of @c ALP_POWER_WAKE_* macros; 0 if @p handle is NULL.

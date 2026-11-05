@@ -34,7 +34,7 @@
 # there is no separate Kconfig-style symbol on this OS the way
 # CONFIG_ZCBOR gates the Zephyr side; the library is a hard build
 # dependency instead (DEPENDS += "zcbor" in meta-alp-sdk/recipes-core/
-# alp-sdk/alp-sdk_0.6.bb, which also sets
+# alp-sdk/alp-sdk_git.bb, which also sets
 # -DALP_SDK_MODEL_ZCBOR_REQUIRED=ON so a missing library on that recipe's
 # own sysroot is a configure error, not a silent degrade back to the
 # stub -- a direct plain-CMake -DALP_OS=yocto configure without that flag
@@ -69,7 +69,7 @@ integration:
   # No image_install entry under yocto: below (unlike ros2.yaml's
   # rclcpp, which alp-image-common.inc lists in IMAGE_INSTALL by hand):
   # zcbor is a BUILD-time dependency of the alp-sdk recipe (DEPENDS +=
-  # "zcbor" in meta-alp-sdk/recipes-core/alp-sdk/alp-sdk_0.6.bb),
+  # "zcbor" in meta-alp-sdk/recipes-core/alp-sdk/alp-sdk_git.bb),
   # dynamically linked into libalp_sdk.so; its runtime libzcbor.so.0
   # package lands on the image automatically via OE's own shlibs
   # RDEPENDS scan of that link, same as libc/libgcc_s -- no manual

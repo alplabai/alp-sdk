@@ -180,9 +180,11 @@ own chip-select mid-frame) — running this app's sweep from a faster
 cache-on/DTCM path than every other AEN801 bench app that has measured this
 link would produce a throughput number nobody else's run is comparable to.
 
+For E1M-AEN803 use `alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` and the matching `boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay`.
+
 ## Build
 
-Standalone Zephyr app (no `alp_project.py` `board.yaml` flow):
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout:
 
 ```
 ZEPHYR_BASE=<zephyr-base> west build \

@@ -125,6 +125,16 @@ class FakeProbe(Probe):
         self.sessions += 1
         self.calls.append(("reset_run",))
 
+    def erase(self, addr: int, size: int) -> None:
+        self.sessions += 1
+        self.calls.append(("erase", addr, size))
+        for base in list(self.memory):          # every stored range overlapping the erased one
+            data = self.memory.pop(base)
+            if base < addr:
+                self.memory[base] = data[: addr - base]
+            if base + len(data) > addr + size:
+                self.memory[addr + size] = data[addr + size - base :]
+
 
 class FakeLinux:
     """Duck-types provision.linux_target.LinuxTarget.

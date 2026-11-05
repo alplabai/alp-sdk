@@ -12,14 +12,16 @@ fixed-link PHY) already lives in `zephyr/dts/alif/ensemble_e8_peripherals.dtsi` 
 just **enables** the node (board overlay) with the RMII pin group + a MAC address,
 and exercises the interface. No new `zephyr/` code.
 
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. For E1M-AEN803 use
+`-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`.
+
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-ethernet-link
 # flash + run per docs/aen-bench-bringup.md, then read ram_console_buf over SWD.
 ```
 
 The board overlay enables `&ethernet` with the **authoritative SoM RMII route**
-(`metadata/e1m_modules/aen/alif-ethernet-phy.tsv`, not the fork reference route the
-first cut wrongly used): REFCLK=P11_0, RXD0=P11_3, RXD1=P1_1, CRS_DV=P6_7,
+(`metadata/e1m_modules/aen/alif-ethernet-phy.tsv`): REFCLK=P11_0, RXD0=P11_3, RXD1=P1_1, CRS_DV=P6_7,
 TXD0=P10_4, TXD1=P10_5, TXEN=P1_5 — with `input-enable` on the RX inputs. It also
 creates `gpio11` + `lpgpio` so main() can drive the PHY control pins.
 

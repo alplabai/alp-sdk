@@ -23,6 +23,8 @@ bus and again after the video sequence.
 Zephyr module is this `alp-sdk` checkout (`-DEXTRA_ZEPHYR_MODULES` below) -- a plain `west build` from
 another workspace resolves a different Zephyr checkout that knows none of the alp-sdk shields and fails.
 
+Bench probe (no `board.yaml`, so not buildable with `tan build`); alp-sdk checkout only.
+
 ```sh
 cd examples/aen/aen-trace-runner
 ZEPHYR_BASE=$ZEPHYR_BASE \

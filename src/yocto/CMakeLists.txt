@@ -702,7 +702,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             # yocto_uio_drv.c is the same <alp/rpc.h> surface over userspace
             # open-amp/libmetal UIO ATTACH.  It registers at priority 150
             # with an EXACT silicon_ref ("renesas:rzv2n:n44"), so it only
-            # overrides yocto_drv.c on a V2N-targeted build.
+            # overrides yocto_drv.c on a V2N-targeted build (ALP_SOC=
+            # ALP_SOC_RENESAS_RZV2N_N44, set by the recipe from local.conf
+            # ALP_SDK_SOC; without it ALP_SOC_REF_STR is "unknown").
             target_sources(alp_sdk PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rpc/yocto_drv.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rpc/yocto_uio_drv.c

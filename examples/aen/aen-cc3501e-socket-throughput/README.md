@@ -78,7 +78,7 @@ mistake this app exists to not repeat.
 2. **STEP 2** — confirm the link answers (`PING`, retried).
 3. **STEP 3** — associate to Wi-Fi. **When no credentials are configured,
    this step selects bridge-only mode instead** (see "Bridge-only mode"
-   above) and the app returns after that sweep — see Credentials below.
+   below) and the app returns after that sweep — see Credentials below.
 4. **STEP 4** — open a TCP socket, connect it to the configured server,
    send a plain HTTP GET, then read the response **body** in a loop
    (skipping past the HTTP headers first — they are a fixed few-hundred-
@@ -263,6 +263,8 @@ running this app's read loop from a faster cache-on/DTCM path than every
 other AEN801 bench app that has measured this link would produce a number
 nobody else's run is comparable to.
 
+For E1M-AEN803 use `alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` and the matching `boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay`.
+
 ### READY gate is off by default on this board
 
 `cc3501e_bridge_bringup()` (`src/cc3501e_bridge.c`) does not open a READY
@@ -276,7 +278,7 @@ associated on the same firmware.
 
 ## Build
 
-Standalone Zephyr app (no `alp_project.py` `board.yaml` flow), same shape
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout, same shape
 as `aen-cc3501e-command-sweep`:
 
 ```

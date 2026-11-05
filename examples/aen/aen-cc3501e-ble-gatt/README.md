@@ -33,6 +33,17 @@ isn't captured (only the SE-UART FT232R is on USB, SETOOLS-only), so the
 `RESULT PASS:`/`RESULT FAIL:` line is read from `ram_console_buf` over SWD
 (see `flashing-and-bench-debugging-aen`), not a serial terminal.
 
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
 ## Builds verified (off-silicon)
 
 - **native_sim/native/64** (`twister`, `build_only`) — against the emulated

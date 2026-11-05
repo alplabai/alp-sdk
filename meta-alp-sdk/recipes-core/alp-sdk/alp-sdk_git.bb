@@ -18,14 +18,8 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=787726818c896f394f6627ab59d98d69"
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
 SRCREV  = "${AUTOREV}"
 
-# PV is the SDK release version, so a package feed offers a newer
-# alp-sdk when a release ships (#2827).  It cannot be read from
-# metadata/sdk_version.yaml here: the source is only fetched after
-# parse.  scripts/bump_version.py rewrites this line and
-# scripts/check_version_doc_sync.py fails on drift.  A SemVer
-# pre-release uses "~" (0.17.0~rc2 sorts BEFORE 0.17.0 under opkg/dpkg/rpm);
-# this filename's _0.6 is inert because PV is set explicitly.
-PV      = "0.17.0"
+# PV comes from the shared include (rewritten by scripts/bump_version.py).
+require recipes-core/alp-sdk/alp-sdk-version.inc
 
 # The build content differs per MACHINE (V2N doorbell SPI,
 # ALP_SDK_INFERENCE_AUTO_ORDER, PACKAGECONFIG auto-enables below), so the
@@ -76,6 +70,14 @@ EXTRA_OECMAKE += "${@'-DALP_SDK_V2N_DOORBELL_RSP_CH8=ON' if d.getVar('ALP_V2N_DO
 # `inference.auto_order` into local.conf by `--emit yocto-conf`; empty means no preset order.
 ALP_SDK_INFERENCE_AUTO_ORDER ?= ""
 EXTRA_OECMAKE:append = "${@' -DALP_SDK_INFERENCE_AUTO_ORDER=' + d.getVar('ALP_SDK_INFERENCE_AUTO_ORDER') if d.getVar('ALP_SDK_INFERENCE_AUTO_ORDER') else ''}"
+
+# Active SoC capability profile (Kconfig-style symbol, e.g.
+# ALP_SOC_RENESAS_RZV2N_N44).  Generated from the SoM preset's silicon into
+# local.conf by `--emit yocto-conf`; CMake turns it into
+# CONFIG_<symbol>=1 so <alp/soc_caps.h> / ALP_SOC_REF_STR match the real
+# silicon.  Empty keeps the permissive "unknown SoC" profile.
+ALP_SDK_SOC ?= ""
+EXTRA_OECMAKE:append = "${@' -DALP_SOC=' + d.getVar('ALP_SDK_SOC') if d.getVar('ALP_SDK_SOC') else ''}"
 
 # Regenerate the CMake toolchain file as a do_configure prefunc.
 #

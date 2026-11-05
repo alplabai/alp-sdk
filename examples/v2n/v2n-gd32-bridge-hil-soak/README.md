@@ -131,6 +131,17 @@ Cold-boot autonomy is inherited from the ping example: init retries
 every 200 ms until the GD32 answers, so the soak survives power
 cycles with no fixed boot delay anywhere.
 
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`board.yaml` targets the E1M-V2M101 SoM's M33 core on the `e1m-x-evk` preset.
+
 ## See also
 
 * [`v2n-gd32-bridge-ping`](../v2n-gd32-bridge-ping) — the link-level bring-up demo this builds on.

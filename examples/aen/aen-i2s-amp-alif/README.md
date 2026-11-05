@@ -15,8 +15,12 @@ used). Upstream Zephyr v4.4 + `hal_alif` ship **no** DesignWare I2S driver, so
 `snps,designware-i2s` is vendored from the Apache-2.0 fork (`drivers/i2s/i2s_dw.c`)
 as an **ADR 0017 Tier-2** copy — FIFO/interrupt-driven (no DMA subsystem needed).
 
+Standalone Zephyr bench app (no `board.yaml`, so it is not buildable with `tan build`).
+From an alp-sdk checkout, for E1M-AEN801 or E1M-AEN803 (the bench evidence below is on AEN803):
+
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-i2s-amp-alif
+# or: west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-i2s-amp-alif
 # flash + run per docs/aen-bench-bringup.md, then read ram_console_buf over SWD.
 ```
 
@@ -57,6 +61,7 @@ the mux or selecting M.2 (`/E`/`S` HIGH) is untested -- see
 The single documented switch to re-enable this node:
 
 ```bash
+# on AEN803 use -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     examples/aen/aen-i2s-amp-alif -- \
     -DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay

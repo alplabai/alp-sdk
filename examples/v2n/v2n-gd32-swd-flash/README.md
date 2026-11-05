@@ -65,9 +65,9 @@ ids; `gd32_swd_init()` answers `ALP_ERR_NOT_READY` if the board does not
 publish the pads, and the example exits cleanly with a log message rather
 than wedging the host.
 
-If your board wires the SWD lines to non-default pads, override
-the three `pin_id` constants at the top of `src/main.c` (or extend
-`board.yaml` with the studio routing for your custom pad mapping).
+If your board wires the SWD lines to non-default pads, change the
+pad routing in `metadata/e1m_modules/v2n/supervisor-links.yaml`; the
+generated `alp,gd32-pads` node carries it into the build.
 Bench validation of the resolved routing against real V2N silicon
 is still ahead — see `docs/v1.0-readiness.md` §1a and
 `docs/test-plan.md`.
@@ -96,10 +96,24 @@ sector; the driver rounds out to sector boundaries automatically.
 
 ## Expected output (board hasn't routed SWD yet)
 
+`gd32_swd_init` answers `ALP_ERR_NOT_READY` (-2) when the board does not
+publish the SWD pads:
+
 ```
-[swd] alp_gpio_open failed (SWDIO + SWCLK required); board may not have routed SWD lines yet
+[swd] gd32_swd_init -> -2
 [swd] done
 ```
+
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`board.yaml` targets the E1M-V2N101 SoM's M33 core on the `e1m-x-evk` preset.
 
 ## See also
 

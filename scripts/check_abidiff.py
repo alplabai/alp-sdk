@@ -30,6 +30,10 @@ tag that no tool extracts per symbol, and its "may change in any minor"
 latitude is a minor-to-minor allowance; this gate only compares within a
 minor, where nothing may break.
 
+The gate is ADVISORY: it is not a required context and has no merge_group
+trigger (maintainer decision, #2851).  Every skip emits a ::warning:: under
+--require-tool or in CI (GITHUB_ACTIONS) so it is visible on the run page.
+
 A missing abidiff SKIPS loudly (exit 0, banner on stderr) unless
 --require-tool is given (CI), in which case it fails.
 
@@ -40,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -57,6 +62,12 @@ BUILD_ARGS = [
     "-DALP_SDK_BUILD_SHARED=ON",
     "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
 ]
+
+
+def warn_skip(msg: str, always: bool = False) -> None:
+    """GitHub ::warning:: for a skipped check (CI or --require-tool)."""
+    if always or os.environ.get("GITHUB_ACTIONS"):
+        print(f"::warning title=abidiff skipped::{msg}")
 
 
 def sdk_minor(root: Path) -> str:
@@ -156,8 +167,10 @@ def main() -> int:
         if not shutil.which(tool):
             msg = f"{tool} not found"
             if args.require_tool:
+                warn_skip(f"{msg}; nothing was checked", True)
                 print(f"FAIL: {msg} (--require-tool)", file=sys.stderr)
                 return 1
+            warn_skip(f"{msg}; nothing was checked")
             print("=" * 70, file=sys.stderr)
             print(f"SKIPPED check_abidiff: {msg}. NOTHING WAS CHECKED.", file=sys.stderr)
             print("Install libabigail (apt install abigail-tools) to run this gate.",
@@ -171,6 +184,8 @@ def main() -> int:
                           capture_output=True, text=True, encoding="utf-8", check=True).stdout.split()
     tag = args.baseline_tag or pick_baseline(minor, tags)
     if tag is None:
+        warn_skip(f"no v{minor}.* tag: nothing compared until the first tag of "
+                  f"minor {minor}", args.require_tool)
         print(f"SKIP: first release of minor {minor}, nothing to compare "
               f"(no v{minor}.* tag; in CI make sure tags are fetched).")
         return 0
@@ -195,7 +210,7 @@ def main() -> int:
         print(proc.stderr, end="", file=sys.stderr)
         same_minor = tag.startswith(f"v{minor}.")
         rc = proc.returncode
-        if same_minor and s1 != s2 and soname_only(proc.stdout):
+        if not (rc & (ABI_ERROR | ABI_USAGE)) and same_minor and s1 != s2 and soname_only(proc.stdout):
             print("note: only the SONAME rename differs (pre-#2839 baseline); ignored")
             rc = 0
         # same_minor is false only with a --baseline-tag override.

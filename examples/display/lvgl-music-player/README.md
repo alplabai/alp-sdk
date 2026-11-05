@@ -21,22 +21,44 @@ does not decode or play any audio.
 
 ## Hardware needed
 
+On the E1M-EVK (AEN M55-HP targets) the build applies the
+`e1m_evk_rk055hdmipi4ma0` shield automatically: a RK055HDMIPI4MA0
+720×1280 MIPI-DSI panel (Himax HX8394) on the EVK's J6 connector, the same
+panel `examples/connectivity/iot-dashboard` uses. The EVK has no working SPI
+route for an ST7789, so the panel described below applies to other boards.
+The UI is laid out for 240×320 and is not scaled to the DSI panel; this
+pairing is build-checked in CI only, not yet run on the bench. Pass
+`-DSHIELD=<other>` to use a different panel.
+
 - E1M-AEN family SoM.
 - 240 x 320 ST7789 TFT.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+native_sim builds the UI against the dummy display.
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```
 # writes examples/display/lvgl-music-player/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/display/lvgl-music-player
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/display/lvgl-music-player -- -DEXTRA_CONF_FILE=generated/alp.conf
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/display/lvgl-music-player -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
-
-native_sim builds the UI against the dummy display.
 
 ## Verification status
 
 `[UNTESTED]` -- the UI is the upstream lv_demo_music() reference;
-panel bring-up gates on the v1.0 HiL sweep.  Use the
+panel bring-up still needs HiL.  Use the
 `lvgl-widgets-demo` for the simplest LVGL test first.

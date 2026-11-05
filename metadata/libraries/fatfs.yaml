@@ -1,0 +1,70 @@
+# fatfs -- ELM ChaN FatFs, the FAT/exFAT filesystem for removable media
+# (SD cards, USB sticks) behind Zephyr's fs subsystem (ADR 0018 library
+# manifest; sibling of littlefs, same `fs_mount()` / `FS_FATFS` API).
+#
+# Grounding (pinned Zephyr workspace, $ZEPHYR_BASE = zephyr/):
+#   * "CONFIG_FILE_SYSTEM=y" + "CONFIG_FAT_FILESYSTEM_ELM=y" -- real
+#     symbols: FILE_SYSTEM at subsys/fs/Kconfig:17, FAT_FILESYSTEM_ELM at
+#     subsys/fs/Kconfig.fatfs:6 (`depends on FILE_SYSTEM_LIB_LINK`, which
+#     FILE_SYSTEM selects, subsys/fs/Kconfig:19; also `select
+#     DISK_ACCESS`, Kconfig.fatfs:9).  Emitted by
+#     scripts/alp_orchestrate/libraries.py (`zephyr_kconfig_lines`).
+#   * west module `fatfs`, path modules/fs/fatfs (zephyr/west.yml:144-146,
+#     revision f4ead3bf4a6dab3a07d7b5f5315795c073db568d, group fs) --
+#     resolved through the `modules.name-allowlist` passthrough in this
+#     repo's west.yml (the `- fatfs` entry; its comment explains that
+#     without it the module's Kconfig dependency is unmet and both
+#     CONFIG_ lines are dropped silently).
+#   * upstream version 0.16 (modules/fs/fatfs/README:7 "Current revision
+#     in the tree is 0.16"; ff.c:2 "FatFs - Generic FAT Filesystem Module
+#     R0.16").  Quoted "0.16" below.
+#   * licence BSD-1-Clause (ff.c:7-17: copyright ChaN 2025, a single
+#     condition -- retain the notice in source redistributions -- plus an
+#     AS-IS disclaimer; no SPDX tag ships in the module, the SPDX id is the
+#     matching identifier for that one-condition text).
+#
+# exFAT / long filenames are OPT-IN, not defaults:
+#   * CONFIG_FS_FATFS_EXFAT (Kconfig.fatfs:66, no `default`) -- needed for
+#     exFAT volumes; it `select`s FS_FATFS_LFN.
+#   * CONFIG_FS_FATFS_LFN (Kconfig.fatfs:116, no `default`) -- without it
+#     names are 8.3 only.
+#   Most SDXC cards (> 32 GB) ship formatted exFAT, so an app mounting one
+#   must add `CONFIG_FS_FATFS_EXFAT=y` (and `CONFIG_FS_FATFS_LFN=y`) in its
+#   own prj.conf; this manifest does not force them because the schema has
+#   no per-library option mechanism and they grow RAM/flash for every
+#   consumer.
+#
+# Mounting: `fs_mount()` of a `FS_FATFS` mount over a disk-access name,
+# e.g. the `zephyr,sdmmc-disk` node's disk-name "SD" at "/SD:".
+#
+# Verification: hil_silicon is NOT claimed through this manifest.  On
+# 2026-10-12 a bench-only app (not SDK code) on E1M-AEN401 E4 HP / E1M-EVK
+# with a 128 GB exFAT microSD in J7 ran the Kconfig set above plus
+# FS_FATFS_EXFAT + FS_FATFS_LFN: fs_mount() "/SD:" worked, a 4096 B file
+# was written, fs_sync'd, read back identical, survived a power cycle and
+# was unlinked.
+#
+# `tier: B`: fatfs is not listed in
+# metadata/registries/tier-a-library-ci.json (hostBuild.libraries or
+# excludedLibraries).
+schema_version: 1
+name: fatfs
+description: "ELM ChaN FatFs -- FAT/exFAT filesystem for SD cards and other removable media."
+tier: B
+version: "0.16"
+license: BSD-1-Clause
+
+integration:
+  zephyr:
+    module: fatfs
+    kconfig:
+      - CONFIG_FILE_SYSTEM=y
+      - CONFIG_FAT_FILESYSTEM_ELM=y
+    hw_backends:
+      class: filesystem
+      upstream_source: "elm-chan.org/fsw/ff (in Zephyr west.yml already)"
+      sw_fallback:
+        required: false
+      verification:
+        hil_silicon: untested
+        smoke_tests: build_only

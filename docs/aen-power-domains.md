@@ -86,8 +86,8 @@ unverified.
 ## The STOP / STANDBY backend
 
 `src/backends/power/alif_se_power.c` implements `alp_power_request_sleep(STOP |
-STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and `STOP` on the E8 M55-HP (**bench-proven HP-only** on the E1M-AEN803) (section "The M55-HP" below). It is registered for
-`alif:ensemble:e8` behind `CONFIG_ALP_SDK_POWER_ALIF_SE` (default **n**,
+STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and `STOP` on the E8 M55-HP (**bench-proven HP-only** on the E1M-AEN803) (section "The M55-HP" below) and on the E4 M55-HP (E1M-AEN401: same registers per the AE402 DFP, customer-reported 14/14 RV-3028 wakes, not bench-run by Alp Lab; the AEN401 board now carries the same `alp,som-power` node and BRD_I2C bus as the E8 boards, and its `bkram` address is inferred from the E3 / E7 SVDs and the E8, so the wake record surviving STOP is unverified on E4). It is registered for
+`alif:ensemble:e8` and `alif:ensemble:e4` behind `CONFIG_ALP_SDK_POWER_ALIF_SE` (default **n**,
 experimental; STOP and STANDBY are bench-proven on the E1M-AEN803 M55-HE, STOP also on its
 M55-HP with only the HP booted). This core's (HE or HP) subsystem is powered off and the
 wake is a cold boot through the Secure Enclave, so the call does not return: read
@@ -118,6 +118,7 @@ vendor sample.
 | Bit | Armed by | Notes |
 |---|---|---|
 | `ALP_POWER_WAKE_RTC` | on-module RV-3028, `INT` -> P15_0 -> `WE_LPGPIO0` | primary RTC (the internal LPRTC is not trusted: ER001 / ER002, LFRC-only boot). With `wake_after_ms == 0` the caller's own alarm / countdown must already be armed, or the request is `ALP_ERR_INVAL`. |
+| `ALP_POWER_WAKE_EXT_EVENT` | on-module RV-3028 `EVI` pin (U21.8, the SoM net `MODULE_STBY` / E1.O2, R43 pull-up to +1V8), through the same `INT` -> P15_0 path | a carrier or radio signal, e.g. CC3501E `GPIO_18` (E1.I3, open-drain) routed to E1.O2, pulls EVI low; EVF (STATUS 0Eh bit 1) latches with EIE (CONTROL_2 10h bit 2) set for the cycle. Reported as its own `wake_source`, not `ALP_POWER_WAKE_RTC`. Event Control (13h) is not written: the power-on value is relied on. Bench-pending (#2811); `aen-power-stop` variant E. |
 | `ALP_POWER_WAKE_TIMER` | LPTIMER (`alp,power-wake-timer`, `WE_LPTIMER0`) for `wake_after_ms < 1000` | runs from the AON low-frequency clock. `wake_after_ms` is a **minimum**: the tick count is rounded up against the fastest the clock can run (LFRC 36045 Hz = +10 %, the top of its trim range; measured 34251.7 Hz; LFXO 32775 Hz), so on LFRC a short wake is never early but can be late: ~5 % at the 34251.7 Hz this module measured, up to ~16 % if the clock sits at the bottom of the trim range (-5 %, ~31130 Hz). |
 | `ALP_POWER_WAKE_GPIO` | application LPGPIO pads named by an `alp,power-wake-gpios` devicetree node, `WE_LPGPIO<n>` | advertised only when the node exists and none of its pads is wired by the SoM (see "LPGPIO wake pads" below). |
 | (timed wake >= 1 s) | RV-3028 countdown (`rv3028c7_timer_start`) | whole seconds, rounded up. Needs the chip context bound (`alp_som_power_bind_rv3028`). |

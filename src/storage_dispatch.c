@@ -70,14 +70,10 @@ alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg)
 		alp_z_set_last_error(ALP_ERR_INVAL);
 		return NULL;
 	}
+	alp_capabilities_t   caps;
 	const alp_backend_t *be = alp_backend_select("storage", ALP_SOC_REF_STR);
 	if (be == NULL) {
 		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
-		return NULL;
-	}
-	const alp_storage_ops_t *ops = (const alp_storage_ops_t *)be->ops;
-	if (ops == NULL || ops->open == NULL) {
-		alp_z_set_last_error(ALP_ERR_NOT_IMPLEMENTED);
 		return NULL;
 	}
 	struct alp_storage *h = _alloc();
@@ -85,19 +81,32 @@ alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg)
 		alp_z_set_last_error(ALP_ERR_NOMEM);
 		return NULL;
 	}
-	h->backend           = be;
-	h->state.ops         = ops;
-	h->state.kind        = cfg->kind;
-	h->state.read_only   = cfg->read_only;
-	h->state.instance_id = cfg->instance_id;
+	/* Backends select by priority, not by kind (flash 100 / littlefs 90 /
+	 * disk 80), so a backend that does not serve cfg->kind declines open()
+	 * with ALP_ERR_NOSUPPORT and the next one is tried (as security does). */
+	alp_status_t rc = ALP_ERR_NOT_IMPLEMENTED;
+	for (; be != NULL; be = alp_backend_select_next("storage", ALP_SOC_REF_STR, be)) {
+		const alp_storage_ops_t *ops = (const alp_storage_ops_t *)be->ops;
+		if (ops == NULL || ops->open == NULL) {
+			rc = ALP_ERR_NOT_IMPLEMENTED;
+			break;
+		}
+		memset(h, 0, offsetof(struct alp_storage, in_use));
+		h->backend           = be;
+		h->state.ops         = ops;
+		h->state.kind        = cfg->kind;
+		h->state.read_only   = cfg->read_only;
+		h->state.instance_id = cfg->instance_id;
 
-	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
-	if (be->probe != NULL) {
-		uint32_t refined = caps.flags;
-		(void)be->probe(cfg->instance_id, &refined);
-		caps.flags = refined;
+		caps = (alp_capabilities_t){ .flags = be->base_caps, .class_flags = be->base_class_flags };
+		if (be->probe != NULL) {
+			uint32_t refined = caps.flags;
+			(void)be->probe(cfg->instance_id, &refined);
+			caps.flags = refined;
+		}
+		rc = ops->open(cfg, &h->state, &caps);
+		if (rc != ALP_ERR_NOSUPPORT) break;
 	}
-	alp_status_t rc = ops->open(cfg, &h->state, &caps);
 	if (rc != ALP_OK) {
 		_free(h);
 		alp_z_set_last_error(rc);

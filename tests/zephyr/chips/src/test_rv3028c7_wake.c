@@ -322,6 +322,28 @@ ZTEST(alp_chips, test_rv3028c7_wake_service_reports_only_enabled_sources)
 	wake_end();
 }
 
+ZTEST(alp_chips, test_rv3028c7_wake_service_reports_evf_only_with_eie)
+{
+	wake_begin();
+	uint8_t flags = 0xFFu;
+
+	/* EIE off: a latched EVF is not a wake cause and is left set. */
+	fake_rv3028c7_set_reg(R_CTRL2, 0x00u);
+	fake_rv3028c7_set_reg(R_STATUS, 0x02u);
+	zassert_equal(rv3028c7_wake_service(&g_ctx, &flags), ALP_OK);
+	zassert_equal(flags, 0u);
+	zassert_equal(fake_rv3028c7_get_reg(R_STATUS), 0x02u);
+
+	/* EIE on: reported and acknowledged, PORF kept. */
+	fake_rv3028c7_set_reg(R_CTRL2, 0x04u);
+	fake_rv3028c7_set_reg(R_STATUS, 0x02u | 0x01u);
+	zassert_equal(rv3028c7_wake_service(&g_ctx, &flags), ALP_OK);
+	zassert_equal(flags, RV3028C7_WAKE_EVF);
+	zassert_equal(fake_rv3028c7_get_reg(R_STATUS), 0x01u);
+	assert_no_eeprom_access();
+	wake_end();
+}
+
 /* What would break if writing 1 to a STATUS flag SET it instead of being
  * ignored (bench-verified NOT to happen on the part; the basis of the constant-mask acknowledge, see
  * RV3028_STATUS_WRITE1_IGNORED in rv3028c7.c): the mask's 1s would

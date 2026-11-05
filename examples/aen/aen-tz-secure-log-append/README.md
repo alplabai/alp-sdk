@@ -55,6 +55,8 @@ holds on E4 unchanged.
 
 ## Running
 
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); the commands below only work from an alp-sdk checkout.
+
 ```
 # Non-destructive (ITCM-linked, RAM-run):
 scripts/bench/aen/build.sh   $PWD/examples/aen/aen-tz-secure-log-append

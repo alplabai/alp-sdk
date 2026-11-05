@@ -200,3 +200,6 @@ class ConsoleSwdProbe(Probe):
 
     def reset_run(self) -> None:
         self._py("gd32_swd_flash.py reset")
+
+    def erase(self, addr: int, size: int) -> None:
+        self._py(f"gd32_swd_flash.py erase {addr:#x} {size:#x}", long_running=True)

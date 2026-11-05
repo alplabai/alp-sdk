@@ -1,8 +1,8 @@
 # drone-hud
 
-> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds on
+> ⚠️ **`[UNTESTED]` on hardware.** Builds on
 > `native_sim/native/64`; HiL silicon bring-up of the IMU + GPS +
-> battery + display chain lands in v0.6.
+> battery + display chain is still open.
 
 Marketing-grade demo: an E1M-AEN module renders a full drone
 telemetry HUD on a 240×320 TFT, sourcing live data from four
@@ -35,6 +35,15 @@ on-board sensor chips.
 
 ## Hardware needed
 
+On the E1M-EVK (AEN M55-HP targets) the build applies the
+`e1m_evk_rk055hdmipi4ma0` shield automatically: a RK055HDMIPI4MA0
+720×1280 MIPI-DSI panel (Himax HX8394) on the EVK's J6 connector, the same
+panel `examples/connectivity/iot-dashboard` uses. The EVK has no working SPI
+route for an ST7789, so the panel described below applies to other boards.
+The UI is laid out for 240×320 and is not scaled to the DSI panel; this
+pairing is build-checked in CI only, not yet run on the bench. Pass
+`-DSHIELD=<other>` to use a different panel.
+
 - E1M-AEN family SoM (E8 recommended for SRAM headroom).
 - E1M-EVK board with:
   - LSM6DSO IMU breakout on I²C0 (already on the EVK).
@@ -44,18 +53,26 @@ on-board sensor chips.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```
 # writes examples/display/drone-hud/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/display/drone-hud
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/display/drone-hud -- -DEXTRA_CONF_FILE=generated/alp.conf
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/display/drone-hud -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
-```
 
-Or in the desktop simulator:
-
-```
-# writes examples/display/drone-hud/generated/alp.conf, which west reads below (#866)
-python3 scripts/gen_example_alp_conf.py examples/display/drone-hud
+# Or in the desktop simulator:
 west build -b native_sim/native/64 examples/display/drone-hud -- -DEXTRA_CONF_FILE=generated/alp.conf
 build/zephyr/zephyr.exe
 ```
@@ -72,7 +89,7 @@ ladder, change the colour scheme.  The data path
 
 ## Showcase pointers
 
-This demo is the v1.0 readiness pitch for the SDK: one Customer
+This demo is the SDK's portability pitch: one customer
 copies this `examples/display/drone-hud/` to start their own UAV
 firmware, swaps the chips list in `board.yaml`, and inherits the
 SDK's portability guarantees.

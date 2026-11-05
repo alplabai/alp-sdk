@@ -35,7 +35,7 @@ A strict subset of `aen-inference-energy`'s `ENERGY-*` protocol, so
 the tan on-device model-run capture parser (tan-cli#1287; the `--device` / `--capture` flags ship with that work) reads both apps with the same code:
 
 ```
-ENERGY-CFG {"mode":"latency-only","cycles_per_s":160000000,"npu_dispatched":true,"model":"<name>","model_bytes":N,"arena_used_bytes":N,"arena_bytes":N,"sram_peak_bytes":N,"windows":W,"inferences_per_window":N,"timestamp_source":"dwt-cyccnt"}
+ENERGY-CFG {"mode":"latency-only","cycles_per_s":160000000,"npu_dispatched":true,"model":"<name>","model_bytes":N,"arena_used_bytes":N,"arena_bytes":N,"sram_peak_bytes":N,"windows":W,"inferences_per_window":N,"timestamp_source":"k-cycle-get-32"}
 ENERGY-W <window> active 0 <span_cycles> <span_ms> <inferences>
 ENERGY-WERR <window> active timed_out=1 invoke_status=<rc> completed=<n>   (failed window only)
 ENERGY-WARN active window <ms> ms exceeds the cycle-counter wrap ...       (only if a window wrapped)
@@ -68,13 +68,7 @@ scripts/bench/aen/build.sh "$A" \
   -DAEN_NPU_MODEL=<model_int8>.tflite -DAEN_NPU_MODEL_NAME=<name>
 ```
 
-The same build through tan:
-
-```sh
-tan build --project examples/aen/aen-inference-latency \
-  --board alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
-  -D AEN_NPU_MODEL=<model_int8>.tflite
-```
+This app has no `board.yaml`, so there is no `tan build` path; the build above is the SDK-internal bench wrapper, run from an alp-sdk checkout.
 
 Then RAM-run it with the AEN `ram-run.sh` helper (tan's RAM-run flash mode, tan-cli#1313, is not released yet) and save the
 console to a file; the tan capture parser (tan-cli#1287) turns it into the host-tier

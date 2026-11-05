@@ -9,9 +9,10 @@
  * the SoM power layer needs (lpgpio, lprtc, lptimer0), mirroring the same nodes
  * in ensemble_e8_peripherals.dtsi.
  *
- * BUILD-ONLY.  Every node that could pull driver code into an image
- * (se_service, both MHUs, lpgpio, rtc0, lptimer0) is status = "disabled", so
- * adding this file changes no E4/E6 image.  The E8 declares the SE channel
+ * Every node that could pull driver code into an image (se_service, both MHUs,
+ * lpgpio, rtc0, lptimer0) is status = "disabled" here.  The AEN401 board
+ * enables lpgpio itself (alp_e1m_aen401_m55_hp-on-module.dtsi: the RV-3028
+ * alarm pad and the SoM power-domain pads); the E6 board enables none.  The E8 declares the SE channel
  * "okay" because it backs the SE TRNG there (bench-proven on the AEN803);
  * nothing of that has been run on an E4 or E6, so an app or a later change
  * enables these explicitly.  vbat / ana / stop_mode are bare register windows

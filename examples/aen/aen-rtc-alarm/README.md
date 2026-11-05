@@ -7,6 +7,8 @@ API** — `drivers/rtc/rtc_rv3028.c`, compatible `microcrystal,rv3028`,
 Tier-1: no alp-sdk driver and no vendored code in the path, just a devicetree
 node plus this app.
 
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); the commands below only work from an alp-sdk checkout.
+
 ```bash
 scripts/bench/aen/build.sh examples/aen/aen-rtc-alarm
 ```
@@ -151,11 +153,11 @@ part. If you get it, check in this order:
 
 Everything in `boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` is
 a **module** fact, not an application choice, and is on its way down one layer:
-the board files under `zephyr/boards/alp/e1m_aen801_m55_he/` are gaining the
-BRD_I2C bus and the on-module device nodes so every AEN801 app gets them for
-free. Until that lands the overlay carries them; because devicetree merges by
-node **path** and the content is identical to what the board layer emits, the
-two compose harmlessly and this overlay can then shrink.
+the board files under `zephyr/boards/alp/e1m_aen801_m55_he/` already carry the
+BRD_I2C bus and the on-module device nodes, so every AEN801 app gets them. This
+overlay repeats them; because devicetree merges by node **path** and the
+content is identical to what the board layer emits, the two compose harmlessly
+and the overlay can shrink to the app-specific part.
 
 The overlay filename must be the **fully-qualified** board id with `/` → `_`.
 Zephyr auto-applies `boards/<name>.overlay` only on an exact match against the

@@ -257,6 +257,16 @@ static void test_watch(void)
 	g.alive = false, g.crashed = true, g.hit = 5;
 	n = watch(&w, &g, false, ev);
 	assert(has(ev, n, TR_AEV_CRASH, TR_CRASH_KIND_WIRE));
+	/* a demo (attract) run: the same wire ahead, no hum */
+	tr_sfx_watch_init(&w);
+	tr_game_init(&g, 4u);
+	(void)watch(&w, &g, true, ev);
+	g.ents[5] = (tr_entity_t){ .kind = TR_ENT_WIRE, .lane = g.lane, .y = 600, .low = true };
+	for (uint32_t t = 1; t <= 2u * TR_SFX_WIRE_TICKS; t++) {
+		g.tick = t;
+		n      = watch(&w, &g, true, ev);
+		assert(!has(ev, n, TR_AEV_WIRE, -1));
+	}
 	tr_game_init(&g, 5u); /* no wire: no hum */
 	tr_sfx_watch_init(&w);
 	(void)watch(&w, &g, false, ev);

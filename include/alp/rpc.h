@@ -53,8 +53,8 @@
  *
  * @note The framing format is deliberately minimal in v0.6.  A
  *       richer schema (length-prefixed binary blocks or protobuf
- *       envelopes via nanopb) is an opt-in upgrade tracked for
- *       v0.7; it will reuse the same `<alp/rpc.h>` public API.  Both
+ *       envelopes via nanopb) is not implemented; it would reuse the
+ *       same `<alp/rpc.h>` public API.  Both
  *       ends of an `alp_rpc_channel_t` must agree on the framing
  *       format -- mixing framed and raw firmwares is a wire-protocol
  *       break.

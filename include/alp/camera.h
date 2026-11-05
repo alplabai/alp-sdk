@@ -27,7 +27,9 @@
  *     R01UH1071EJ0120 section 9.8).
  *   - **alif_isp_pico** (silicon_ref `"alif:ensemble:e8"`, priority
  *     100): same real sensor pipeline, plus the E8 VeriSilicon
- *     ISP-Pico's `configure_isp` (same latch-and-ALP_OK posture).
+ *     ISP-Pico's `configure_isp` (validates, latches the config in backend state and
+ *     returns ALP_OK; unlike v2n_n44_isp it does NOT return
+ *     ALP_ERR_NOSUPPORT).
  *     OPT-IN (`CONFIG_ALP_SDK_CAMERA_ALIF_ISP`, default n) --
  *     depends on `VIDEO_ISP_VSI`.  Negotiates a YUV ISP MI output
  *     (converting to RGB565 on the CPU when the caller asked for

@@ -48,6 +48,9 @@ a speaker-to-mic loopback on silicon (issue #2133 round 4f, E1M-AEN803 serial
 only, never acoustically tested. Full-scale headroom at the provisional
 gain default is unmeasured; see issue #2143.
 
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout.
+The commands target E1M-AEN801; for E1M-AEN803 (where the bench evidence below was taken) use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`.
+
 ```sh
 # default (48 kHz, in spec):
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-pdm-mic-alif
@@ -85,8 +88,8 @@ no channel over that floor reports `INCONCLUSIVE` instead of `PASS`.
 
 **Signal-level gate: AC RMS, not peak-to-peak (issue #2133).** Peak-to-peak
 is transient-prone: a probe loopback silence window (`PROBE_LOOPBACK` mode
-of `examples/aen/aen-i2s-tas2563-probe` on branch
-`test/u46-i2s-tas2563-on-reworked-mux`, commit `56631094d`, issue #2143,
+of `examples/aen/aen-i2s-tas2563-probe` (not on dev; on branch
+`test/u46-i2s-tas2563-on-reworked-mux`), commit `56631094d`, issue #2143,
 E1M-AEN803 serial 2026W36-0002, 2026-09-15 14:49Z) measured peak-to-peak 545 on one
 channel with the room silent -- above the prior 512 floor, from a single
 sample excursion, not sustained signal. AC RMS averages over the whole
@@ -224,16 +227,19 @@ them):
    stay available for an app that wants to override the driver's defaults.
    Round 3: the driver also rejects a mode outside the board overlay's
    declared mic clock range -- see Rates above.
-4. **EXPMST0 IP clock not forced** — set `EXPMST0_CTRL` (`0x4902F000`) bits 30/31
-   (PCLK/IPCLK force), not just the bit-8 gate.
+4. **EXPMST0 IP clock not forced** — `EXPMST0_CTRL` (`0x4902F000`) bits 30/31
+   (PCLK/IPCLK force) must be set, not just the bit-8 gate. The patched
+   Tier-1.5 clockctrl now sets them; the app does no raw register write.
 5. **The 76.8 MHz audio source was OFF** — the load-bearing fix. The upstream Alif
    clockctrl only sets per-peripheral gates; it never enables the **HFOSCx2**
    master source. Enabling it is a single CGU write: `CGU_CLK_ENA` (`0x1A602014`,
    = CGU base `0x1A602000` + `0x14`) **bit 24** (`CLK76P8M`) — reg + bit from the
-   fork `clock_control_alif_ensemble.c` GEN2 path, not invented. (So it is *not*
-   SE-only as first feared; a direct register write suffices.) SWD before the
+   fork `clock_control_alif_ensemble.c` GEN2 path. It is *not*
+   SE-only; a direct register write suffices, and the patched Tier-1.5
+   clockctrl now performs it. SWD before the
    fix: `CGU_CLK_ENA=0xFE33FFF1` (bit24=0, source off); after: the FIFO fills.
 
-The example pokes the CGU 76.8 MHz enable + the EXPMST0 force directly (with
-grounded reg/bit references) because the upstream clockctrl driver does neither;
-folding both into a Tier-1.5 clockctrl patch is the clean follow-up.
+The upstream clockctrl driver does neither write, so the patched Tier-1.5
+clockctrl (`zephyr/patches/zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch`)
+enables the CGU 76.8 MHz master source and sets the EXPMST0 IPCLK/PCLK force
+bits. The app itself does no raw register poke.

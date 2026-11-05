@@ -49,6 +49,10 @@ class HaltingProbe(FakeProbe):
             raise BenchError("fake: FMC busy timeout")
         super().loadbin(path, addr)
 
+    def erase(self, addr, size):
+        self.halted = True
+        super().erase(addr, size)
+
     def reset_run(self):
         super().reset_run()
         self.resume_ok -= 1

@@ -92,6 +92,8 @@ make the shared `sram_ipc0` vrings coherent + zeroed.
 Zephyr-pinned modules), so a `west update` fetches them and they are
 auto-discovered — no manual `-DEXTRA_ZEPHYR_MODULES` for them:
 
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); the commands below only work from an alp-sdk checkout. The targets shown are E1M-AEN801; E1M-AEN803 uses `alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp` and `alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`.
+
 ```sh
 west build -p always -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/aen-rpc-pingpong -d build/hp -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
 west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-rpc-pingpong -d build/he -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"

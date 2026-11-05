@@ -68,6 +68,7 @@ on:
       - 'scripts/check_i2c_address_uniqueness.py'
       - 'scripts/check_e1m_pinout.py'
       - 'scripts/check_amp_pad_claims.py'
+      - 'scripts/check_example_readme.py'
       - 'scripts/check_amp_window.py'
       - 'scripts/gen_amp_window.py'
       - 'src/backends/rpc/alp_amp_window.h'
@@ -173,6 +174,7 @@ on:
       - 'scripts/check_i2c_address_uniqueness.py'
       - 'scripts/check_e1m_pinout.py'
       - 'scripts/check_amp_pad_claims.py'
+      - 'scripts/check_example_readme.py'
       - 'scripts/check_amp_window.py'
       - 'scripts/gen_amp_window.py'
       - 'src/backends/rpc/alp_amp_window.h'
@@ -625,6 +627,9 @@ jobs:
 
       - name: Gate — quality-task registry matches scripts/check_*.py on disk
         run: python3 scripts/check_quality_registry.py
+
+      - name: Gate — example READMEs show `tan build` and match board.yaml (#2885)
+        run: python3 scripts/check_example_readme.py
 
       - name: "Gate — changelog.d/ fragments are well-formed (#1395)"
         run: python3 scripts/check_changelog_fragments.py

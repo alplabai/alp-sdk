@@ -9,6 +9,12 @@ see [`bring-up-aen.md`](bring-up-aen.md).
 
 ## 1. Attach a debugger: `west debug`
 
+> **Debug probe.** On the E1M EVK 2641-R3 the on-board RP2040 (`U55`,
+> CMSIS-DAP) is the primary debugger and a SEGGER J-Link is the optional
+> alternative; see [`aen-rp2040-debug-probe.md`](aen-rp2040-debug-probe.md).
+> That RP2040 path is not bench-verified and has no SDK runner yet, so every
+> command below, which drives a J-Link, is the only proven flow today.
+
 For the qualified board target (e.g.
 `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`), a J-Link debug runner
 is wired for you out of the box:
@@ -60,6 +66,11 @@ attach/debug advantage over the generic device and the generic device is
 what `west debug` already drives.
 
 ## 3. Flashing your application
+
+The EVK 2641-R3 RP2040 probe (CMSIS-DAP) is listed first as the intended
+flash path and J-Link as the alternative
+([`aen-rp2040-debug-probe.md`](aen-rp2040-debug-probe.md)); the RP2040 flash
+steps are TBD (not bench-verified), so the proven paths follow.
 
 Replacing the resident slot0 application on E1M-AEN801 has two proven
 paths, both of which persist across a cold power-cycle (a bare

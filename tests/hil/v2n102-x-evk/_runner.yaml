@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Runner defaults for E1M-V2N102 (same silicon as V2N101, larger
-# memory) + E1M-X-EVK.  Inherits the portable spec set from
-# tests/hil/_common/.  A run must target ../v2n101-x-evk/
-# explicitly for the v2n101-* ssh-run set (the memory tier changes no
-# check; v2n101-emmc-block is size-independent); nothing includes it
-# automatically.
+# Runner defaults for E1M-V2N102 + E1M-X-EVK.  Inherits the portable spec set
+# from tests/hil/_common/.  This dir carries its own ssh-run specs, derived
+# from v2n101-x-evk and NOT BENCH-VERIFIED on a E1M-V2N102 unit (the SoM preset
+# populates the same hardware).  Memory tier differs only in DRAM/eMMC size; no spec asserts a size.
 
 schema_version: 1
 board: alp_e1m_v2n102_m33_sm

@@ -20,6 +20,17 @@ SUMMARY = "Alp SDK production image (hardened: key-only SSH, no debug tooling)"
 
 require alp-image-common.inc
 
+# The dev-kit opkg feed must never reach a field image (#2854). A prefunc, not a
+# parse-time fatal: bitbake parses this recipe in every build, including edge
+# builds that legitimately set ALP_DEVKIT_FEED (#2853).
+python alp_prod_no_devkit_feed() {
+    if d.getVar('ALP_DEVKIT_FEED') == '1':
+        bb.fatal('alp-image-prod must not be built with the dev-kit opkg feed '
+                 '(ALP_DEVKIT_FEED=1); build it from a build dir without '
+                 'conf/distro/include/alp-devkit-feed.inc')
+}
+do_rootfs[prefuncs] += "alp_prod_no_devkit_feed"
+
 # Vision appliance: camera + display, but NOT ros (opt in with alp-ros if the
 # product's app is a ROS node). debug-tweaks is never enabled here.
 IMAGE_FEATURES += "alp-camera alp-display"

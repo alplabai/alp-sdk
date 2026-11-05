@@ -122,7 +122,7 @@ reboot
 > path and the only way to also reflash BL2 (`bl2_bp_spi.bin`).
 Recovery if a bad BL2 won't boot: SCIF Flash Writer + a known-good `bl2_bp_spi*.srec`.
 
-## Lifecycle: TF-A boots the CM33, Linux remoteproc attaches (opt-in, bench-pending)
+## Lifecycle: TF-A boots the CM33, Linux remoteproc attaches (opt-in; attach-only half bench-run, dev stop/start/reload not exercised)
 
 Decision (Q52): adopt Renesas' RZ/V2N Linux remoteproc driver and **keep TF-A
 boot**.  BL2 still starts the CM33 at power-on from the xSPI image (above);

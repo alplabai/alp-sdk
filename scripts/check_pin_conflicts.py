@@ -15,8 +15,13 @@ Two TSV variants exist:
   `e1m_pad \t e1m_function \t <silicon_peripheral> \t <silicon_pad>`.
   Conflicts here are between two `silicon_pad` cells claiming
   different `e1m_function`s.
-* `inter-chip.tsv`, `alif-ospi.tsv`, `alif-ethernet-phy.tsv` are
-  not pad-claim maps and are skipped.
+* `inter-chip.tsv`, `alif-ospi.tsv`, `alif-ethernet-phy.tsv` list Alif
+  pads under a named column.  They are not checked on their own, but
+  they ARE joined with `from-alif.tsv` (`_check_aen_alif_join`): an
+  Alif pad claimed by two of these tables is a conflict unless it is on
+  `CROSS_TABLE_ALLOWLIST`.  Likewise the V2N base map and
+  `v2n-m1/m1-additions.tsv` are joined (`_check_v2n_join`) so an M1
+  addition cannot silently reuse a base Renesas pad.
 
 Exit codes:
 * 0  -- no conflicts.
@@ -32,6 +37,7 @@ CI wires this in `pr-metadata-validate.yml`.
 from __future__ import annotations
 
 import csv
+import re
 import sys
 from pathlib import Path
 from collections import defaultdict
@@ -65,6 +71,44 @@ E1M_PAD_TSVS = (
     "aen/from-alif.tsv",
     "aen/from-cc3501e.tsv",
 )
+
+# AEN Alif-pad tables joined across files: (relative path, column index
+# of the Alif pad, column index of the signal name, has an unfiltered
+# header row that must be dropped).
+AEN_ALIF_JOIN_TSVS = (
+    ("aen/from-alif.tsv", 3, 1, False),
+    ("aen/inter-chip.tsv", 4, 0, True),
+    ("aen/alif-ospi.tsv", 1, 0, True),
+    ("aen/alif-ethernet-phy.tsv", 1, 0, True),
+)
+
+# V2N pad-first tables joined across files (column[1] = silicon pad).
+V2N_JOIN_TSVS = (
+    "v2n/renesas-peripheral-map.tsv",
+    "v2n-m1/m1-additions.tsv",
+)
+
+# Alif pads legitimately claimed by two different AEN tables.  The E1M
+# edge SD bus and the CC3501E SDIO link land on the same six Alif pads
+# through a board-level mux that time-shares the single Alif SDIO
+# controller; the CC3501E side is behind unpopulated 0 ohm links on
+# every board built to date.  See docs/cc3501e-bridge.md ("SDIO").
+_SD_SDIO_TABLES = frozenset({"from-alif.tsv", "inter-chip.tsv"})
+CROSS_TABLE_ALLOWLIST: dict[str, frozenset[str]] = {
+    pad: _SD_SDIO_TABLES
+    for pad in ("P13_0", "P13_1", "P13_2", "P13_3", "P14_0", "P14_1")
+}
+
+_PAD_RE = re.compile(r"^P\d+_\d+")
+
+
+def _norm_pad(cell: str) -> str:
+    """Reduce an alias cell ('P4_1/JTAG0_TDATA1', 'P15_0_FLEX') to 'P4_1'."""
+    for tok in cell.split("/"):
+        m = _PAD_RE.match(tok.strip())
+        if m:
+            return re.sub(r"_FLEX$", "", tok.strip())
+    return cell.strip()
 
 
 def _read_rows(path: Path) -> list[list[str]]:
@@ -131,8 +175,54 @@ def _check_e1m_pad(rel: str) -> list[str]:
     return errors
 
 
+def _join_errors(
+    claims: dict[str, list[tuple[str, str]]],
+    allow: dict[str, frozenset[str]],
+) -> list[str]:
+    errors: list[str] = []
+    for pad, who in claims.items():
+        files = {f for f, _ in who}
+        if len(files) > 1 and not files <= allow.get(pad, frozenset()):
+            errors.append(
+                f"pad {pad!r} claimed across tables: "
+                + ", ".join(f"{f}:{sig!r}" for f, sig in who)
+            )
+    return errors
+
+
+def _check_aen_alif_join() -> list[str]:
+    """Join the AEN Alif-pad tables; a pad in two files is a conflict."""
+    claims: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for rel, pad_col, sig_col, has_header in AEN_ALIF_JOIN_TSVS:
+        rows = _read_rows(MODULES / rel)
+        for row in rows[1:] if has_header else rows:
+            if len(row) <= pad_col:
+                continue
+            pad = _norm_pad(row[pad_col])
+            if not pad or is_tbd(pad):
+                continue
+            claims[pad].append((Path(rel).name, row[sig_col].strip()))
+    return _join_errors(claims, CROSS_TABLE_ALLOWLIST)
+
+
+def _check_v2n_join() -> list[str]:
+    """Join the V2N base map with the M1 additions."""
+    claims: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for rel in V2N_JOIN_TSVS:
+        for row in _read_rows(MODULES / rel):
+            if len(row) < 2:
+                continue
+            pad = row[1].strip()
+            if not pad or is_tbd(pad):
+                continue
+            claims[pad].append((Path(rel).name, row[0].strip()))
+    return _join_errors(claims, {})
+
+
 def main() -> int:
     all_errors: list[str] = []
+    all_errors.extend(_check_aen_alif_join())
+    all_errors.extend(_check_v2n_join())
     for rel in PAD_FIRST_TSVS:
         all_errors.extend(_check_pad_first(rel))
     for rel in E1M_PAD_TSVS:
@@ -144,8 +234,9 @@ def main() -> int:
         print(
             f"\ncheck_pin_conflicts: {len(all_errors)} conflict(s).  "
             "If a row is a legitimate dual-source map, add the pad to "
-            "ALLOWLIST in scripts/check_pin_conflicts.py and update the "
-            "matching README to document the dual-source convention.",
+            "ALLOWLIST (single-table duplicates) or CROSS_TABLE_ALLOWLIST "
+            "('claimed across tables' errors) in scripts/check_pin_conflicts.py "
+            "and update the matching README to document the convention.",
             file=sys.stderr,
         )
         return 1

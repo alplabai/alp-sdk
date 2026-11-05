@@ -179,7 +179,7 @@ is a real open question this app is not built to answer by itself, and
 
 ## Build
 
-Standalone Zephyr app (no `alp_project.py` `board.yaml` flow), same target
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout, same target
 as `aen-evk-demo`:
 
 ```

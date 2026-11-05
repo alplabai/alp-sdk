@@ -37,8 +37,7 @@ on `native_sim` and real silicon.
 ## Why vendored, not west-fetched
 
 `west.yml` carries a `minimp3` project pin under the disabled
-`extras-tier1` group, but the west topdir workspace this SDK builds
-against hasn't fetched it. minimp3 is a single header with no build
+`extras-tier1` group, which west does not fetch by default. minimp3 is a single header with no build
 system of its own, so it's vendored the same way as `etl`/`fmt`
 instead of left as a documented gap -- see
 [`vendors/minimp3/README.md`](../../../vendors/minimp3/README.md).
@@ -65,14 +64,31 @@ ffmpeg -f lavfi -i "sine=frequency=440:duration=0.2:sample_rate=44100" \
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```
+# writes examples/audio/minimp3-decode/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/audio/minimp3-decode
+
 # Standalone, native_sim (host binary; no hardware needed):
 west build -b native_sim/native/64 examples/audio/minimp3-decode \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 
 # On real silicon, point -b at the SoM's Zephyr board target.
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/audio/minimp3-decode
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/audio/minimp3-decode \
+    -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

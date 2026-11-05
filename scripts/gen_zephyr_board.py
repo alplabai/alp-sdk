@@ -1905,6 +1905,10 @@ def _aen_dts(
         "",
         f"#include <alif/ensemble/{display_variant.lower()}.dtsi>",
         f"#include <alif/ensemble/common/ensemble_rtss_{role}.dtsi>",
+        # The core's own CMSDK watchdog (wdog0, disabled): address checked
+        # against the E4 / E8 DFP soc.h only, so no other family gets it.
+        *([f"#include <alif/ensemble_rtss_{role}_wdog.dtsi>"]
+          if part in ("E4", "E8") else []),
         f"#include <{peripherals_dtsi}>",
         "#include <zephyr/dt-bindings/gpio/gpio.h>",
         "#include <zephyr/dt-bindings/i2c/i2c.h>",

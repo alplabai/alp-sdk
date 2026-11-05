@@ -140,6 +140,7 @@ reports before a build.
 | `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `fatfs` | B | `0.16` | BSD-1-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `gfx-compat` | B | `1a7b16034ec123e92c25e9ec13fb3508e7041a23` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `jsmn` | B | `1.1.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -163,7 +164,7 @@ reports before a build.
 | `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-**241 / 245 (library × SKU) cells compatible (4 incompatible, 0 n/a).**
+**248 / 252 (library × SKU) cells compatible (4 incompatible, 0 n/a).**
 
 ### E1M-X family (Cortex-A55 + Cortex-M33)
 
@@ -182,6 +183,7 @@ reports before a build.
 | `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `fatfs` | B | `0.16` | BSD-1-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `gfx-compat` | B | `1a7b16034ec123e92c25e9ec13fb3508e7041a23` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `jsmn` | B | `1.1.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -205,7 +207,7 @@ reports before a build.
 | `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-**210 / 210 (library × SKU) cells compatible.**
+**216 / 216 (library × SKU) cells compatible.**
 
 Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (the named `requires:` constraint fails) · — not applicable (no `integration:` for any OS this SoM runs).
 <!-- END GENERATED: gen_portability_matrix_libraries -->
@@ -230,11 +232,9 @@ the `CONFIG_ALP_SOC_*=y` line, the two SoM-identity comments (`# SoM
 silicon (...)` and `# SoM-intrinsic chip drivers (...)`, not one — see
 the E1M-X section below, which already had this right), and the
 `CONFIG_ALP_SDK_SOC_{NAME,CPUS,NPUS,SRAM_KB}` per-silicon identity
-block, AEN301/401/501/601/701 additionally carry
-`CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M=y` where AEN801/AEN803 do not (the
-OPTIGA Trust M secure element is DNP on this batch for both —
-`assembled: false` in their presets — while the other five SKUs' presets
-default it `assembled: true`), and AEN803 additionally emits two more,
+block, no AEN SKU emits `CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M=y` (the
+OPTIGA Trust M secure element, IC1, is DNP on the shared AEN PCB, so all
+seven presets carry `assembled: false`; #2958), and AEN803 additionally emits two more,
 `CONFIG_ALP_SDK_SOM_DRAM_MBIT=512` and `CONFIG_ALP_SDK_SOM_FLASH_MBIT=256`
 — a legitimate, silicon-population-derived diff, the same class as the
 U85 lines in Gap G-1 below: AEN803 is the only AEN SKU whose external
@@ -288,7 +288,6 @@ Expected diffs (legitimate — driven by silicon / SoM facts):
 | ------------------------------------------------- | --------------------------------------------------- |
 | `CONFIG_ALP_SOC_ALIF_ENSEMBLE_{E3..E8}=y`         | one per silicon variant, not one per AEN SKU -- AEN801 and AEN803 share E8 silicon and both emit `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8=y` (#2084) |
 | `CONFIG_ALP_SDK_SOC_{NAME,CPUS,NPUS,SRAM_KB}`     | per-silicon-variant identity block; differs across every SoC part (E3..E8) |
-| `CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M=y`            | present when `optiga_trust_m` is `assembled: true` -- AEN301/401/501/601/701 default it true; AEN801/AEN803 both carry `assembled: false` (DNP this batch) |
 | `CONFIG_ALP_SDK_SOM_{DRAM,FLASH}_MBIT`            | only on E1M-AEN803 -- the only AEN SKU whose external OSPI0 memories (`hyperram`/`ospi_memories.ospi0`) are `assembled: true`, so the only one whose `memory:` block resolves non-TBD (#2084) |
 | `CONFIG_ALP_SDK_CHIP_CC3501E=y`                   | on all AEN (on-module Wi-Fi/BLE coprocessor)        |
 | `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y`          | on every AEN (every E3..E8 carries a U55 pair) |

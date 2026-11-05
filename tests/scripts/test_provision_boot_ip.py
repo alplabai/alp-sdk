@@ -154,6 +154,7 @@ def test_extra_cold_cycle_goes_through_power_cycle_with_min_off(tmp_path):
         def on(self): seen.append("on")
     p = P()
     p._sleep = lambda s: seen.append(f"sleep {s:g}")
+    p._clock = lambda: 0.0  # frozen: a real clock ticks between off() and the dwell
     p.cycle(0.1)
     assert seen[0] == "off" and "on" in seen and any(x == f"sleep {MIN_OFF_S:g}" for x in seen)
 

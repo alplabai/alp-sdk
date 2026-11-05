@@ -160,7 +160,7 @@ inference:
   ethos_u_variant:      u85                    # primary.
 
 capabilities:
-  optiga_trust_m:       true
+  optiga_trust_m:       false      # DNP=1 (assembled: false in i2c_devices); capability tracks population.
 
 topology:
   a32_cluster:

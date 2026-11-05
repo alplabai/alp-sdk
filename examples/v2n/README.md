@@ -1,7 +1,7 @@
 # V2N / V2N-M1-specific examples
 
 Reference applications that exercise E1M-X-V2N-family hardware
-(Renesas RZ/V2N A55 + dual-M33 + DRP-AI NPU, GD32G553 supervisor
+(Renesas RZ/V2N quad-A55 + Cortex-M33 + DRP-AI NPU, GD32G553 supervisor
 MCU, on-module PMIC fleet, OPTIGA Trust M secure element, eMMC +
 xSPI NOR storage, dual Gigabit Ethernet, on-module RTC + temp
 sensor).  Build any of these against an E1M-X-V2N SKU on the
@@ -12,7 +12,7 @@ captured in [`docs/bring-up-v2n-m1.md`](../../docs/bring-up-v2n-m1.md).
 
 | Directory                                              | What it shows                                                                |
 |--------------------------------------------------------|------------------------------------------------------------------------------|
-| [`v2n-gd32-bridge-ping`](v2n-gd32-bridge-ping/)        | PING + GET_VERSION handshake against the GD32 supervisor over both SPI (fast path) and I²C (management path). The canonical first build on V2N. |
+| [`v2n-gd32-bridge-ping`](v2n-gd32-bridge-ping/)        | PING + GET_VERSION handshake against the GD32 supervisor over the 25 MHz SPI fast path (BRD_I2C not opened). The canonical first build on V2N. |
 | [`v2n-gd32-bridge-functional`](v2n-gd32-bridge-functional/) | Single-pass FUNCTIONAL validation -- drive each bridge surface with a known stimulus and assert the value back (sqrt/sin/TRNG/ADC-reject/PWM readback), then a live PWM7 staircase for the scope. |
 | [`v2n-gd32-bridge-loopback`](v2n-gd32-bridge-loopback/) | Jumpered Tier-B LOOPBACK -- three copper jumpers route a bridge OUTPUT back into a bridge INPUT to prove the analog + timer signal paths end to end. |
 | [`v2n-gd32-bridge-hil-soak`](v2n-gd32-bridge-hil-soak/) | Pass/fail soak of the WHOLE GD32 bridge command set over the 25 MHz SPI fast path -- every opcode round-trips each cycle with a self-contained verification. |
@@ -20,7 +20,7 @@ captured in [`docs/bring-up-v2n-m1.md`](../../docs/bring-up-v2n-m1.md).
 | [`v2n-brd-i2c-bringup`](v2n-brd-i2c-bringup/)          | Patch-day diagnostic for the SoM's BRD_I2C management bus (Renesas RIIC8) -- scan, separate bus-level faults from per-device failures, then read-only probe every populated IC. Linux/Yocto app; no `testcase.yaml`, not built or gated by CI. |
 | [`v2n-eeprom-manifest-dump`](v2n-eeprom-manifest-dump/)| Hexdump + structured decode of the EEPROM manifest at offset 0x0000 (magic, schema_version, family, sku, hw_rev, serial, mfg_year/mfg_month/mfg_day, CRC32).            |
 | [`v2n-temp-sensor`](v2n-temp-sensor/)                  | Read the on-module TMP112 once per second and print degrees Celsius. Linux/Yocto app; no `testcase.yaml`, not built or gated by CI. |
-| [`v2n-pwm-fan-control`](v2n-pwm-fan-control/)          | Ramp a GD32-side PWM channel along a five-stop fan curve (25 kHz board, 0--100 % duty interpolation).                                          |
+| [`v2n-pwm-fan-control`](v2n-pwm-fan-control/)          | Ramp a GD32-side PWM channel along a five-stop fan curve (fixed 25 kHz PWM frequency, 0--100 % duty interpolation).                                          |
 | [`v2n-secure-element-sign`](v2n-secure-element-sign/)  | OPTIGA Trust M probe, Coprocessor UID read and raw APDU session (host library). Linux/Yocto app; no `testcase.yaml`, not built or gated by CI. |
 | [`v2n-gd32-swd-flash`](v2n-gd32-swd-flash/)            | Host-driven SWD bit-bang on the GD32 supervisor -- connect, halt, mass-erase, program, verify, reset.                                            |
 | [`v2n-drpai-inference`](v2n-drpai-inference/)          | DRP-AI3 inference on the V2N A55 cluster (Linux/Yocto app; no `testcase.yaml`, not built or gated by CI). |

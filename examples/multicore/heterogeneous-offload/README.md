@@ -1,8 +1,9 @@
 # heterogeneous-offload
 
-> `[UNTESTED]` -- v0.6 paper-correct.  Builds against the same V2N
-> memory_map as rpmsg-v2n (no TBD addresses).  HiL bring-up gates
-> on v0.8.
+> `[UNTESTED]` -- builds against the same V2N memory_map as rpmsg-v2n
+> (no TBD addresses).  The underlying rpmsg-v2n transport is
+> bench-proven (#697, #2374); the FFT offload itself has not been
+> benched.
 
 **The "why heterogeneous compute?" flagship.**  The A-cluster
 delegates a 1024-point FFT to its M-class peer over RPMsg and reads
@@ -45,9 +46,14 @@ returned the magnitude spectrum.
 
 ## Memory map
 
-Same layout as [`rpmsg-v2n`](../rpmsg-v2n/).  The 512 KiB
+Same layout as [`rpmsg-v2n`](../rpmsg-v2n/).  The tan-resolved 512 KiB
 `alp_default_rpmsg` carve-out lives in `ocram_low` at
-`0x00010000`; deterministic + non-cacheable.
+`0x00010000`; deterministic + non-cacheable.  That is the address the
+generated `<alp/system_ipc.h>` carries.  The M33 slice's real OpenAMP
+transport (resource table, vrings, shared buffers) sits in the SoC's
+`openamp_carveout` instead: 9 MiB at `0x4f700000` (A55) =
+`0x9f700000` (CM33-NS), see
+[`rpmsg-v2n`'s memory map](../rpmsg-v2n/README.md#memory-map).
 
 ## Boot order
 
@@ -56,8 +62,11 @@ firmware → both sides discover `alp_default_rpmsg`.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
-tan build --project examples/multicore/heterogeneous-offload
+tan build
+tan flash
 ```
 
 Fan-out:

@@ -22,6 +22,8 @@ the `CHANGELOG.md` entries tagged (#2287) for the IMX296 bring-up's bench histor
 | AE envelope | hal_alif patch 0011 | hal_alif patch 0013 |
 | Bench status | bench-verified (see `docs/camera-shields.md`) | data path bench-verified (run 297, ISP-Pico + AE, runs 298-310); colour uncalibrated, image quality not verified |
 
+Standalone Zephyr bench app (no `board.yaml`, so it is not buildable with `tan build`); the commands below only work from an alp-sdk checkout. Targets shown are E1M-AEN803; the AEN801 overlay also exists (use `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`).
+
 ```bash
 # OV5647 (default):
 west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \

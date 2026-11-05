@@ -120,7 +120,7 @@ Kconfig fragment + devicetree overlay beside the slice's `alp.conf`; the
 content mirrors `scripts/bench/aen/aen-flowc-itcm.{conf,overlay}`. Proven on the
 E8 M55-HE (E1M-AEN801 / E1M-AEN803) and HE-only: a project with no M55-HE app
 (an M55-HP-only one included) or any other SKU is refused
-(`build.link-itcm-unsupported`), as is an explicit non-RAM
+(`build.link-itcm-unsupported`), as is an explicit `linux`/`none`
 `diagnostics.console:` (`build.link-itcm-console-conflict`). Details and the
 Flow C procedure: `docs/aen-bench-bringup.md`.
 
@@ -486,7 +486,9 @@ PSA Crypto runs entirely non-secure (mbedTLS-only) and the overlay is
 not written.
 
 `attestation_root: optiga_trust_m` only validates when the SoM preset
-physically ships OPTIGA Trust M (AEN family + V2N family today); the
+physically ships OPTIGA Trust M with the part fitted (V2N family today;
+every E1M-AEN SKU shares one SoM PCB on which OPTIGA IC1 is DNP, so the
+loader refuses it there with `assembled: false`); the
 emitter additionally surfaces `CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y`
 and a comment pointing at the `src/security/optiga_trust_m_bridge.c`
 PSA <-> OPTIGA bridge driver.

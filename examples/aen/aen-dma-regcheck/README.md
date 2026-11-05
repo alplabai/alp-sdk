@@ -82,6 +82,7 @@ transcribe the relevant `*_PERIPH_REQ` from that file.
 
 ## Build (bench, serial-driven by the maintainer)
 
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout.
 RAM-run for the RTSS-HE core; the board overlay
 `boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` auto-applies for the fully-qualified
 board:
@@ -92,6 +93,8 @@ ZEPHYR_BASE=<zephyr-base> west build \
   examples/aen/aen-dma-regcheck -- \
   "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
 ```
+
+For E1M-AEN803 use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`; its overlay `boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay` auto-applies the same way.
 
 Flash/run is the bench RAM-run (J-Link `loadbin` + go to ITCM); read
 `ram_console_buf` over SWD for the `RESULT` line. Expected:
@@ -152,4 +155,3 @@ Three on-silicon findings; #1 + #2 led to the #3 fix (bench re-verify pending):
   addition not present in pinned Zephyr 4.4**. This example deliberately uses the
   standard upstream `dma_config()` + `dma_start()` path, where the driver
   generates the M2M microcode internally — the Tier-1 upstream-native surface.
-```

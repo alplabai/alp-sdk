@@ -56,7 +56,7 @@ alp_status_t alp_renesas_camera_isp_3a_window_set(alp_camera_t                  
 	/* Enum range-check.  The header declares three named entries;
      * any out-of-range value is rejected as INVAL rather than
      * silently latched into an unused slot. */
-	if ((int)region < 0 || (int)region >= (int)ALP_V2N_N44_ISP_3A_REGION_COUNT) {
+	if ((unsigned)region >= (unsigned)ALP_V2N_N44_ISP_3A_REGION_COUNT) {
 		return ALP_ERR_INVAL;
 	}
 	if (_state(camera) == NULL) return ALP_ERR_NOT_READY;
@@ -77,7 +77,7 @@ alp_status_t alp_renesas_camera_isp_gain_table_load(alp_camera_t                
 	}
 	/* Channel enum range-check + length range-check per
      * the SDK's accepted length range (16..1024). */
-	if ((int)channel < 0 || (int)channel >= (int)ALP_V2N_N44_ISP_CHANNEL_COUNT) {
+	if ((unsigned)channel >= (unsigned)ALP_V2N_N44_ISP_CHANNEL_COUNT) {
 		return ALP_ERR_INVAL;
 	}
 	if (len < 16u || len > 1024u) {

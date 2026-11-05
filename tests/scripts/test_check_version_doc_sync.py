@@ -237,11 +237,33 @@ def _recipe_pv_check():
 def test_recipe_pv_prerelease_uses_tilde():
     assert _recipe_pv_check().expected_recipe_pv("0.17.0-rc2") == "0.17.0~rc2"
     assert _recipe_pv_check().expected_recipe_pv("0.17.0") == "0.17.0"
+    assert _recipe_pv_check().expected_recipe_pv("0.17.1") == "0.17.1"
+    assert _recipe_pv_check().expected_recipe_pv("1.0.0-rc.1") == "1.0.0~rc.1"
+
+
+def test_sibling_recipe_without_shared_pv_fails(tmp_path):
+    mod = _recipe_pv_check()
+    r = tmp_path / "meta-alp-sdk/recipes-core/alp-chips/alp-chips_0.6.bb"
+    r.parent.mkdir(parents=True)
+    src = 'SRC_URI = "git://github.com/alplabai/alp-sdk.git;branch=main"\n'
+    r.write_text(src + 'PV = "0.6.0"\n', encoding="utf-8")
+    assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
+    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\n", encoding="utf-8")
+    assert mod.check_sibling_recipes_use_shared_pv(tmp_path) == []
+    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\nPV = \"0.6.0\"\n", encoding="utf-8")
+    assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
+    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\nPV ?= \"0.6.0\"\n", encoding="utf-8")
+    assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
+
+
+def test_real_sibling_recipes_use_shared_pv():
+    mod = _recipe_pv_check()
+    assert mod.check_sibling_recipes_use_shared_pv(REPO) == []
 
 
 def test_recipe_pv_drift_detected(tmp_path):
     mod = _recipe_pv_check()
-    recipe = tmp_path / "meta-alp-sdk/recipes-core/alp-sdk/alp-sdk_0.6.bb"
+    recipe = tmp_path / "meta-alp-sdk/recipes-core/alp-sdk/alp-sdk-version.inc"
     recipe.parent.mkdir(parents=True)
     recipe.write_text('PV      = "0.6.0"\n', encoding="utf-8")
     assert mod.check_yocto_recipe_pv(tmp_path, "0.17.0-rc2")

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-13",
+  "generated": "2026-10-21",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -7776,6 +7776,10 @@
           "hash": "b18ec2860f5c8e83",
           "value": "0x04u"
         },
+        "RV3028C7_WAKE_EVF": {
+          "hash": "f4b49f46eeca6322",
+          "value": "0x02u"
+        },
         "RV3028C7_WAKE_TF": {
           "hash": "a078bc6de6f40481",
           "value": "0x08u"
@@ -12961,6 +12965,10 @@
         "ALP_POWER_WAKE_ETH_LINK": {
           "hash": "410c5a53de215113",
           "value": "0x00000020u"
+        },
+        "ALP_POWER_WAKE_EXT_EVENT": {
+          "hash": "dcaa59ea9235f378",
+          "value": "0x00000100u"
         },
         "ALP_POWER_WAKE_GPIO": {
           "hash": "4344dd605d19bdc2",

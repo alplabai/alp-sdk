@@ -232,9 +232,9 @@ on-module eMMC (SDHI0) is the production boot.
 
 | Signal | Pin | Behaviour |
 |---|---|---|
-| Card detect `SD1_SD1CD` | `PA1` | Socket switch to GND, pulled up to the switched card rail; active-low (`cd-gpios`) |
+| Card detect `SD1_SD1CD` | `PA1` | Socket switch to GND; active-low (`cd-gpios`, with the SoC's internal pull-up requested). On the V2 carrier `R53` (10 kOhm) also pulls it to the 3.3 V card rail, but `PA1` is a 1.8 V pad on the V2N SoMs, so an empty slot over-drives it. Remove `R53`; the internal pull-up then holds CD high |
 | IO voltage `µSD1_V_SEL` | `PA2` | SoM selector: low = 3.3 V, high = 1.8 V (`vqmmc_sdhi1`, `e1m-v2n-som.dtsi`) |
-| Card power `SD1_SD1PWEN` | `PA3` | Always-on hog; the card-detect pull-up lives on this rail |
+| Card power `SD1_SD1PWEN` | `PA3` | Always-on hog; the `R53` card-detect pull-up lives on this rail |
 | `SDCARD_RST` | `PA4` | M.2 Wi-Fi SDIO reset through the carrier mux, not a microSD signal; undriven |
 
 The carrier SDIO mux (TMUX1574 `U38`/`U39`) switches SD1 between the
@@ -243,14 +243,36 @@ line `MUX_SEL.SDIO` is not a GPIO: `R239` (100 kOhm) pulls it low (microSD)
 and header `P6` ties it to +3V3 (M.2). E1M `IO27` is unconnected. The
 active-low enable `SD_MUX_EN` is E1M `IO29` (a GD32 pad) with no external
 pull-down, so it rests on the TMUX1574's internal pull-downs; the slot works
-with a blank GD32.
+with a blank GD32. With bridge firmware running, the GD32 pad's input
+pull-up wins and the mux is off: `mmc1` then sees no card (U-Boot
+`Card did not respond to voltage select! : -110`) while `PA1` still reads
+present, because card detect bypasses the mux. Drive `IO29` low through the
+bridge GPIO (resolve the line by name, since its gpio number changes between
+kernels), then rebind or re-seat the card.
 
 Fastest mode is **SDR50** (1.8 V, 100 MHz). The SD1 pads use
 `renesas,output-impedance = <2>`, one step weaker than the eMMC's `<3>`:
 at `<3>` the data phase fails with `error -84` (CRC). SDR104 is not
-enabled: reads work there (about 78-85 MB/s, bench 2026-09-24/27), but
-host-to-card writes at 208 MHz never complete (`mmc1: Card stuck being
-busy!`, #2357). With kernel patch `0010` (bounce buffer for multi-segment
+enabled. At 200 MHz reads are clean (53-56 MB/s), but nearly every
+multi-block write ends in `error -84` and recovery, so writes crawl at
+about 50 KiB/s (#2357). The card accepts the data (its ACMD22 count covers
+the blocks); the host mis-frames the card's CRC-status token on DAT0:
+`SD_ERR_STS1` reports the token as `100`, `001` or `101` instead of `010`,
+each a whole-bit shift of a good token. The shift follows the SCC sampling
+tap. Only tap 2 frames it correctly here, but tuning picks tap 5 for reads,
+and tap 2 fails reads. Switching `SCC_TAPSET` to 2 for writes alone gives
+~23 MB/s writes and 56 MB/s reads, but that one-tap window still slips
+about 25 times per GB, so it is not shipped. Pad drive (`<2>`/`<3>`),
+slew, `SCC_DT2FF` (17 values, including the manual's `0x0207` written
+before `DTSEL`) and carrier ESD removal do not move it. Renesas's own RZ/V2N EVK pad setting (`<3>` in the DT, so tuning
+also runs at `<3>`) leaves only tap 2 clean too. The eMMC on SDHI0 runs
+HS200 at 200 MHz cleanly on the same IP, and the Renesas EVK routes its
+slot straight to the SoC. Here the path runs through the B2B connector and
+the TMUX1574 mux, so the framing most likely depends on that path's
+round-trip timing. A mux-bypass rework would test this; it is not yet
+tested. The SDHI clock divides 200 MHz by powers of two, so there is no SDR104
+step between 200 and 100 MHz (SDR50 speed). Bench: E1M-V2M103 on
+E1M-X EVK V2, SanDisk 32 GB U1, 2026-10-23. With kernel patch `0010` (bounce buffer for multi-segment
 requests) SDR50 writes 512 MiB in 20 s and HS in 29 s (E1M-V2M103, bench
 2026-09-27); before it every write was a single 4 KiB request (~2.7 MB/s).
 

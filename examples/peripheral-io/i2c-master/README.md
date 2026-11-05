@@ -40,16 +40,28 @@ works unchanged across them (see
 BMP581 datasheet BST-BMP581-DS004 s5.6, or
 [`include/alp/chips/bmp581.h`](../../../include/alp/chips/bmp581.h)).
 
-> **#1269:** this example used to target the TMP112 temperature sensor,
-> but TMP112 lives on **BRD_I2C**, not on `BOARD_I2C_SENSORS` -- opening
-> `BOARD_I2C_SENSORS` and probing for TMP112 NACKs on real hardware.
-> BRD_I2C is a separate controller instance regardless (on the E1M-AEN
-> family it is SoC I2C0, function C -- #1848), so simply repointing the bus_id
-> would still not reach a TMP112 there. See
+> The TMP112 temperature sensor lives on **BRD_I2C**, not on
+> `BOARD_I2C_SENSORS`, so probing for it on `BOARD_I2C_SENSORS` NACKs on
+> real hardware. BRD_I2C is a separate controller instance (on the E1M-AEN
+> family it is SoC I2C0, function C), so repointing the bus_id
+> would not reach a TMP112 there either. See
 > [`examples/v2n/v2n-temp-sensor`](../../v2n/v2n-temp-sensor/) for the
 > V2N-only BRD_I2C/TMP112 pattern instead.
 
 ## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 ```bash
 # Standalone, native_sim (emul I2C; bmp581_init NACKs cleanly):

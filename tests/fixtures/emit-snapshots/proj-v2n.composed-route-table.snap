@@ -246,7 +246,8 @@
       "board_macro": "XEVK_I2C_BUS_DSI_CSI1",
       "board_role": null,
       "board_doc": "Display/camera control I2C bank 1.",
-      "dispatch": "direct"
+      "dispatch": "gd32_bridge",
+      "dispatch_pin": "PC8/PC9"
     },
     {
       "e1m": "E1M_X_SPI1",
@@ -403,6 +404,14 @@
       "board_doc": "PEC12R-4222F rotary encoder: ENC0_X = A phase, ENC0_Y = B phase; push switch on XEVK_PIN_ENCODER_SW (E1M_X_GPIO_IO28).  ENC1-3 pads are broken out but unpopulated.",
       "dispatch": "gd32_bridge",
       "dispatch_pin": "PA0/PB3"
+    },
+    {
+      "e1m": "E1M_CAN_STBY",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "dispatch_pin": "PB13"
     },
     {
       "e1m": "E1M_X_ADC1",

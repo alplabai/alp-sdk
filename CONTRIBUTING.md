@@ -13,14 +13,13 @@ predictable, and OS-pivoted is the whole point.
 
 | Channel | Use it for |
 |---|---|
-| [`community.alplab.ai`](https://community.alplab.ai/) | Open-ended questions, "how do I...", design discussions, showcasing what you built |
-| [GitHub Issues](https://github.com/alplabai/alp-sdk/issues) | Concrete bugs, feature requests, regressions, anything with a reproducer |
+| [GitHub Issues](https://github.com/alplabai/alp-sdk/issues) | Bugs, feature requests, regressions, and usage questions ("how do I...") |
 | [GitHub Security Advisories](https://github.com/alplabai/alp-sdk/security/advisories) | **Security issues only** — see [`docs/security-advisories.md`](docs/security-advisories.md) for the report flow |
 | [`docs.alplab.ai/sdk/introduction`](https://docs.alplab.ai/sdk/introduction) | Rendered docs (mirror of the in-repo markdown with cross-version nav + search) |
 
-If you're unsure whether it's a bug or a usage question, start on
-the community forum — bugs that need the issue tracker get triaged
-across.
+If you're unsure whether it's a bug or a usage question, open a
+GitHub issue — it gets triaged and relabelled as needed. For anything
+not suited to a public issue, email contact@alplab.ai.
 
 ## How to contribute
 
@@ -204,5 +203,4 @@ commits as their work lands.
 ## Getting help
 
 - [Documentation](https://docs.alplab.ai)
-- [Community forum](https://community.alplab.ai)
 - [GitHub Issues](https://github.com/alplabai/alp-sdk/issues)

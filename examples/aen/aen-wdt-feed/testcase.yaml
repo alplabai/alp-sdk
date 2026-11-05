@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Build-only regression for the upstream Zephyr wdt_cmsdk_apb driver (Tier-1,
-# "arm,cmsdk-watchdog") on the E1M-AEN801 (Ensemble E8, M55-HE): installs a
-# timeout, feeds it a few times, then disables it -- the timeout is never
-# allowed to actually fire (a reset would tear down the bench RAM-console
-# read).
+# "arm,cmsdk-watchdog") on the E1M-AEN801/803 (Ensemble E8, M55-HE) and the
+# E1M-AEN401 (Ensemble E4, M55-HP): installs a timeout, feeds it a few times,
+# then disables it -- the timeout is never allowed to actually fire (a reset
+# would tear down the bench RAM-console read).
 #
-# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
-# of the native_sim PR gate (platform_allow = the AEN801/AEN803 M55-HE board targets).
+# Compile-checks the driver + DT node on the real E4 / E8 board targets; filtered
+# OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803 M55-HE and
+# AEN401 M55-HP board targets).
 
 sample:
   name: aen-wdt-feed
@@ -21,6 +22,7 @@ tests:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
       - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp
     tags:
       - alp-sdk
       - example

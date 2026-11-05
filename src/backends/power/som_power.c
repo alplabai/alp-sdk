@@ -357,12 +357,14 @@ static alp_status_t rv3028_clkout_restore(const struct i2c_dt_spec *i2c, bool pr
 #define RV3028_REG_STATUS    0x0Eu
 #define RV3028_REG_CONTROL_2 0x10u
 #define RV3028_STATUS_PORF   0x01u
+#define RV3028_STATUS_EVF    0x02u
 #define RV3028_STATUS_AF     0x04u
 #define RV3028_STATUS_TF     0x08u
 #define RV3028_STATUS_UF     0x10u
 #define RV3028_STATUS_FLAGS  0x7Fu /* every latchable flag; EEbusy (bit7) is read-only */
 #define RV3028_CTRL2_UIE     0x20u
 #define RV3028_CTRL1_TE      0x04u
+#define RV3028_CTRL2_EIE     0x04u
 #define RV3028_CTRL2_AIE     0x08u
 #define RV3028_CTRL2_TIE     0x10u
 
@@ -506,6 +508,52 @@ alp_status_t alp_som_power_rtc_clear_stale_wake(bool keep_alarm)
 	           : ALP_ERR_IO;
 }
 
+/* EVI wake (#2811).  EIE is CONTROL_2 10h bit 2, EVF is STATUS 0Eh bit 1 (a flag clears by
+ * writing 0, a 1 is ignored: same constant-mask write as above).  EVF is cleared while EIE is
+ * still off, so the stale one cannot hold /INT low the moment EIE comes on. */
+alp_status_t alp_som_power_rtc_evi_arm(void)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   c2  = 0;
+
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0) {
+		return ALP_ERR_IO;
+	}
+	if ((c2 & RV3028_CTRL2_EIE) == 0u) {
+		if (i2c_reg_write_byte_dt(
+		        i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_EVF)) != 0 ||
+		    i2c_reg_write_byte_dt(i2c, RV3028_REG_CONTROL_2, (uint8_t)(c2 | RV3028_CTRL2_EIE)) !=
+		        0) {
+			return ALP_ERR_IO;
+		}
+	}
+	return ALP_OK;
+}
+
+alp_status_t alp_som_power_rtc_evi_disarm(void)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   c2  = 0;
+
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0) {
+		return ALP_ERR_IO;
+	}
+	if ((c2 & RV3028_CTRL2_EIE) != 0u &&
+	    i2c_reg_write_byte_dt(i2c, RV3028_REG_CONTROL_2, (uint8_t)(c2 & ~RV3028_CTRL2_EIE)) != 0) {
+		return ALP_ERR_IO;
+	}
+	return (i2c_reg_write_byte_dt(
+	            i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_EVF)) == 0)
+	           ? ALP_OK
+	           : ALP_ERR_IO;
+}
+
 alp_status_t alp_som_power_rtc_flags_pending(bool *pending)
 {
 	const struct i2c_dt_spec *i2c = rtc_i2c();
@@ -523,7 +571,8 @@ alp_status_t alp_som_power_rtc_flags_pending(bool *pending)
 		return ALP_ERR_IO;
 	}
 	*pending = ((st & RV3028_STATUS_TF) && (c2 & RV3028_CTRL2_TIE)) ||
-	           ((st & RV3028_STATUS_AF) && (c2 & RV3028_CTRL2_AIE));
+	           ((st & RV3028_STATUS_AF) && (c2 & RV3028_CTRL2_AIE)) ||
+	           ((st & RV3028_STATUS_EVF) && (c2 & RV3028_CTRL2_EIE));
 	return ALP_OK;
 }
 
@@ -544,11 +593,14 @@ alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags)
 		return ALP_ERR_IO;
 	}
 	/* A flag is a wake cause only with its interrupt enable on; UF latches every
-	 * second regardless of UIE, so it is never one here. */
+	 * second regardless of UIE, so it is never one here.  EVF with EIE on is the EVI
+	 * wake (#2811) and is acknowledged with the rest; with EIE off it is left alone. */
 	*flags =
 	    (uint8_t)(((st & RV3028_STATUS_TF) && (c2 & RV3028_CTRL2_TIE) ? RV3028_STATUS_TF : 0u) |
-	              ((st & RV3028_STATUS_AF) && (c2 & RV3028_CTRL2_AIE) ? RV3028_STATUS_AF : 0u));
-	hit = (uint8_t)(st & (RV3028_STATUS_TF | RV3028_STATUS_AF | RV3028_STATUS_UF));
+	              ((st & RV3028_STATUS_AF) && (c2 & RV3028_CTRL2_AIE) ? RV3028_STATUS_AF : 0u) |
+	              ((st & RV3028_STATUS_EVF) && (c2 & RV3028_CTRL2_EIE) ? RV3028_STATUS_EVF : 0u));
+	hit = (uint8_t)((st & (RV3028_STATUS_TF | RV3028_STATUS_AF | RV3028_STATUS_UF)) |
+	                (*flags & RV3028_STATUS_EVF));
 	if (hit == 0u) {
 		return ALP_OK; /* nothing latched: no STATUS write */
 	}

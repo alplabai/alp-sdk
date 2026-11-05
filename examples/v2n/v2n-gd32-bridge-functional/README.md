@@ -114,13 +114,16 @@ as a slow link soak.
 
 ## Build
 
-`board.yaml` targets the E1M-V2M101 SoM's M33 core on the
-`e1m-x-evk` preset (SPI is the 25 MHz fast path under test; the
-suite passes `i2c = NULL`):
+From this directory, or from your own copy of it:
 
 ```bash
-tan build --project examples/v2n/v2n-gd32-bridge-functional
+tan build
+tan flash
 ```
+
+`board.yaml` targets the E1M-V2M101 SoM's M33 core on the
+`e1m-x-evk` preset (SPI is the 25 MHz fast path under test; the
+suite passes `i2c = NULL`).
 
 The twister row is `build_only` on `native_sim/native/64` -- there
 is no GD32 to answer off-silicon, so CI proves compile + link and

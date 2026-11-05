@@ -4,13 +4,11 @@ Common issues firmware engineers hit when working with the SDK,
 organised by where the symptom shows up.  Each entry includes the
 exact error text and a fix.
 
-> **Didn't find your issue here?**  Ask on
-> [**community.alplab.ai**](https://community.alplab.ai/) — most
-> questions get answered there before they become tracked issues,
-> and the community search often surfaces a peer who hit the same
-> thing first.  If you have a concrete reproducer, file a bug
-> directly on
-> [github.com/alplabai/alp-sdk/issues](https://github.com/alplabai/alp-sdk/issues).
+> **Didn't find your issue here?**  File an
+> issue on
+> [github.com/alplabai/alp-sdk/issues](https://github.com/alplabai/alp-sdk/issues),
+> with the exact error text and a reproducer if you have one.  For
+> anything not suited to a public issue, email contact@alplab.ai.
 
 ## Build-time errors
 

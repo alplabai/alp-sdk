@@ -681,3 +681,15 @@ def test_power_kinds_without_a_meter_return_none_for_voltage():
     from .provision_fakes import FakePower
     assert FakePower().voltage() is None
     assert bench.LabgridPower("place").voltage() is None
+
+
+def test_probe_erase_base_and_jlink_refuse_and_the_script_probe_passes_the_range_through(tmp_path):
+    with pytest.raises(BenchError, match="cannot erase"):
+        bench.Probe().erase(0x08008000, 0x2000)
+    r = JLinkRunner()
+    with pytest.raises(BenchError, match="not bench-proven"):
+        bench.JLinkProbe("1", runner=r).erase(0x08008000, 0x2000)
+    assert r.scripts == []                      # nothing was sent to the probe
+    calls = []
+    bench.ScriptProbe(tmp_path / "w", runner=lambda a, **k: calls.append(a) or _cp()).erase(0x08008000, 0x2000)
+    assert calls[0][-3:] == ["erase", "0x8008000", "0x2000"]

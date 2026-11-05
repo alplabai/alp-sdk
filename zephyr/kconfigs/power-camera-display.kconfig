@@ -278,14 +278,16 @@ config ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	  only and must stay off in a product build.
 
 config ALP_SDK_POWER_ALIF_SE
-	bool "Alif SE STOP / STANDBY power backend (E8 M55-HE / M55-HP, EXPERIMENTAL)"
+	bool "Alif SE STOP / STANDBY power backend (E8 M55-HE / M55-HP, E4 M55-HP, EXPERIMENTAL)"
 	depends on ALP_SDK_POWER && ALP_SDK_SOM_POWER
 	depends on HAS_ALIF_SE_SERVICES
-	depends on SOC_AE822FA0E5597LS0_RTSS_HE || SOC_AE822FA0E5597LS0_RTSS_HP
+	depends on SOC_AE822FA0E5597LS0_RTSS_HE || SOC_AE822FA0E5597LS0_RTSS_HP || \
+		   SOC_AE402FA0E5597LE0_RTSS_HP
 	default n
 	help
 	  Compile src/backends/power/alif_se_power.c: alp_power_request_sleep()
-	  for STOP and STANDBY on the Alif Ensemble E8 M55-HE.  It builds a
+	  for STOP and STANDBY on the Alif Ensemble E8 M55-HE (STOP only on the
+	  E8 and E4 M55-HP, see below).  It builds a
 	  complete OFF profile for the Secure Enclave, quiesces the on-module
 	  domains, arms the wake source (the on-module RV-3028 on INT -> P15_0,
 	  or the LPTIMER for short intervals) and enters the EWIC subsystem-off
@@ -295,7 +297,12 @@ config ALP_SDK_POWER_ALIF_SE
 	  STOP is bench-proven on the E1M-AEN803 M55-HE (U8h: LPTIMER, RV-3028
 	  countdown and alarm wakes); STANDBY is not.  The M55-HP STOP is
 	  bench-proven on the E1M-AEN803 (2026-10-10), HP-only and with the HE
-	  running; the AEN801 HP is not verified.  The HP has STOP only (the
+	  running; the AEN801 HP is not verified.  The E4 M55-HP (E1M-AEN401)
+	  uses the same registers; a customer bench ran 14/14 RV-3028 wakes on
+	  it, Alp Lab has not.  The E4 BKRAM address (the wake record) is
+	  inferred from the E3 / E7 SVDs and the E8, not read from an E4
+	  source.
+	  The HP has STOP only (the
 	  vendor's SOFT_OFF-class sleep; STANDBY is refused with
 	  ALP_ERR_NOSUPPORT), no TCM retention (ALP_ERR_NOSUPPORT) and needs an
 	  MRAM-booted image (VTOR >= 0x80000000, else ALP_ERR_NOSUPPORT).

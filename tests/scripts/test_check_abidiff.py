@@ -97,3 +97,58 @@ def test_soname_only_not_fooled_by_filtered_change():
         "SONAME changed from 'a' to 'b'",
     ])
     assert not mod.soname_only(rep)
+
+
+# Fixture in libabigail's documented abidiff report shape (SONAME-only change).
+# ponytail: not recorded from a live run (no abidiff on the authoring host);
+# replace with real rc2-vs-HEAD output when one is available.
+GOLDEN = Path(__file__).parent / "fixtures" / "abidiff_soname_only.txt"
+
+
+def test_soname_only_golden_report():
+    assert mod.soname_only(GOLDEN.read_text(encoding="utf-8"))
+
+
+def _wire(tmp_path, monkeypatch, rc, stdout):
+    (tmp_path / "metadata").mkdir(exist_ok=True)
+    (tmp_path / "metadata" / "sdk_version.yaml").write_text("version: 0.17.2\n", encoding="utf-8")
+    monkeypatch.setattr(mod.shutil, "which", lambda t: "/usr/bin/" + t)
+    monkeypatch.setattr(mod, "export_tag", lambda *a: None)
+    monkeypatch.setattr(mod, "build_lib", lambda src, b: b / "libalp_sdk.so")
+    monkeypatch.setattr(mod, "soname_of", lambda lib: lib.parent.name)  # differ
+
+    def fake_run(cmd, **kw):
+        if cmd[0] == "git":
+            return subprocess.CompletedProcess(cmd, 0, stdout="v0.17.0-rc2", stderr="")
+        return subprocess.CompletedProcess(cmd, rc, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr("sys.argv", ["x", "--root", str(tmp_path)])
+
+
+def test_soname_suppression_applies_on_plain_abi_change(tmp_path, monkeypatch):
+    _wire(tmp_path, monkeypatch, 4, GOLDEN.read_text(encoding="utf-8"))
+    assert mod.main() == 0
+
+
+def test_soname_suppression_never_masks_abidiff_error(tmp_path, monkeypatch):
+    _wire(tmp_path, monkeypatch, 5, GOLDEN.read_text(encoding="utf-8"))
+    assert mod.main() == 1
+
+
+def test_skip_warns_in_ci(monkeypatch, capsys):
+    monkeypatch.setattr(mod.shutil, "which", lambda t: None)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr("sys.argv", ["x"])
+    assert mod.main() == 0
+    assert "::warning" in capsys.readouterr().out
+
+
+def test_no_minor_tag_warns_under_require_tool(tmp_path, monkeypatch, capsys):
+    _wire(tmp_path, monkeypatch, 0, "")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(mod.subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
+    monkeypatch.setattr("sys.argv", ["x", "--root", str(tmp_path), "--require-tool"])
+    assert mod.main() == 0
+    assert "::warning" in capsys.readouterr().out

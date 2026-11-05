@@ -16,7 +16,7 @@ see prj.conf's comment on `CONFIG_REQUIRES_FULL_LIBCPP`).
 ## What this shows
 
 * `board.yaml`'s `libraries: [fmt]` -> the loader adds
-  `vendors/fmt/include` (the vendored fmt 11.0.2 headers, Task 0) and
+  `vendors/fmt/include` (the vendored fmt 11.0.2 headers) and
   `metadata/library-profiles/fmt/fmt_config.h` to the include path.
 * `fmt_config.h`'s three invariants: `FMT_HEADER_ONLY=1` (no separate
   compiled library, no static-init concern), `FMT_USE_IOSTREAM=0` (no
@@ -31,6 +31,19 @@ see prj.conf's comment on `CONFIG_REQUIRES_FULL_LIBCPP`).
   precision, `const char *`) in a single format string.
 
 ## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 ```bash
 # Standalone, native_sim (host binary; no hardware needed):

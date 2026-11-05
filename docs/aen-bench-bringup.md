@@ -39,7 +39,7 @@ the flows here apply to both SKUs unchanged.
 | **I2S TX** (`i2s3`) | ✅ PASS | Clocks the tone out with the 76.8 MHz audio clock. **Update (2026-09-15, E1M-AEN803 serial 2026W36-0002): audible amp output** verified 🟡 PARTIAL with U46 replaced by a 3257-type bus switch powered from `+3V3` (the as-built 74LVC157 is a one-way mux, never passes SoC→amp I2S at any VCC) + TAS2563 config; an open TDM clock-error latch and open issue #2146 (amp auto-shutdown after I2S stop) remain. |
 | **Quadrature encoder** (`qenc`) | 🟡 PARTIAL *(HW-gated)* | Driver reads clean; count is static until the encoder is physically spun. Not a code/Flow-D bug. |
 | **SD card** (DWC SDHC) | 🟡 PARTIAL | **Update (2026-09-15, E1M-AEN803 serial 2026W36-0002, at 25 MHz, after a U38 solder fix):** 4-bit SD read proven with U38/U39/U46 hand-reworked to 3257-type, but only with the unmerged enable path (#2122, clock gate) plus the unmerged `test/2051-sdhc-enable-on-reworked-mux` branch (ADMA address translation, system RAM in SRAM0) -- dev's SD path is unverified until that lands. EN=IO20, CC3501E-side on both hw revisions; SEL=IO21, CC3501E-side on r1 only -- unrouted/hardware-strapped on r2. |
-| **GPU2D** (`<alp/gpu2d.h>` sw_fallback) | ✅ PASS (RAM-run, 2026-06-17) | Portable 2D surface on the M55-HE via the priority-0 pure-C software fallback (the D/AVE 2D HW backend is opt-in + bench-unverified). `fill_rect` + clip, `blit`, and all four `blend` modes (REPLACE/SRC_OVER/ADDITIVE/MULTIPLY) produce **exact** expected pixels on silicon. Example: `examples/aen/aen-gpu2d-bench`. The D/AVE 2D hardware backend (`alif_dave2d.c`) is the separate bucket-C item. |
+| **GPU2D** (`<alp/gpu2d.h>` sw_fallback) | ✅ PASS (RAM-run, 2026-06-17) | Portable 2D surface on the M55-HE via the priority-0 pure-C software fallback (the D/AVE 2D HW backend is opt-in; see below). `fill_rect` + clip, `blit`, and all four `blend` modes (REPLACE/SRC_OVER/ADDITIVE/MULTIPLY) produce **exact** expected pixels on silicon. Example: `examples/aen/aen-gpu2d-bench`. The D/AVE 2D hardware backend (`alif_dave2d.c`) was bench-verified separately on E1M-AEN803 2026W36-0001 (M55-HE, 9 of 9 runs, #916; ADDITIVE/MULTIPLY still on the sw fallback). |
 | **Low-power (WFI/SysTick)** | ✅ PASS (RAM-run, 2026-06-17) | Stage-A baseline: the M55-HE enters architectural `__WFI()` via the kernel idle path (a k_timer beats the wake cadence; SysTick wakes it) for N rounds — proven by an advancing SRAM0 beacon + uptime (8 sleeps, 0→420 ms). No `CONFIG_PM` (pinned Zephyr 4.4 ships no Alif PM); the deep IWIC `pm_state_set` path (WICCONTROL HE `0x1A604010`) is the documented Stage-B follow-on. Example: `examples/aen/aen-power-smoke`. |
 | **SE CryptoCell compute** (`<alp/security.h>` SHA / AES-GCM) | ✅ PASS (RAM-run, 2026-06-19) | The portable hash/AEAD surface runs **inside the Secure Enclave's CryptoCell** on the E8: the `se_cryptocell` backend binds at priority 110 and pushes SHA-256 / AES-128-GCM into the SE over the RTSS-HE↔SE MHUv2 pair (the new public `se_service_send_request()` transport, hal_alif patch `0002`). Bench: SHA-256(`"abc"`) matched the NIST known-answer (`s=0`, MATCH) and the AES-128-GCM encrypt→decrypt round-trip matched (`enc=0 dec=0`, MATCH) — both computed in the SE, plus SE TRNG. `CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM` now defaults ON; algs the SE declines fall through to MbedTLS-PSA. Example: `examples/aen/aen-se-crypto`. |
 | **CRC engine** (`crc_alif` / `alif,crc`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | HW CRC32-IEEE on `crc0@48107000` via the Zephyr CRC class API — `crc_begin/update/finish` rc=0, computed `0x684fc31c` = the reference value over a 16-byte input. Example: `examples/aen/aen-crc-regcheck`. |
@@ -64,6 +64,12 @@ tally still has not been formally recomputed against the corrected GPIO
 criterion, but nothing in the correction moves GPIO out of the PASS column.
 
 ## 2. The four flashing / observation flows
+
+> On the E1M EVK 2641-R3 the on-board RP2040 (`U55`, CMSIS-DAP) is the
+> primary debug probe and J-Link is the optional alternative
+> ([`aen-rp2040-debug-probe.md`](aen-rp2040-debug-probe.md)). The RP2040 path
+> is not bench-verified and its flash/debug steps are TBD; the flows below
+> are the proven ones.
 
 | Flow | Use it for | Touches MRAM? | Tooling |
 |---|---|---|---|
@@ -415,14 +421,14 @@ does not need those two files copied in: set
 ```yaml
 diagnostics:
   link: itcm        # auto (default) | itcm
-  console: ram      # optional here -- `auto` is promoted to `ram`; uart/alp/linux/none are refused
+  console: ram      # optional here -- `auto` is promoted to `ram`; linux/none are refused; ram/uart/alp are accepted
 ```
 
 and the planner writes the retarget itself next to the slice's `alp.conf`
 (`alp-link-itcm.conf` + `alp-link-itcm.overlay`: the same `zephyr,flash = &itcm;`
 / `/delete-property/ zephyr,code-partition;` overlay and the same
 `CONFIG_USE_DT_CODE_PARTITION=n` + `CONFIG_FLASH_LOAD_OFFSET=0x0` conf as above,
-plus `CONFIG_DCACHE=n` and the 16 KiB RAM console of `aen-bench-shared.conf`) and
+plus, for `console: auto`/`ram`, `CONFIG_DCACHE=n` and the 16 KiB RAM console of `aen-bench-shared.conf`; a `console: uart`/`alp` image gets neither) and
 passes them via `-DEXTRA_CONF_FILE` / `-DEXTRA_DTC_OVERLAY_FILE`. Then
 `tan flash --ram --ram-console --core m55_he` loads the ELF at its link base
 `0x0` (the HE-local ITCM, reached through the HE access port; `0x58000000` is
@@ -431,7 +437,7 @@ image) and reads `ram_console_buf`. The knob is proven on the E8 M55-HE
 (E1M-AEN801 / E1M-AEN803) and is HE-only: `tan build` refuses it
 (`build.link-itcm-unsupported`) for a project with no M55-HE app of its own (an
 M55-HP-only project included), any other SKU, or a `boot:`/sysbuild project, and
-refuses an explicit non-RAM console (`build.link-itcm-console-conflict`). The
+refuses an explicit `linux`/`none` console (`build.link-itcm-console-conflict`). The
 slice's manifest entry carries `flash_method: ram_run_only`, so plain
 `tan flash` refuses it and points at `tan flash --ram`. It links at `0x0` --
 never flash that image to MRAM. The planner lives in tan-cli
