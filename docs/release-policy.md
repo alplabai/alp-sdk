@@ -161,10 +161,14 @@ The cut happens on `main`, and only after `dev` has been promoted to
    running in an isolated, ephemeral GitHub-hosted runner that
    the `build` job cannot tamper with -- the L3 promise.
    Verifiable with
-   `gh attestation verify alp-sdk-v<N>.tar.gz --owner alplabai`;
-   the command checks the Sigstore signature, the workflow
+   `slsa-verifier verify-artifact alp-sdk-v<N>.tar.gz --provenance-path alp-sdk-v<N>.tar.gz.intoto.jsonl --source-uri github.com/alplabai/alp-sdk --source-tag v<N>`;
+   the command checks the Sigstore signature, the builder
    identity (`slsa-framework/slsa-github-generator`), the source
-   repo, and the artefact digest all match in a single check.
+   repo and tag, and the artefact digest all match in a single
+   check. `gh attestation verify` does not work here: the
+   generic generator publishes its proof only as the
+   `.intoto.jsonl` release asset, not to the GitHub attestations
+   API (alp-sdk#3058).
 
 A patch release skips steps 1-2 (the verification ledger doesn't
 move; ABI doesn't change) but still writes step 0's release-notes
