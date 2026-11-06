@@ -50,7 +50,7 @@ LOG_MODULE_REGISTER(hetero_offload_m33_sm, LOG_LEVEL_INF);
 #define SHM_DEVICE_NAME "shm"
 
 #if !DT_HAS_CHOSEN(zephyr_ipc_shm)
-#error "heterogeneous-offload/m33_sm requires `chosen { zephyr,ipc_shm = ...; }` -- see the board overlay"
+#error "m33_sm requires `chosen { zephyr,ipc_shm = ...; }` (see the board overlay)"
 #endif
 
 /* Endpoint address the A55 side's rpmsg_sample_client dials; matches the
@@ -182,7 +182,6 @@ static void run_fft(void)
 		g_mags[i]      = sqrtf(r * r + im * im);
 	}
 }
-
 
 /* #707: echo RX frames via a QUEUE, not a single buffer + binary sem.  The old
  * single sc_msg buffer + K_SEM(...,1) dropped the second of two rapid frames --
