@@ -114,7 +114,7 @@ def test_shards_follow_each_skus_configuration_count():
 
 
 def test_sku_with_no_configuration_gets_no_leg():
-    roots = ["examples/multicore/mproc-mailbox"]
+    roots = ["examples/audio/audio-wake-word"]
     counts = s.config_counts(roots, REPO)
     assert counts["aen803"] == 0
     assert {x["sku"] for x in s.matrix(list(s.SKUS), roots, counts)} == {"aen801"}
