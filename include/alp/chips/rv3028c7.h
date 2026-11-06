@@ -134,7 +134,11 @@ alp_status_t rv3028c7_get_time(rv3028c7_t *ctx, rv3028c7_time_t *out);
 /** @brief Write a wall-clock time (24-hour mode). */
 alp_status_t rv3028c7_set_time(rv3028c7_t *ctx, const rv3028c7_time_t *t);
 
-/** @brief Configure the alarm registers + match mask. */
+/** @brief Configure the alarm registers + match mask.
+ * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (a pointer NULL, or
+ *         minute > 59, hour > 23, day outside 1..31 when
+ *         @c use_weekday is false, weekday > 6 when it is true -- no
+ *         register is written), or ALP_ERR_IO. */
 alp_status_t rv3028c7_set_alarm(rv3028c7_t                   *ctx,
                                 const rv3028c7_time_t        *when,
                                 const rv3028c7_alarm_match_t *match);
@@ -366,8 +370,10 @@ alp_status_t rv3028c7_timer_read(rv3028c7_t *ctx, rv3028c7_timer_state_t *out);
  * @param when   Alarm time (minute, hour, and day or weekday).
  * @param match  Which fields participate and whether 09h is a date or a
  *               weekday.
- * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (a pointer NULL),
- *         or ALP_ERR_IO.
+ * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (a pointer NULL, or
+ *         minute > 59, hour > 23, day outside 1..31, weekday > 6 --
+ *         checked before any write, so a previously armed alarm stays
+ *         armed), or ALP_ERR_IO.
  */
 alp_status_t rv3028c7_alarm_arm(rv3028c7_t                   *ctx,
                                 const rv3028c7_time_t        *when,

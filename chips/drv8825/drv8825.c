@@ -27,9 +27,18 @@ alp_status_t drv8825_init(drv8825_t  *dev,
 	dev->m1    = m1;
 	dev->m2    = m2;
 
-	(void)alp_pwm_set_duty(step, 0u);
-	(void)alp_gpio_write(dir, false);
-	if (nenbl != NULL) (void)alp_gpio_write(nenbl, false); /* enable */
+	/* Bind leaves the driver DISABLED (nENBL high, active low) with no
+	 * step pulses; the coils are not energised until the caller releases
+	 * nENBL.  Any write failure is returned so the caller never sees
+	 * ALP_OK with the outputs in an unknown state. */
+	alp_status_t s = alp_pwm_set_duty(step, 0u);
+	if (s != ALP_OK) return s;
+	s = alp_gpio_write(dir, false);
+	if (s != ALP_OK) return s;
+	if (nenbl != NULL) {
+		s = alp_gpio_write(nenbl, true);
+		if (s != ALP_OK) return s;
+	}
 
 	dev->initialised = true;
 	return ALP_OK;

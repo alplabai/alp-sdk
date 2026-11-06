@@ -27,9 +27,18 @@ alp_status_t a4988_init(a4988_t    *dev,
 	dev->ms2     = ms2;
 	dev->ms3     = ms3;
 
-	(void)alp_pwm_set_duty(step, 0u);
-	(void)alp_gpio_write(dir, false);
-	if (nenable != NULL) (void)alp_gpio_write(nenable, false);
+	/* Bind leaves the driver DISABLED (nENABLE high, active low) with no
+	 * step pulses; the caller energises the coils with a4988_set_enable().
+	 * Any write failure is returned so the caller never sees ALP_OK with
+	 * the outputs in an unknown state. */
+	alp_status_t s = alp_pwm_set_duty(step, 0u);
+	if (s != ALP_OK) return s;
+	s = alp_gpio_write(dir, false);
+	if (s != ALP_OK) return s;
+	if (nenable != NULL) {
+		s = alp_gpio_write(nenable, true);
+		if (s != ALP_OK) return s;
+	}
 
 	dev->initialised = true;
 	return ALP_OK;

@@ -32,8 +32,9 @@ SensorPublishers::SensorPublishers(rclcpp::Node &parent) : parent_(parent)
 		// U12 ICM-42670, canonical primary IMU (0x69); the alternate
 		// IMU, BMI323, is at 0x68.
 		if (icm42670_init(&imu_, i2c_, XEVK_I2C_ADDR_ICM42670) == ALP_OK) {
-			// 100 Hz, +-2 g / +-250 dps -- icm42670_init() only binds the
-			// bus; the caller selects ODR + full-scale.  These are the
+			// 100 Hz, +-2 g / +-250 dps -- icm42670_init() enables both
+			// engines at +-2 g / +-250 dps but leaves the ODR at its reset
+			// value; the caller selects the ODR.  These are the
 			// full-scales tick_imu()'s raw-count conversion assumes.
 			icm42670_set_accel(&imu_, ICM42670_ODR_100_HZ, ICM42670_ACCEL_FS_2G);
 			icm42670_set_gyro(&imu_, ICM42670_ODR_100_HZ, ICM42670_GYRO_FS_250_DPS);

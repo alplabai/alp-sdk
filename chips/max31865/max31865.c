@@ -12,16 +12,6 @@
 
 #define MAX31865_WRITE_BIT 0x80u
 
-static alp_status_t max31865_read_reg(max31865_t *dev, uint8_t reg, uint8_t *val)
-{
-	uint8_t      tx[2] = { (uint8_t)(reg & 0x7Fu), 0x00 };
-	uint8_t      rx[2] = { 0 };
-	alp_status_t s     = alp_spi_transceive(dev->bus, tx, rx, sizeof(tx));
-	if (s != ALP_OK) return s;
-	*val = rx[1];
-	return ALP_OK;
-}
-
 static alp_status_t max31865_write_reg(max31865_t *dev, uint8_t reg, uint8_t val)
 {
 	uint8_t buf[2] = { (uint8_t)(reg | MAX31865_WRITE_BIT), val };
@@ -47,11 +37,14 @@ alp_status_t max31865_read_rtd(max31865_t *dev, uint16_t *rtd_out, bool *fault_s
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 	if (rtd_out == NULL) return ALP_ERR_INVAL;
-	uint8_t      msb = 0, lsb = 0;
-	alp_status_t s = max31865_read_reg(dev, MAX31865_REG_RTD_MSB, &msb);
+	/* One CS window, auto-incrementing 0x01 -> 0x02, so MSB and LSB always
+	 * come from the same conversion. */
+	uint8_t      tx[3] = { (uint8_t)(MAX31865_REG_RTD_MSB & 0x7Fu), 0x00, 0x00 };
+	uint8_t      rx[3] = { 0 };
+	alp_status_t s     = alp_spi_transceive(dev->bus, tx, rx, sizeof(tx));
 	if (s != ALP_OK) return s;
-	s = max31865_read_reg(dev, MAX31865_REG_RTD_LSB, &lsb);
-	if (s != ALP_OK) return s;
+	const uint8_t msb = rx[1];
+	const uint8_t lsb = rx[2];
 	if (fault_set != NULL) *fault_set = (lsb & 0x01u) != 0u;
 	*rtd_out = (uint16_t)(((uint16_t)msb << 7) | ((lsb & 0xFEu) >> 1));
 	return ALP_OK;

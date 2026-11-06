@@ -114,6 +114,21 @@ alp_status_t icm42670_init(icm42670_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
      * the 45 ms already elapsed. */
 	alp_delay_ms(GYRO_STARTUP_MS);
 
+	/* The shadows above claim +-2 g / 250 dps but the chip powers up at
+	 * +-16 g / 2000 dps (FS field 0x0).  Write the FS_SEL bits [6:5] with
+	 * read-modify-write so the ODR field [3:0] keeps its reset value. */
+	uint8_t cfg = 0;
+	s           = reg_read(dev, REG_ACCEL_CONFIG0, &cfg, 1);
+	if (s != ALP_OK) return s;
+	cfg = (uint8_t)((cfg & ~0x60u) | (((uint8_t)ICM42670_ACCEL_FS_2G & 0x03u) << 5));
+	s   = reg_write(dev, REG_ACCEL_CONFIG0, cfg);
+	if (s != ALP_OK) return s;
+	s = reg_read(dev, REG_GYRO_CONFIG0, &cfg, 1);
+	if (s != ALP_OK) return s;
+	cfg = (uint8_t)((cfg & ~0x60u) | (((uint8_t)ICM42670_GYRO_FS_250_DPS & 0x03u) << 5));
+	s   = reg_write(dev, REG_GYRO_CONFIG0, cfg);
+	if (s != ALP_OK) return s;
+
 	dev->initialised = true;
 	return ALP_OK;
 }

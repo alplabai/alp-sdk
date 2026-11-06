@@ -52,7 +52,13 @@ typedef struct {
 	bool        initialised;
 } a4988_t;
 
-/** @brief Bind context to caller-opened PWM + GPIO handles. */
+/**
+ * @brief Bind context to caller-opened PWM + GPIO handles.
+ *
+ * Leaves the driver disabled (nENABLE high, no step pulses); call
+ * @ref a4988_set_enable to energise the coils.  Returns the first
+ * GPIO/PWM write error.
+ */
 alp_status_t a4988_init(a4988_t    *dev,
                         alp_pwm_t  *step,
                         alp_gpio_t *dir,
