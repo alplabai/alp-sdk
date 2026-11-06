@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * vendor-ext / build-bridge.  Custom fixed MPU region table for the Alif
- * Ensemble E8 (AE822FA0E5597), REPLACING (not appending to) the generic
+ * Ensemble AEN boards (E1M-AEN401 / AEN601 on E4 / E6, E1M-AEN801 / AEN803 on
+ * E8 AE822FA0E5597), REPLACING (not appending to) the generic
  * 2-region table Zephyr falls back to (arm_mpu_regions.c: FLASH_0/SRAM_0).
  *
  * ROOT CAUSE this replaces (alp-advisor 2026-07-28, superseding the
@@ -91,8 +92,11 @@
  * exists -- exactly the same kind of always-sourced, never-generated hook
  * `board.cmake` already is for flash/debug runners in both of these board
  * dirs.  This ONE shared .c file + ONE CMake gate covers BOTH boards
- * automatically (CONFIG_SOC_SERIES_E8 is true for both, and the two new
- * per-board `Kconfig` files each select the shared symbol), so it survives
+ * automatically (the CMake gate is the Ensemble SoC family AND
+ * CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS, and each per-board `Kconfig` in
+ * e1m_aen401_m55_hp / e1m_aen601_* / e1m_aen801_m55_{he,hp} / e1m_aen803_*
+ * selects the shared symbol; the family guard keeps non-Alif SoCs that default
+ * that symbol on from compiling this file), so it survives
  * `alp_project.py --emit zephyr-board` regeneration of the .dts/_defconfig/
  * Kconfig.alp_<board>/Kconfig.defconfig files untouched.
  */

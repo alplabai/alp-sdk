@@ -2255,11 +2255,14 @@ def _aen_som_power_dts(
         d["node_label"]
         for d in (links["brd_i2c"].get("devices") or []) if d.get("node_label")}
     children: list[str] = []
+    gpio_ports: set[str] = set()
     for name, dom in domains.items():
         found = _aen_power_domain_presence(dom, on_module)
         if found is None:
             continue
         state, chip = found
+        gpio_ports.update(c["gpio_node"] for c in dom["controls"]
+                          if c["gpio_node"] != "lpgpio")
         label = dom.get("device_label")
         if label and label not in device_labels:
             raise ZephyrBoardEmitError(
@@ -2387,6 +2390,19 @@ def _aen_som_power_dts(
         "};",
         "",
     ]
+    if gpio_ports:
+        # The SoC peripherals dtsi declares every GPIO port disabled.  A domain
+        # whose pad sits on one needs the port ready, or pin_assert() fails with
+        # ALP_ERR_NOT_READY and the quiesce that STOP/STANDBY runs first aborts.
+        # (`&lpgpio` is enabled with BRD_I2C above.)
+        lines += [
+            "/*",
+            " * GPIO ports carrying a SoM power-domain pad (the SoC peripherals dtsi leaves",
+            " * them disabled).  Without them the SoM power layer cannot drive those pads.",
+            " */",
+        ]
+        for port in sorted(gpio_ports, key=lambda g: (len(g), g)):
+            lines += [f"&{port} {{", '\tstatus = "okay";', "};", ""]
     return lines
 
 

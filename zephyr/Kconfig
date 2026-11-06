@@ -77,10 +77,11 @@ endif # ALP_SDK
 # (MCUboot builds too) because it is a pad-level board fact, like the MPU table.
 config ALIF_FLEX_IO_1V8
 	bool "Alif flex-IO bank supplied at 1.8 V (VBAT GPIO_CTRL bit 0)"
-	depends on SOC_SERIES_E8
+	depends on SOC_FAMILY_ENSEMBLE || SOC_FAMILY_ENSEMBLE_RTSS
 	help
 	  Set ONLY by a board whose VDD_IO_FLEX pin is wired to a 1.8 V rail
-	  (the E1M-AEN SoM: VDD_IO_FLEX = +1V8).  Commands the flex-IO pads
+	  (the E1M-AEN SoM, every SKU: AEN401 / AEN601 / AEN801 / AEN803 share one
+	  PCB with VDD_IO_FLEX = +1V8).  Commands the flex-IO pads
 	  into 1.8 V mode at PRE_KERNEL_1, as the Alif DFP's board_pins_config()
 	  does under FLEX_IO_VOLTAGE_1V8.  Never enable it on a board that
 	  supplies VDD_IO_FLEX from 3.3 V: the DFP warns against 1.8 V mode on
