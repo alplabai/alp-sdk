@@ -5,8 +5,8 @@
  * v2n-gd32-swd-flash -- demonstrate the host-driven SWD bit-bang
  * controller (chips/gd32_swd/) by attaching to the on-module
  * GD32G553, reading the SW-DP IDCODE, halting the Cortex-M33, and
- * writing a tiny scratch pattern to the last flash sector then
- * reading it back.
+ * writing a tiny scratch pattern to the last non-reserved flash sector
+ * then reading it back.
  *
  * This is the recovery / first-flash path documented in
  * docs/gd32-bridge-protocol.md §10 Path B + docs/bring-up-v2n.md §2b:
@@ -40,12 +40,18 @@
  * BUSY; gd32_swd_deinit() gives P70/P71 back as inputs.
  *
  * **Safety:**
- *   * This example writes to the *last sector* of the GD32G553's
- *     flash (top 2 KB) by default to minimise impact on any
- *     in-place bridge firmware.
- *   * If the bridge firmware happens to live in that sector the
- *     write trashes it; flash a fresh bridge image afterwards via
- *     either an external probe or the same SWD driver.
+ *   * The target sector is computed from the driver geometry
+ *     (GD32_SWD_FMC_FLASH_BYTES / GD32_SWD_FMC_SECTOR_BYTES), not
+ *     hard-coded.  The topmost sector is left untouched because
+ *     docs/ota-device-contract.md ("Planned flash layout") reserves
+ *     the top of flash, just below 0x08080000, for the OTA metadata
+ *     page (active slot, version, sha).  The scratch sector is the one
+ *     directly below it.
+ *   * That sector is still inside the flash the bridge image may use.
+ *     If the bridge firmware (or, in a -DBRIDGE_OTA_PARTITIONED build,
+ *     slot B) happens to live there the write trashes it; flash a
+ *     fresh bridge image afterwards via either an external probe or
+ *     the same SWD driver.
  */
 
 #include <stdio.h>
@@ -56,10 +62,19 @@
 #include "alp/peripheral.h"
 #include "alp/chips/gd32_swd.h"
 
-/* Write target: the top sector of the GD32G553's 512 KB flash.
- * 0x08080000 - 2048 = 0x0807F800 is the last sector start address. */
-#define WRITE_ADDR  0x0807F800u
+/* Write target, derived from the driver geometry (256 sectors of 2 KiB):
+ * sector index N starts at GD32_SWD_FMC_FLASH_BASE + N * GD32_SWD_FMC_SECTOR_BYTES.
+ * The last sector (index 255, 0x0807F800) is OTA-reserved (metadata page),
+ * so the scratch sector is the one below it: index 254, 0x0807F000. */
+#define OTA_RESERVED_SECTORS 1u
+#define LAST_USABLE_SECTOR   (GD32_SWD_FMC_SECTOR_COUNT - 1u - OTA_RESERVED_SECTORS)
+#define WRITE_ADDR  (GD32_SWD_FMC_FLASH_BASE + LAST_USABLE_SECTOR * GD32_SWD_FMC_SECTOR_BYTES)
 #define WRITE_BYTES 64u
+
+BUILD_ASSERT(WRITE_ADDR + GD32_SWD_FMC_SECTOR_BYTES <=
+                 GD32_SWD_FMC_FLASH_BASE + GD32_SWD_FMC_FLASH_BYTES -
+                     OTA_RESERVED_SECTORS * GD32_SWD_FMC_SECTOR_BYTES,
+             "scratch sector must not reach the OTA-reserved top of flash");
 
 static uint8_t pattern[WRITE_BYTES];
 static uint8_t scratch[WRITE_BYTES];
