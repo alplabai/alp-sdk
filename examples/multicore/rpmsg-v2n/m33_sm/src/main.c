@@ -524,13 +524,14 @@ static void rpmsg_mng_task(void *arg1, void *arg2, void *arg3)
 
 int main(void)
 {
-	LOG_INF("rpmsg-v2n/m33_sm: starting (alp-sdk #683, Path B Phase 1)");
-
 	/* CRITICAL: the liveness beacon is the VERY FIRST action, ahead of
 	 * OpenAMP/libmetal/driver init below -- so a bench `devmem` read that
 	 * catches this firmware mid-fault still sees "alive, once" rather than
-	 * nothing at all. */
+	 * nothing at all.  It also goes ahead of the first LOG_INF: a boot was
+	 * seen to stall inside main()'s first log call before the beacon (#3068). */
 	alp_v2n_beacon_start();
+
+	LOG_INF("rpmsg-v2n/m33_sm: starting (alp-sdk #683, Path B Phase 1)");
 
 	if (platform_init() != 0) {
 		LOG_ERR("platform_init failed");
