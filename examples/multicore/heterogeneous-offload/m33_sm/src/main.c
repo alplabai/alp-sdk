@@ -165,7 +165,11 @@ static float g_mags[MAGS_LEN];
 static void run_fft(void)
 {
 	arm_rfft_fast_instance_f32 fft;
-	arm_rfft_fast_init_f32(&fft, FFT_LEN);
+	/* The fixed-size init links only the 64-point tables. The generic
+	 * arm_rfft_fast_init_f32() keeps every table up to 4096 points (~79 KB)
+	 * and pushes the image past the 0x30000 CM33 boot slot. */
+	BUILD_ASSERT(FFT_LEN == 64u, "arm_rfft_fast_init_64_f32 needs FFT_LEN 64");
+	arm_rfft_fast_init_64_f32(&fft);
 	arm_rfft_fast_f32(&fft, g_samples, g_complex, /*ifft=*/0);
 
 	/* CMSIS packs DC + Nyquist into bin 0 (DC.real, Nyquist.real).
