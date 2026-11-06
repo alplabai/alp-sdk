@@ -1,0 +1,3 @@
+### Fixed — examples: flash-release write guards, sdcard comment matches the board header (#2966, #2992)
+
+aen-trace-runner a32/release/flash-release.sh `write` now runs the check-a32 precondition (ctrl_entry == 0x02500000, A32 running from SRAM1) and refuses on a mismatch, and refuses any blob whose 16 KiB sector span falls outside the MRAM ranges `restore` puts back; both subcommands share one RESTORE_RANGES list, so a grown ATOC can no longer leave unrestorable bytes. The aen-sdcard-file comment, README and e1m_evk_microsd shield overlay now state that the stock 74LVC157 mux contends with the SoC SD pads on either /E state, matching the board header.

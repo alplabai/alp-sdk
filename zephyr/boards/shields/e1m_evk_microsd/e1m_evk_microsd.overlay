@@ -17,10 +17,13 @@
  *     IO20 is a CC3501E GPIO, so it can only be driven once the CC3501E
  *     bridge is up: the app drives alp_gpio IO20 LOW before it first touches
  *     the disk. The SD host driver itself never touches the card before
- *     disk_access_init()/fs_mount(), so that order is safe.
- *   - Only enable the mux on a carrier whose U38/U39 are the reworked
- *     74LV3257 bus switches. The stock 74LVC157 parts drive their outputs at
- *     all times and fight the SoC's SD pins while /E is low.
+ *     disk_access_init()/fs_mount(), so SD traffic starts only after the mux
+ *     is enabled.
+ *   - Use this shield only on a carrier whose U38/U39 are the reworked
+ *     74LV3257 bus switches. The stock 74LVC157 parts always drive their
+ *     outputs and fight the SoC's SD pins on EITHER /E state (see
+ *     include/alp/boards/alp_e1m_evk.h), so leaving the mux disabled is not
+ *     a safe fallback.
  *   - 4-bit, 3.3 V signalling only (no 1.8 V switch on the carrier), 25 MHz
  *     default speed.
  *
