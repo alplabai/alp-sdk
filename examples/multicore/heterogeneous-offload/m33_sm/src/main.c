@@ -487,10 +487,11 @@ static void app_rpmsg_client_sample(void *arg1, void *arg2, void *arg3)
 			}
 			if (f.len != FFT_METHOD_LEN + sizeof g_samples ||
 			    memcmp(f.data, FFT_METHOD, FFT_METHOD_LEN) != 0) {
-				LOG_WRN("bad %u B frame (not an fft request): empty reply", (unsigned)f.len);
-				/* An empty "fft" reply makes the A55 fail fast instead of
-				 * timing out, which would poison its channel. */
-				(void)rpmsg_send(&sc_ept, FFT_METHOD, FFT_METHOD_LEN);
+				/* Dropped without a reply, so the A55 call times out. An empty
+				 * "fft" reply here stopped the image from booting on E1M-V2M103
+				 * (layout-sensitive, root cause not found: #3068), so it is not
+				 * sent. */
+				LOG_WRN("dropped %u B frame (not an fft request)", (unsigned)f.len);
 				continue;
 			}
 			memcpy(g_samples, f.data + FFT_METHOD_LEN, sizeof g_samples);

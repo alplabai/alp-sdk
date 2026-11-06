@@ -10,3 +10,5 @@ The M33 testcase now builds for V2N101/V2M101 only; the native_sim build
 coverage of this example is dropped (the slice no longer uses `<alp/rpc.h>`).
 Needs the CMSIS-DSP library (build error otherwise). The generic Zephyr RPC
 backend on V2N is tracked in #3067.
+
+A non-FFT frame is dropped without a reply; the empty-reply variant did not boot on E1M-V2M103 (#3068).
