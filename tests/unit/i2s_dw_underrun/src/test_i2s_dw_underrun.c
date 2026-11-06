@@ -152,7 +152,7 @@ static int fake_clk_configure(const struct device *dev, clock_control_subsys_t s
 	return 0;
 }
 
-static const struct clock_control_driver_api fake_clk_api = {
+static DEVICE_API(clock_control, fake_clk_api) = {
 	.on        = fake_clk_on,
 	.off       = fake_clk_off,
 	.set_rate  = fake_clk_set_rate,
