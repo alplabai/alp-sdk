@@ -99,7 +99,7 @@ struct mbox_be {
 	const struct device *dev;
 	int                      mtu;     /* mbox_mtu_get(dev); 0 = doorbell-only, <0 = unknown */
 	struct alp_mbox_db_slot *db_slot; /* non-NULL only for a doorbell-only controller */
-	const struct device *rx_dev; /* == dev unless an alp-mbox-rxN alias splits TX/RX */
+	const struct device     *rx_dev;  /* == dev unless an alp-mbox-rxN alias splits TX/RX */
 	uint32_t             channel;
 	alp_mbox_msg_cb_t    cb;
 	void                *cb_user;
@@ -403,7 +403,7 @@ static alp_status_t z_mbox_open(const alp_mbox_config_t  *cfg,
 	if (cfg->channel >= ARRAY_SIZE(alp_mbox_devs)) return ALP_ERR_INVAL;
 	const struct device *dev = alp_mbox_devs[cfg->channel];
 	if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
-	const struct device *rx_dev = alp_mbox_rx_devs[cfg->channel];
+	const struct device     *rx_dev  = alp_mbox_rx_devs[cfg->channel];
 	int                      mtu     = mbox_mtu_get(dev);
 	struct alp_mbox_db_slot *db_slot = NULL;
 	if (mtu == 0) {

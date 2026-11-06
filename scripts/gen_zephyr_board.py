@@ -674,6 +674,12 @@ def _aen_check_extents(
         prev_label, prev_end = label, end
 
 
+# Global SRAM0, identical for both M55 cores: Alif DFP AE822FA0E5597
+# soc_features.h SOC_FEAT_BULK_SRAM0_BASE / SOC_FEAT_BULK_SRAM0_SIZE.
+_AEN_SRAM0_BASE = 0x02000000
+_AEN_SRAM0_SIZE = 0x00400000
+
+
 def _aen_check_map_overlaps(
     memory_map: "list[dict[str, Any]]", mram_base: int, total_kib: int,
 ) -> None:
@@ -716,6 +722,23 @@ def _aen_check_map_overlaps(
     ]
     limit = mram_base + total_kib * 1024
     aperture = (mram_base, limit)
+    # RAM-class rows (e.g. the `sram_ipc` IPC carve-out) are not App MRAM:
+    # they are bounds- and overlap-checked against global SRAM0 instead.
+    sram = [row for row in placed
+            if _AEN_SRAM0_BASE <= row[1] < _AEN_SRAM0_BASE + _AEN_SRAM0_SIZE]
+    for name, base, size_kib in sram:
+        end = base + size_kib * 1024
+        if end > _AEN_SRAM0_BASE + _AEN_SRAM0_SIZE:
+            raise ZephyrBoardEmitError(
+                f"AEN memory_map region {name!r} spans "
+                f"0x{base:x}..0x{end:x}, past the end of SRAM0 "
+                f"(0x{_AEN_SRAM0_BASE:x} + 0x{_AEN_SRAM0_SIZE:x})")
+    sram_sorted = sorted(sram, key=lambda r: r[1])
+    for (a_name, a_base, a_kib), (b_name, b_base, _b) in zip(sram_sorted, sram_sorted[1:]):
+        if b_base < a_base + a_kib * 1024:
+            raise ZephyrBoardEmitError(
+                f"AEN memory_map SRAM0 regions {a_name!r} and {b_name!r} overlap")
+    placed = [row for row in placed if row not in sram]
     for name, base, size_kib in placed:
         end = base + size_kib * 1024
         if base < mram_base or end > limit:
