@@ -809,8 +809,16 @@ static int sdhc_dwc_dma_init(struct dwc_sdhc_regs *regs, struct sdhc_dwc_data *d
 {
 	uint32_t total_len = sdhc_data->blocks * sdhc_data->block_size;
 
-	if (IS_ENABLED(CONFIG_CACHE_MANAGEMENT) && !read) {
-		sys_cache_data_flush_range(sdhc_data->data, total_len);
+	if (IS_ENABLED(CONFIG_CACHE_MANAGEMENT)) {
+		if (read) {
+			/* Write back + drop any dirty line over the buffer BEFORE the DMA
+			 * starts, so a mid-transfer eviction cannot overwrite sectors the
+			 * DMA already landed; the post-transfer invalidate then reads the
+			 * real data. */
+			sys_cache_data_flush_and_invd_range(sdhc_data->data, total_len);
+		} else {
+			sys_cache_data_flush_range(sdhc_data->data, total_len);
+		}
 	}
 
 #if defined(CONFIG_SDHC_DWC_ADMA)
