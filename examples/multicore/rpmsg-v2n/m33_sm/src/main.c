@@ -31,7 +31,7 @@
  * resource table, whereas the A55 side here is the Renesas Multi-OS
  * Package's `rpmsg_sample_client` + `platform_info.c` (license-gated, not
  * an alp-sdk component) -- fixed, vendor userspace tooling that dials a
- * resource table shaped EXACTLY like this file's resource_table.c, not
+ * resource table shaped EXACTLY like zephyr/drivers/ipc/resource_table.c, not
  * whatever `ipc_service` would generate.  Reconciling the two -- most
  * likely a v2n-specific `<alp/rpc.h>` backend once this raw transport is
  * bench-proven -- is follow-up, not this phase.
@@ -78,7 +78,7 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
 #define APP_EPT_ADDR (1024)
 
 /* Shared-memory geometry, read straight from the board overlay's
- * `chosen { zephyr,ipc_shm = &vring_shm0; }` -- see resource_table.h for
+ * `chosen { zephyr,ipc_shm = &vring_shm0; }` -- see zephyr/drivers/ipc/resource_table.h for
  * why the vring TX/RX addresses come from a DIFFERENT pair of nodes
  * (vring_ctrl0/1, allocated by the rpmsg MASTER). */
 #define SHM_NODE       DT_CHOSEN(zephyr_ipc_shm)
@@ -102,10 +102,10 @@ K_THREAD_STACK_DEFINE(thread_rp_client_stack, APP_TASK_STACK_SIZE);
 static struct k_thread thread_mng_data;
 static struct k_thread thread_rp_client_data;
 
-/* `chosen { zephyr,ipc = &mbox_consumer; }` in the board overlay resolves
- * this pair to the MHU channel-1 TX / channel-0 RX halves declared there --
- * see the overlay's KNOWN GAP comment for why this link isn't bench-proven
- * yet. */
+/* `chosen { zephyr,ipc = &ipc0; }` in the generated board dts (see
+ * scripts/gen_zephyr_board.py) carries the MHU-B "tx" / "rx" mbox pair; this
+ * firmware only uses "rx" -- the reverse doorbell is a direct register write
+ * (alp_v2n_doorbell_ring()). */
 static const struct mbox_dt_spec tx_channel = MBOX_DT_SPEC_GET(DT_CHOSEN(zephyr_ipc), tx);
 static const struct mbox_dt_spec rx_channel = MBOX_DT_SPEC_GET(DT_CHOSEN(zephyr_ipc), rx);
 
@@ -274,7 +274,7 @@ int platform_init(void)
 	 * link-placement: BL22 loads only this app's SRAM raw-bin, so a
 	 * `.resource_table` section linked AT the DDR rsctbl address (0x9F7xxxxx)
 	 * would simply never be loaded.  Keeping the const table in the SRAM
-	 * image (resource_table.c's `.resource_table` section) and memcpy'ing it
+	 * image (zephyr/drivers/ipc/resource_table.c's `.resource_table` section) and memcpy'ing it
 	 * here is what actually gets it into DDR (alp-sdk #683 address fix). */
 	rsc_table_get(&rsc_tab_addr, &rsc_size);
 	memcpy((void *)RSC_TABLE_ADDR, rsc_tab_addr, rsc_size);

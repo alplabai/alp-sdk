@@ -1551,10 +1551,8 @@ def _emit_cross_core_shmem_cache(
 def _emit_rpmsg_link(
     project: "BoardProject",
     slice_: Slice,
-    existing_lines: list[str],
 ) -> list[str]:
-    """CONFIG_ALP_SDK_RPC_LINK=y (+ an OpenAMP-sized heap) for a Zephyr
-    slice that is an endpoint of a `kind: rpmsg` `ipc:` entry (#3066).
+    """CONFIG_ALP_SDK_RPC_LINK=y for a Zephyr slice that is an endpoint of a `kind: rpmsg` `ipc:` entry (#3066).
 
     `zephyr/kconfigs/mproc-rpc-usb.kconfig` says heterogeneous projects get
     `<alp/rpc.h>`'s transport switched on by this per-core alp.conf, but only
@@ -1563,31 +1561,29 @@ def _emit_rpmsg_link(
     `imply`s that stack, so which pieces land is the board tree's call: the
     Alif MHUv2 + static-vrings backend on the AEN M55 cores, the V2N/V2M CM33
     backend (zephyr/drivers/ipc) on the E1M-V2N101 / V2M101 M33, and nothing on
-    a build whose tree has no matching ipc node (the same alp.conf also feeds
-    native_sim twister runs).  `raw_shmem` / `mailbox_only` entries are
+    a build whose tree has no matching ipc node (on native_sim / ARCH_POSIX the
+    symbol implies nothing, so the same alp.conf still feeds those twister
+    runs).  `raw_shmem` / `mailbox_only` entries are
     untouched: `<alp/mproc.h>` needs no ipc_service.
 
-    The heap is the one non-`imply`-able part: OpenAMP / libmetal allocate the
-    rpmsg virtio state from it (examples/aen/aen-alp-rpc and the V2N rpmsg
-    examples both set 16 KiB).  Skipped when the memory section already set it.
+    No heap is emitted: alp.conf loads after prj.conf, so an emitted value would
+    override the app's own sizing (microros-ros2-v2n needs 32 KiB).  OpenAMP /
+    libmetal need one, so the app sets CONFIG_HEAP_MEM_POOL_SIZE itself.
     """
     if not any(
         entry.kind == "rpmsg" and slice_.core_id in entry.endpoints
         for entry in project.ipc
     ):
         return []
-    lines = [
+    return [
         "# board.yaml ipc[].kind: rpmsg names this core as an endpoint: switch",
         "# on <alp/rpc.h>'s transport.  ALP_SDK_RPC_LINK implies the MBOX +",
         "# ipc_service + OpenAMP stack this core's board tree supports (AEN M55:",
         "# MHUv2 + static vrings; V2N/V2M M33: the alp,ipc-v2n-rpmsg backend).",
+        "# OpenAMP needs a heap: set CONFIG_HEAP_MEM_POOL_SIZE in prj.conf.",
         "CONFIG_ALP_SDK_RPC_LINK=y",
+        "",
     ]
-    if not any(line.startswith("CONFIG_HEAP_MEM_POOL_SIZE=")
-               for line in existing_lines):
-        lines.append("CONFIG_HEAP_MEM_POOL_SIZE=16384")
-    lines.append("")
-    return lines
 
 
 def _emit_memory(slice_: Slice) -> list[str]:
@@ -2185,7 +2181,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     lines.extend(_emit_inference(project, slice_, silicon))
     lines.extend(_emit_cross_core_shmem_cache(project, slice_, lines))
     lines.extend(_emit_memory(slice_))
-    lines.extend(_emit_rpmsg_link(project, slice_, lines))
+    lines.extend(_emit_rpmsg_link(project, slice_))
     lines.extend(_emit_power(slice_))
     lines.extend(_emit_storage(project))
     lines.extend(_emit_ota(project))

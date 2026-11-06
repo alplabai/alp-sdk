@@ -23,8 +23,11 @@ west build -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 examples/v2n/v2n-alp-rp
 ```
 
 On the A55, open the same channel name with `alp_rpc_open()`, set
-`dst_ept = 1024` (the first endpoint the M33 registers) and `alp_rpc_call()`
-method `echo`.
+`dst_ept = 1024` and `alp_rpc_call()` method `echo`. `ipc_service` has no
+address field, so the M33 ignores `src_ept` / `dst_ept` and serves its Nth open
+channel (first free slot) at rpmsg address 1024 + N (this one is the first, so
+1024). The link reports up once the A55's first frame arrives, and sends are
+non-blocking (`ALP_ERR_NOMEM`-class failure when no TX buffer is free).
 
 **Status:** build-verified only. Bench-unverified through `<alp/rpc.h>`; the
 transport underneath is the one `examples/multicore/rpmsg-v2n` proved on

@@ -27,3 +27,12 @@ config IPC_SERVICE_BACKEND_ALP_V2N_RPMSG_MAX_ENDPOINTS
 	depends on IPC_SERVICE_BACKEND_ALP_V2N_RPMSG
 	help
 	  Endpoint i is created at rpmsg address 1024 + i, in registration order.
+
+config IPC_SERVICE_BACKEND_ALP_V2N_RPMSG_STACK_SIZE
+	int "Stack size of the V2N rpmsg manager thread (bytes)"
+	default 2048
+	depends on IPC_SERVICE_BACKEND_ALP_V2N_RPMSG
+	help
+	  The manager thread runs every rpmsg callback, so <alp/rpc.h> method
+	  handlers (alp_rpc_subscribe callbacks) execute on this stack.  Raise it
+	  for handlers that need more than a small frame.

@@ -16,11 +16,15 @@
  * alive before anything opens a channel; the attach epoch turns odd once the
  * virtio device is bound and even again after an A55-requested link reset.
  *
- * Endpoint i is created at rpmsg address 1024 + i (registration order), with
- * the peer address learned from the first frame the A55 sends.  `bound` fires
- * from the manager thread once the endpoint is live; `unbound` fires when the
- * A55 resets the link, and `bound` again after the next attach.  Callbacks run
- * on the manager thread, never concurrently.
+ * Endpoint slot i is created at rpmsg address 1024 + i (first free slot; a
+ * freed slot is reused), with the peer address learned from the first frame the
+ * A55 sends.  alp_rpc_config_t::src_ept / dst_ept do not reach this layer
+ * (ipc_service has no such field), so the A55 must dial 1024 + slot.  `bound`
+ * fires just before the first frame is delivered, i.e. once a send can
+ * succeed; `unbound` fires when the A55 resets the link and `bound` again
+ * after the next attach.  Callbacks run on the manager thread, never
+ * concurrently, and sends are non-blocking (-ENOMEM when no TX buffer is
+ * free).
  *
  * NOT bench-proven through <alp/rpc.h> yet -- see the changelog fragment for
  * the V2M bench steps.
@@ -63,7 +67,7 @@ LOG_MODULE_REGISTER(ipc_alp_v2n_rpmsg, CONFIG_LOG_DEFAULT_LEVEL);
 #define MAX_EPT   CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG_MAX_ENDPOINTS
 #define EPT_ADDR0 (1024U)
 
-#define MGR_STACK_SIZE 2048
+#define MGR_STACK_SIZE CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG_STACK_SIZE
 #define MGR_PRIO       K_PRIO_PREEMPT(1)
 
 struct v2n_ept {
@@ -74,8 +78,9 @@ struct v2n_ept {
 };
 
 struct v2n_data {
-	struct k_mutex               lock; /* recursive: callbacks may re-enter */
-	struct k_sem                 kick; /* doorbell or endpoint change -> manager */
+	struct k_mutex               lock;    /* recursive; slots, link state, vdev lifecycle only */
+	atomic_t                     tx_busy; /* sends in flight outside `lock` */
+	struct k_sem                 kick;    /* doorbell or endpoint change -> manager */
 	struct v2n_ept               ept[MAX_EPT];
 	struct metal_io_region       shm_io;
 	struct metal_io_region       rsc_io;
@@ -121,9 +126,22 @@ rpmsg_rx_cb(struct rpmsg_endpoint *rept, void *data, size_t len, uint32_t src, v
 	ARG_UNUSED(src);
 	ARG_UNUSED(priv);
 	struct v2n_ept *e = CONTAINER_OF(rept, struct v2n_ept, rept);
+	/* Read once: deregister_endpoint() may clear it from another thread. */
+	const struct ipc_ept_cfg *cfg = e->cfg;
 
-	if (e->cfg != NULL && e->cfg->cb.received != NULL) {
-		e->cfg->cb.received(data, len, e->cfg->priv);
+	if (cfg == NULL) {
+		return RPMSG_SUCCESS;
+	}
+	/* The A55's first frame teaches the peer address; only now can a send
+	 * succeed, so only now is the link "bound". */
+	if (e->bound_pending && rept->dest_addr != RPMSG_ADDR_ANY) {
+		e->bound_pending = false;
+		if (cfg->cb.bound != NULL) {
+			cfg->cb.bound(cfg->priv);
+		}
+	}
+	if (cfg->cb.received != NULL) {
+		cfg->cb.received(data, len, cfg->priv);
 	}
 	return RPMSG_SUCCESS;
 }
@@ -140,25 +158,13 @@ static void ept_create(struct v2n_data *d, unsigned int idx)
 	                     rpmsg_rx_cb,
 	                     NULL) != 0) {
 		LOG_ERR("rpmsg_create_ept(%u) failed", idx);
+		if (e->cfg->cb.error != NULL) {
+			e->cfg->cb.error("rpmsg_create_ept failed", e->cfg->priv);
+		}
 		return;
 	}
 	e->live          = true;
 	e->bound_pending = true;
-}
-
-/* Called with d->lock held, from the manager thread only. */
-static void fire_bound(struct v2n_data *d)
-{
-	for (unsigned int i = 0; i < MAX_EPT; i++) {
-		struct v2n_ept *e = &d->ept[i];
-
-		if (e->cfg != NULL && e->live && e->bound_pending) {
-			e->bound_pending = false;
-			if (e->cfg->cb.bound != NULL) {
-				e->cfg->cb.bound(e->cfg->priv);
-			}
-		}
-	}
 }
 
 static int vdev_up(struct v2n_data *d)
@@ -275,28 +281,37 @@ static void manager(void *a, void *b, void *c)
 
 		k_mutex_lock(&d->lock, K_FOREVER);
 		d->link_up = true;
-		for (unsigned int i = 0; i < MAX_EPT; i++) {
-			if (d->ept[i].cfg != NULL) {
-				ept_create(d, i);
-			}
-		}
-		fire_bound(d);
 		k_mutex_unlock(&d->lock);
 
-		while (wait_for_work(d)) {
+		do {
+			/* Endpoints registered since the last wake are created here, on
+			 * this thread, so a (possibly blocking) ns announcement never
+			 * runs on an application thread. */
 			k_mutex_lock(&d->lock, K_FOREVER);
-			rproc_virtio_notified(d->rvdev.vdev, VRING1_ID);
-			fire_bound(d);
+			for (unsigned int i = 0; i < MAX_EPT; i++) {
+				if (d->ept[i].cfg != NULL && !d->ept[i].live) {
+					ept_create(d, i);
+				}
+			}
 			k_mutex_unlock(&d->lock);
-		}
+			/* rpmsg callbacks run here without `lock`: OpenAMP's own rdev
+			 * lock serialises the rings, and a handler may send. */
+			rproc_virtio_notified(d->rvdev.vdev, VRING1_ID);
+		} while (wait_for_work(d));
 
 		LOG_INF("A55 reset the link; waiting for the next attach");
 		k_mutex_lock(&d->lock, K_FOREVER);
 		d->link_up = false;
+		k_mutex_unlock(&d->lock);
+		/* Sends are non-blocking, so this drains in microseconds. */
+		while (atomic_get(&d->tx_busy) != 0) {
+			k_msleep(1);
+		}
+		k_mutex_lock(&d->lock, K_FOREVER);
 		for (unsigned int i = 0; i < MAX_EPT; i++) {
 			struct v2n_ept *e = &d->ept[i];
 
-			if (e->cfg != NULL && e->live && e->cfg->cb.unbound != NULL) {
+			if (e->cfg != NULL && e->live && !e->bound_pending && e->cfg->cb.unbound != NULL) {
 				e->cfg->cb.unbound(e->cfg->priv);
 			}
 		}
@@ -372,17 +387,16 @@ v2n_register_endpoint(const struct device *instance, void **token, const struct 
 	k_mutex_lock(&d->lock, K_FOREVER);
 	for (unsigned int i = 0; i < MAX_EPT; i++) {
 		if (d->ept[i].cfg == NULL) {
-			d->ept[i].cfg = cfg;
-			*token        = &d->ept[i];
-			if (d->link_up) {
-				ept_create(d, i);
-			}
-			ret = 0;
+			d->ept[i].cfg           = cfg;
+			d->ept[i].bound_pending = false;
+			*token                  = &d->ept[i];
+			ret                     = 0;
 			break;
 		}
 	}
 	k_mutex_unlock(&d->lock);
-	/* Wake the manager so `bound` fires from its thread, not from here. */
+	/* The manager creates the rpmsg endpoint; `bound` follows the A55's
+	 * first frame. */
 	k_sem_give(&d->kick);
 	return ret;
 }
@@ -411,18 +425,29 @@ static int v2n_send(const struct device *instance, void *token, const void *data
 	struct v2n_ept  *e   = token;
 	int              ret = -EBUSY;
 
+	/* `lock` is held only to claim the send, never across it: a send from an
+	 * rpmsg callback runs on the manager thread, and a blocking wait for a TX
+	 * buffer there would stall RX and link-reset handling.  The link-reset
+	 * path waits for `tx_busy` to drain before tearing the vdev down. */
 	k_mutex_lock(&d->lock, K_FOREVER);
-	if (d->link_up && e->live) {
-		ret = rpmsg_send(&e->rept, data, len);
-		if (ret == RPMSG_ERR_NO_BUFF) {
-			ret = -ENOMEM;
-		} else if (ret == RPMSG_ERR_BUFF_SIZE) {
-			ret = -EBADMSG;
-		} else if (ret < 0) {
-			ret = -EIO;
-		}
+	bool ok = d->link_up && e->live && e->rept.dest_addr != RPMSG_ADDR_ANY;
+	if (ok) {
+		atomic_inc(&d->tx_busy);
 	}
 	k_mutex_unlock(&d->lock);
+	if (!ok) {
+		return -EBUSY;
+	}
+
+	ret = rpmsg_trysend(&e->rept, data, len);
+	atomic_dec(&d->tx_busy);
+	if (ret == RPMSG_ERR_NO_BUFF) {
+		ret = -ENOMEM; /* A55 has not returned a TX buffer yet; retry later */
+	} else if (ret == RPMSG_ERR_BUFF_SIZE) {
+		ret = -EBADMSG;
+	} else if (ret < 0) {
+		ret = -EIO;
+	}
 	return ret;
 }
 
@@ -448,7 +473,7 @@ static int v2n_init(const struct device *dev)
 	k_mutex_init(&d->lock);
 	k_sem_init(&d->kick, 0, 1);
 
-	alp_v2n_beacon_start();
+	/* No magic until the link can actually work. */
 	if (!mbox_is_ready_dt(&rx_channel)) {
 		LOG_ERR("MHU-B mailbox RX channel is not ready");
 		return -ENODEV;
@@ -456,6 +481,7 @@ static int v2n_init(const struct device *dev)
 	rsc_table_get(&tab, &size);
 	memcpy((void *)RSC_TABLE_ADDR, tab, size);
 	d->rsc_table = (void *)RSC_TABLE_ADDR;
+	alp_v2n_beacon_start();
 	return 0;
 }
 

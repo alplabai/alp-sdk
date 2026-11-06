@@ -116,24 +116,27 @@ config ALP_SDK_RPC
 config ALP_SDK_RPC_LINK
 	bool "Cross-core rpmsg link (set by the orchestrator for board.yaml ipc: kind rpmsg)"
 	depends on ALP_SDK
-	imply MBOX
-	imply MBOX_ALIF_MHUV2
-	imply IPC_SERVICE
-	imply IPC_SERVICE_BACKEND_RPMSG
-	imply IPC_SERVICE_BACKEND_RPMSG_SHMEM_RESET
-	imply IPC_SERVICE_BACKEND_ALP_V2N_RPMSG
-	imply OPENAMP
+	imply MBOX if !ARCH_POSIX
+	imply MBOX_ALIF_MHUV2 if !ARCH_POSIX
+	imply IPC_SERVICE if !ARCH_POSIX
+	imply IPC_SERVICE_BACKEND_RPMSG if !ARCH_POSIX
+	imply IPC_SERVICE_BACKEND_RPMSG_SHMEM_RESET if !ARCH_POSIX
+	imply IPC_SERVICE_BACKEND_ALP_V2N_RPMSG if !ARCH_POSIX
+	imply OPENAMP if !ARCH_POSIX
 	help
 	  Emitted into a Zephyr slice's alp.conf when board.yaml declares an
 	  `ipc:` entry of kind rpmsg naming this core.  It only pulls in what
 	  this core's board tree can actually run (`imply`: a request the board
-	  cannot honour is dropped, so the same alp.conf also builds on
-	  native_sim): the Alif MHUv2 + OpenAMP static-vrings ipc_service
-	  backend on the AEN M55 cores, the V2N/V2M CM33 backend
+	  cannot honour is dropped; on ARCH_POSIX (native_sim) nothing is
+	  implied, so the same alp.conf builds there with the SW fallback):
+	  the Alif MHUv2 + OpenAMP static-vrings ipc_service backend on the
+	  AEN M55 cores, the V2N/V2M CM33 backend
 	  (IPC_SERVICE_BACKEND_ALP_V2N_RPMSG) on the E1M-V2N101 / V2M101
 	  Cortex-M33.  ALP_SDK_RPC then defaults on.  A firmware that drives
 	  the V2N link with raw OpenAMP itself (examples/multicore/rpmsg-v2n)
-	  sets CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG=n.
+	  sets CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG=n.  OpenAMP needs a
+	  heap: set CONFIG_HEAP_MEM_POOL_SIZE in the app's prj.conf (16384 is
+	  what the examples use).
 
 config ALP_SDK_RPC_SW_FALLBACK
 	bool "Software RPC fallback (no-op stub)"
