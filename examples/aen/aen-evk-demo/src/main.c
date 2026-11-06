@@ -1577,9 +1577,10 @@ static phase_verdict_t phase_rgb_led(demo_ctx_t *ctx)
 		}
 
 		alp_status_t duty_rc = alp_pwm_set_duty(pwm, RGB_PULSE_NS);
-		/* Latch time: the driver's compare/period write is buffered until
-		 * the next cycle boundary. 1 ms comfortably covers the 1 kHz
-		 * period this phase configures. */
+		/* Settle time: the driver's compare write is immediate (not
+		 * shadow-buffered).  1 ms covers a full cycle of the 1 kHz
+		 * period this phase configures, so any one-cycle glitch has
+		 * passed before the next step. */
 		k_busy_wait(1000);
 
 		uint32_t reload  = rgb_reg_read(ch->timer_base, RGB_OFF_CNTR_PTR);
