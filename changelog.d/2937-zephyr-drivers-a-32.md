@@ -15,4 +15,7 @@ CFB_ADDR; it now translates through local_to_global() under
 CONFIG_FB_USES_DTCM_REGION like cdc200_layer_fb_setup().
 
 dma_alif_boot_latch: the M55HE_CFG (HE-local) DMA2 latch is built only
-under CONFIG_RTSS_HE; header and CMake comment now match the code.
+when the dma2 node is enabled; header and CMake comment now match the code.
+dma_pl330_alif now registers its own log module (dma_pl330_alif) instead
+of reusing upstream's dma_pl330, so an image that enables both dma0 and
+dma2 with CONFIG_LOG=y links.

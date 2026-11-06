@@ -49,7 +49,7 @@
 
 #define LOG_LEVEL CONFIG_DMA_LOG_LEVEL
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(dma_pl330);
+LOG_MODULE_REGISTER(dma_pl330_alif, CONFIG_DMA_LOG_LEVEL);
 
 #define BYTE_WIDTH(burst_size) (1 << (burst_size))
 
