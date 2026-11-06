@@ -11,8 +11,10 @@
  * (metadata/e1m_modules/aen/on-module-links.yaml), and `alp_i2c`'s
  * `z_open` re-runs `i2c_configure()` with the caller's bitrate and has no
  * exclusivity check (src/backends/i2c/zephyr_drv.c) -- a portable open at
- * `alp_hw_info`'s 400 kHz would both silently reconfigure the bus under
- * an app's own handle and be a real electrical fault on this board.  The
+ * a fast-mode rate (e.g. a raised CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ;
+ * `alp_hw_info`'s default is 100 kHz) would both silently reconfigure the bus
+ * under an app's own handle and, at 400 kHz, be a real electrical fault on
+ * this board.  The
  * DT-bound path here inherits the bus's own `clock-frequency` instead.
  * See issue #2066.
  *
