@@ -33,11 +33,17 @@ extern const size_t             alp_storage_mount_count __attribute__((weak));
  * LOG_ERR on a missing mount. */
 static inline bool alp_zmnt_is_mounted(const char *mnt_point)
 {
+#if defined(CONFIG_FILE_SYSTEM)
 	int         idx  = 0;
 	const char *name = NULL;
 	while (fs_readmount(&idx, &name) == 0) {
 		if (name != NULL && strcmp(name, mnt_point) == 0) return true;
 	}
+#else
+	/* No filesystem subsystem: fs_readmount() is not linked and nothing can
+	 * be mounted, so a raw-flash-only build must not reference it. */
+	(void)mnt_point;
+#endif
 	return false;
 }
 
