@@ -722,8 +722,11 @@ typedef struct {
  *                 per-word + chip-select pin).  Must be non-NULL.
  *
  * @return Open handle on success; NULL with @ref alp_last_error
- *         set to @ref ALP_ERR_INVAL / @ref ALP_ERR_NOT_READY /
- *         @ref ALP_ERR_NOSUPPORT.
+ *         set to @ref ALP_ERR_INVAL (including a @c cs_pin_id that is
+ *         neither @ref ALP_SPI_NO_CS nor a resolvable pin) /
+ *         @ref ALP_ERR_NOT_READY / @ref ALP_ERR_NOSUPPORT, or the
+ *         mapped driver error (e.g. @ref ALP_ERR_IO) when configuring
+ *         the chip-select GPIO fails.
  */
 alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg);
 

@@ -25,6 +25,22 @@ ZTEST(alp_peripheral, test_spi_open_close_roundtrip)
 	alp_spi_close(spi);
 }
 
+ZTEST(alp_peripheral, test_spi_open_unresolvable_cs_fails_closed)
+{
+	/* A chip-select that cannot be resolved must fail the open: succeeding
+	 * would clock SCK/MOSI with CS never asserted while every transfer
+	 * still reported OK. */
+	alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
+	    .bus_id        = 0,
+	    .freq_hz       = 1000000,
+	    .mode          = ALP_SPI_MODE_0,
+	    .bits_per_word = 8,
+	    .cs_pin_id     = 0xFFFFFFFEu, /* neither ALP_SPI_NO_CS nor a pin */
+	});
+	zassert_is_null(spi, "unresolvable cs_pin_id must yield NULL");
+	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
 ZTEST(alp_peripheral, test_spi_open_invalid_bus_returns_null)
 {
 	alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
