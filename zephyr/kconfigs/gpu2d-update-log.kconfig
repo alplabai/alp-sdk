@@ -104,8 +104,11 @@ config ALP_SDK_UPDATE_LOG_PERSIST
 	  overlay) must carve that partition out of a flash device the
 	  running image can write -- there is no portable default offset,
 	  so alp-sdk does not invent one per board. Without the partition
-	  (or if the NVS mount fails) the tier silently falls back to the
-	  pre-persistence RAM store: entries then vanish on reboot.
+	  the tier falls back to the pre-persistence RAM store at build
+	  time: entries then vanish on reboot. With the partition, a failed
+	  NVS mount is never papered over by the RAM store: ready() and
+	  every append/verify/count/get call report ALP_ERR_NOT_READY and the
+	  mount is retried on the next call.
 
 	  TRUST BOUNDARY: persistence does not raise the assurance level.
 	  The tier stays SW_TAMPER_EVIDENT (app-cooperative tamper
