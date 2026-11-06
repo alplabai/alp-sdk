@@ -6,8 +6,8 @@ Subject: [PATCH] gpio: gd32-bridge: gate can-stby on protocol minor 13, not on
 
 can-stby (bridge bit 20) is part of the 21-pad map and exists from minor 13.  It shared the IO15/IO26 status cache, so raising that gate to minor 16 took CAN standby away from 0.13..0.15 bridges.  Give it its own status cache resolved by the same GET_VERSION.
 ---
- drivers/gpio/gpio-gd32-bridge.c | 42 +++++++++++++++++++++++++++++----
- 1 file changed, 38 insertions(+), 4 deletions(-)
+ drivers/gpio/gpio-gd32-bridge.c | 41 ++++++++++++++++++++++++++++----
+ 1 file changed, 37 insertions(+), 4 deletions(-)
 
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
 index 2dc5a63b28f7..90baec979e1f 100644
