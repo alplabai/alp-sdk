@@ -202,6 +202,60 @@ def _require_block_device(resolved: Path) -> "str | None":
     return None
 
 
+_PROC_MOUNTS = Path("/proc/mounts")
+_SYS_BLOCK = Path("/sys/class/block")
+
+
+def _block_family(name: str, seen: "set[str] | None" = None) -> "set[str]":
+    """Return ``name`` plus every whole disk beneath it (partition parent,
+    device-mapper / md slaves), using sysfs.  Without sysfs the set is just
+    ``{name}``, so only an exact match is caught.
+    """
+    seen = seen if seen is not None else set()
+    if name in seen:
+        return seen
+    seen.add(name)
+    node = _SYS_BLOCK / name
+    try:
+        if (node / "partition").exists():
+            _block_family(os.path.basename(os.path.dirname(os.path.realpath(node))), seen)
+        if (node / "slaves").is_dir():
+            for slave in os.listdir(node / "slaves"):
+                _block_family(slave, seen)
+    except OSError:
+        pass
+    return seen
+
+
+def _require_unused_device(resolved: Path) -> "str | None":
+    """Refuse a target that is mounted, or is (part of) the disk backing a
+    mounted filesystem -- notably the host's root disk.
+
+    ``confirm`` alone is not a barrier: provision_som.py sets it under
+    --execute, so a mistyped ``--emmc-device /dev/sda`` would otherwise
+    overwrite the workstation's system disk.  Reads ``/proc/mounts`` (Linux);
+    on a host without it the check is skipped, as the on-board writer
+    (provision/bmap_writer.py) does.  Returns ``None`` when safe.
+    """
+    try:
+        lines = _PROC_MOUNTS.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    target = os.path.basename(os.path.realpath(resolved))
+    for ln in lines:
+        src = ln.split(" ", 1)[0] if ln.strip() else ""
+        if not src.startswith("/dev/"):
+            continue
+        name = os.path.basename(os.path.realpath(src))
+        if target in _block_family(name):
+            return (
+                f"yocto_wic: refusing target '{resolved}' -- it is mounted "
+                f"or backs a mounted filesystem ('{src}' in /proc/mounts); "
+                f"unmount it (and never target the host's root disk)."
+            )
+    return None
+
+
 @dataclass
 class _ProcOutcome:
     returncode: int
@@ -384,6 +438,13 @@ class YoctoWicFlash:
             return FlashResult(
                 ok=False, elapsed_s=time.monotonic() - start,
                 message=block_err,
+            )
+
+        busy_err = _require_unused_device(resolved_target)
+        if busy_err:
+            return FlashResult(
+                ok=False, elapsed_s=time.monotonic() - start,
+                message=busy_err,
             )
 
         if pipeline is not None:
