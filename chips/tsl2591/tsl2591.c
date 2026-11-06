@@ -35,9 +35,13 @@ alp_status_t tsl2591_init(tsl2591_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	if (s != ALP_OK) return s;
 	if (id != TSL2591_DEVICE_ID) return ALP_ERR_IO;
 
+	/* Power on + ALS enable; integration / gain defaults are OK for v0.5.
+	 * Mark the context initialised only once the write lands, so a failed
+	 * ENABLE never leaves a powered-down ADC readable as 0/0 counts. */
+	s = tsl2591_write_reg(dev, TSL2591_REG_ENABLE, TSL2591_ENABLE_POWER_ON | TSL2591_ENABLE_AEN);
+	if (s != ALP_OK) return s;
 	dev->initialised = true;
-	/* Power on + ALS enable; integration / gain defaults are OK for v0.5. */
-	return tsl2591_write_reg(dev, TSL2591_REG_ENABLE, TSL2591_ENABLE_POWER_ON | TSL2591_ENABLE_AEN);
+	return ALP_OK;
 }
 
 alp_status_t tsl2591_read_channels(tsl2591_t *dev, uint16_t *ch0_full_out, uint16_t *ch1_ir_out)
