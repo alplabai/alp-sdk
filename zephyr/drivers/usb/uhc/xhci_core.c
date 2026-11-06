@@ -44,6 +44,16 @@ void xhci_ring_enqueue(struct xhci_ring *ring, const struct xhci_trb *in)
 	}
 }
 
+uint32_t xhci_ring_next_index(const struct xhci_ring *ring, uint32_t index)
+{
+	uint32_t next = index + 1u;
+
+	if (next == ring->size - 1u) {
+		next = 0u;
+	}
+	return next;
+}
+
 void xhci_dcbaa_set(uint64_t *dcbaa, uint32_t slot, uint64_t ctx_phys)
 {
 	dcbaa[slot] = ctx_phys;
@@ -58,14 +68,49 @@ void xhci_build_slot_context(uint32_t *ctx,
 	ctx[0] = (route_string & 0xFFFFFu) | ((speed & 0xFu) << 20) | ((ctx_entries & 0x1Fu) << 27);
 }
 
-void xhci_build_ep_context(
-    uint32_t *ctx, uint32_t ep_type, uint32_t max_packet, uint64_t tr_dequeue_phys, int dcs)
+void xhci_build_ep_context(uint32_t *ctx,
+                           uint32_t  ep_type,
+                           uint32_t  max_packet,
+                           uint64_t  tr_dequeue_phys,
+                           int       dcs,
+                           uint32_t  interval,
+                           uint32_t  avg_trb_len)
 {
-	/* §6.2.3 dword1: EPType[5:3], MaxPacketSize[31:16]. */
-	ctx[1] = ((ep_type & 0x7u) << 3) | ((max_packet & 0xFFFFu) << 16);
+	/* §6.2.3 dword0: Interval[23:16]. */
+	ctx[0] = (interval & 0xFFu) << 16;
+	/* dword1: CErr[2:1] (set to the spec-recommended max of 3 retries
+	 * before the xHC reports an error up), EPType[5:3], MaxPacketSize[31:16]. */
+	ctx[1] = (3u << 1) | ((ep_type & 0x7u) << 3) | ((max_packet & 0xFFFFu) << 16);
 	/* dword2/3: TR Dequeue Pointer (16-byte aligned) | DCS[bit0]. */
 	ctx[2] = ((uint32_t)(tr_dequeue_phys & 0xFFFFFFF0u)) | (dcs ? 1u : 0u);
 	ctx[3] = (uint32_t)(tr_dequeue_phys >> 32);
+	/* dword4: Average TRB Length[15:0] (spec requires nonzero); Max ESIT
+	 * Payload Lo[31:16] left 0 -- only meaningful for isochronous/SS
+	 * endpoints, neither of which this USB 2.0 bulk/control/interrupt-only
+	 * driver uses. */
+	ctx[4] = avg_trb_len & 0xFFFFu;
+}
+
+int xhci_validate_xfer_len(size_t len, size_t buf_room)
+{
+	if (len == 0u || len > buf_room) {
+		return -EINVAL;
+	}
+	if (len > XHCI_TRB_MAX_LEN) {
+		return -EINVAL;
+	}
+	return 0;
+}
+
+uint8_t xhci_dci_for_ep(uint8_t ep_addr)
+{
+	uint8_t num    = ep_addr & 0x0Fu;
+	uint8_t dir_in = (ep_addr & 0x80u) != 0u;
+
+	if (num == 0u) {
+		return 1u;
+	}
+	return (uint8_t)(2u * num + (dir_in ? 1u : 0u));
 }
 
 void xhci_init_sequence(struct xhci_op_regs *op,
