@@ -155,7 +155,7 @@ class TestMramMainOrderingGuard:
         entry = _by_name(resolve_carve_outs(project))["alp_shmem0"]
         assert entry.status == "ok", entry.reason
         assert entry.region == "sram_ipc"
-        assert 0x02010000 <= entry.base < 0x02020000
+        assert 0x023E0000 <= entry.base < 0x023F0000
 
 
 def _with_outside_aperture_row_added(project):

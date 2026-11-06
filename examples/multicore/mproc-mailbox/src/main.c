@@ -58,7 +58,7 @@
  * the orchestrator-emitted carve-out for AEN dual-core builds. */
 #define SHMEM_REGION_NAME "alp_shmem0"
 #define SHMEM_REGION_SIZE 512u
-#define MBOX_CHANNEL      0u
+#define MBOX_CHANNEL      1u /* the SoM's `app` mailbox channel; ALP_IPC_ALP_SHMEM0_MBOX_CH */
 #define REQUEST_OFFSET    0u
 #define RESPONSE_OFFSET   256u /* gap from request so the two never overlap */
 #define MAX_PAYLOAD       128u

@@ -136,7 +136,7 @@ memory:
   source: som_preset
   kind: unclassified
   status: ok
-  base: 33619968
+  base: 37617664
   size_bytes: 65536
   write_authority: customer_runtime
   accessible_from:

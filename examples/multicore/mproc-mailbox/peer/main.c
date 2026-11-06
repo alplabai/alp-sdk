@@ -45,7 +45,7 @@
  * the alp-shmem0 alias. */
 #define SHMEM_REGION_NAME "alp_shmem0"
 #define SHMEM_REGION_SIZE 512u
-#define MBOX_CHANNEL      0u
+#define MBOX_CHANNEL      1u /* the SoM's `app` mailbox channel; ALP_IPC_ALP_SHMEM0_MBOX_CH */
 #define RESPONSE_OFFSET   256u /* must match HP's expectation */
 #define ECHO_PREFIX       "echo: "
 #define MAX_PAYLOAD       128u

@@ -281,7 +281,7 @@ def test_resolve_carve_outs_aen801_lands_in_sram_ipc_not_mram(
     entry = resolved[0]
     assert entry.status == "ok", entry.reason
     assert entry.region == "sram_ipc"
-    assert 0x02010000 <= entry.base < 0x02020000
+    assert 0x023E0000 <= entry.base < 0x023F0000
 
 
 # ---------------------------------------------------------------------
