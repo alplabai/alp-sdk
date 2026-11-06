@@ -620,14 +620,15 @@ K_TIMER_DEFINE(rsctbl_heartbeat_timer, rsctbl_heartbeat_expiry, NULL);
 
 int main(void)
 {
-	LOG_INF("heterogeneous-offload/m33_sm: starting");
-
 	/* CRITICAL: the liveness beacon is the VERY FIRST action, ahead of
 	 * OpenAMP/libmetal/driver init below -- so a bench `devmem` read that
 	 * catches this firmware mid-fault still sees "alive, once" rather than
-	 * nothing at all. */
+	 * nothing at all.  It also goes ahead of the first LOG_INF: a boot was
+	 * seen to stall inside main()'s first log call before the beacon (#3068). */
 	rsctbl_beacon_publish();
 	k_timer_start(&rsctbl_heartbeat_timer, K_SECONDS(1), K_SECONDS(1));
+
+	LOG_INF("heterogeneous-offload/m33_sm: starting");
 
 	if (platform_init() != 0) {
 		LOG_ERR("platform_init failed");
