@@ -28,8 +28,9 @@ boundary.
 - `button_led/` -- generic button + LED helper (alp-studio block
   `blk_button_led`).  Wraps `alp_gpio_*` from `<alp/peripheral.h>`.
 - `pdm_mic/` -- generic PDM-microphone surface (alp-studio block
-  `blk_pdm_mic`).  v0.2 declares the shape; the underlying
-  `alp_i2s_*` peripheral abstraction lands alongside `<alp/audio.h>`.
+  `blk_pdm_mic`).  Permanent stub: declares the shape only;
+  open returns NULL and read returns `ALP_ERR_NOSUPPORT`
+  (tracking: #2987).
 
 Both live behind a `CONFIG_ALP_SDK_BLOCK_<NAME>` Kconfig flag and
 get auto-enabled when the matching slug appears in the resolved

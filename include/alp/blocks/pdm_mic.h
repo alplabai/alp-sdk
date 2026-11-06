@@ -20,11 +20,10 @@
  * SPH0645LM4H-B, STMicro MP34DT06J, Infineon IM73A135V01, …) drops
  * in.  See `blocks/README.md` for the full block-vs-chip rationale.
  *
- * v0.2 scope: declares the surface a PDM source needs to expose to
- * `<alp/audio.h>`; the underlying I²S/PDM peripheral abstraction
- * (`alp_i2s_t`) ships in v0.2's audio library work — until then
+ * Permanent stub: this declares the surface a PDM source would expose,
+ * but nothing is implemented on top of `<alp/i2s.h>`.
  * @ref alp_pdm_mic_open returns NULL and read() returns
- * `ALP_ERR_NOSUPPORT`.  Same shape as `<alp/iot.h>` in v0.1.
+ * `ALP_ERR_NOSUPPORT`.  Tracking: github.com/alplabai/alp-sdk/issues/2987.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      PDM-mic capture block (`alp_pdm_mic_*`).  See
