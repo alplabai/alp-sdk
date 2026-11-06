@@ -266,30 +266,22 @@ def test_resolve_carve_outs_routes_an_unresolved_base_through_the_full_pipeline(
     assert "write_authority is 'composite'" in entry.reason
 
 
-def test_resolve_carve_outs_aen801_stays_blocked_after_1069_memory_map(
+def test_resolve_carve_outs_aen801_lands_in_sram_ipc_not_mram(
     tmp_path: Path,
 ) -> None:
-    """#1069 gave E1M-AEN801 a real `memory_map:` (mcuboot/he_slot0/
-    hp_slot0/reserved/storage/mram_main), but an m55_hp+m55_he rpmsg
-    carve-out MUST still land `status: blocked`: the five fine-grained
-    regions are MRAM (flash-class), not RAM, and are marked
-    `carveout: false` so resolve_carve_outs() can't silently place a
-    shared-memory ring inside non-volatile flash just because the region
-    has a real `base` (needed only for the board generator's DTS
-    partition table, see metadata/e1m_modules/E1M-AEN801.yaml). The only
-    other both-core-accessible region, `mram_main`, is ALSO excluded --
-    its `base` resolved to `0x80000000` (#2053), so its extent equals the
-    aperture exactly (the whole-device alias) and it is `flash`-class
-    too, not the `write_authority`-keyed unresolved-base refusal it used
-    to hit while its `base` was still `"TBD"`."""
+    """E1M-AEN801's MRAM regions (mcuboot/he_slot0/hp_slot0/reserved/
+    storage/atoc/mram_main) are flash-class and ineligible; an
+    m55_hp+m55_he carve-out must land in the SRAM0 `sram_ipc` row
+    (metadata/e1m_modules/E1M-AEN801.yaml), never in non-volatile
+    flash."""
     path = _write_board(tmp_path, AEN801_MAPPED)
     project = load_board_yaml(path)
     resolved = resolve_carve_outs(project)
     assert len(resolved) == 1
     entry = resolved[0]
-    assert entry.status == "blocked"
-    assert entry.reason is not None
-    assert "mram_main" in entry.reason
+    assert entry.status == "ok", entry.reason
+    assert entry.region == "sram_ipc"
+    assert 0x02010000 <= entry.base < 0x02020000
 
 
 # ---------------------------------------------------------------------
