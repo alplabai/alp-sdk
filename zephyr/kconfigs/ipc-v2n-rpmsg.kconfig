@@ -1,0 +1,29 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# ipc_service backend that lets <alp/rpc.h> (src/backends/rpc/zephyr_drv.c) run
+# on the RZ/V2N / V2M Cortex-M33 against the Linux A55 master.  Driver:
+# zephyr/drivers/ipc/ipc_alp_v2n_rpmsg.c; binding:
+# zephyr/dts/bindings/ipc/alp,ipc-v2n-rpmsg.yaml.
+
+config IPC_SERVICE_BACKEND_ALP_V2N_RPMSG
+	bool "ipc_service backend for the V2N/V2M CM33 <-> A55 rpmsg link"
+	depends on IPC_SERVICE
+	depends on DT_HAS_ALP_IPC_V2N_RPMSG_ENABLED
+	depends on MBOX_RENESAS_RZ_MHU_B
+	depends on !OPENAMP_RSC_TABLE
+	select OPENAMP
+	help
+	  OpenAMP remote on the vendor-shaped resource table the A55 attach path
+	  expects, with the Alp AMP beacon (attach epoch, heartbeat) published
+	  from boot and the MHU-B doorbells.  Not bench-proven through
+	  <alp/rpc.h> yet; the transport logic is the one proven by
+	  examples/multicore/rpmsg-v2n.  Needs CONFIG_OPENAMP_RSC_TABLE=n.
+
+config IPC_SERVICE_BACKEND_ALP_V2N_RPMSG_MAX_ENDPOINTS
+	int "Maximum endpoints on the V2N rpmsg instance"
+	default 4
+	range 1 16
+	depends on IPC_SERVICE_BACKEND_ALP_V2N_RPMSG
+	help
+	  Endpoint i is created at rpmsg address 1024 + i, in registration order.

@@ -160,9 +160,11 @@
 #if defined(CONFIG_ALP_SDK_RPC)
 
 #if !defined(CONFIG_OPENAMP) || !defined(CONFIG_IPC_SERVICE) || \
-    !defined(CONFIG_IPC_SERVICE_BACKEND_RPMSG)
+    (!defined(CONFIG_IPC_SERVICE_BACKEND_RPMSG) && \
+     !defined(CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG))
 #error "alp_rpc requires CONFIG_ALP_SDK_RPC=y + CONFIG_OPENAMP=y + " \
-       "CONFIG_IPC_SERVICE=y + CONFIG_IPC_SERVICE_BACKEND_RPMSG=y"
+       "CONFIG_IPC_SERVICE=y + CONFIG_IPC_SERVICE_BACKEND_RPMSG=y " \
+       "(or CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG=y on the V2N/V2M CM33)"
 #endif
 
 #include <zephyr/ipc/ipc_service.h>

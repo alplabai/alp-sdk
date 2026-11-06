@@ -234,6 +234,7 @@ SoM EEPROM manifest).
 |---------------------------------|--------------------------------------------------------------------------|
 | `v2n/v2n-gd32-bridge-ping`      | PING + GET_VERSION round-trip on both SPI fast path + I2C management path.|
 | `v2n/v2n-board-id-readout`      | Read the SoM EEPROM manifest + assert the SKU matches the firmware build. |
+| `v2n/v2n-alp-rpc-responder`     | M33 `<alp/rpc.h>` echo responder for the Linux A55 (build-only). |
 | `v2n/v2n-eeprom-manifest-dump`  | Hexdump + decode the 128-byte EEPROM manifest at offset 0x0000.          |
 | `v2n/v2n-temp-sensor`           | Read the on-module TMP112 once per second; print degrees C.              |
 | `v2n/v2n-soc-temperature`       | Read the SoC die temperature from the Linux thermal zones once per second. |

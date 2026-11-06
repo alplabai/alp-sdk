@@ -371,7 +371,7 @@
 		 * 0x9fc00000, leaving every buffer outside it).  Silicon-root-caused
 		 * alongside the vring-DA fix (#683/#697 bench, 2026-07-11). */
 		zephyr,ipc_shm = &vring_shm1;
-		zephyr,ipc = &mbox_consumer;
+		zephyr,ipc = &ipc0;
 	};
 
 	rsctbl: memory@9f700000 {
@@ -412,8 +412,12 @@
 		reg = <0x9fc00000 0x300000>;
 	};
 
-	mbox_consumer: mbox-consumer {
-		compatible = "vnd,mbox-consumer";
+	/* <alp/rpc.h> ipc_service instance (zephyr/drivers/ipc/ipc_alp_v2n_rpmsg.c);
+	 * also the tx/rx mbox pair the raw-OpenAMP examples read via
+	 * MBOX_DT_SPEC_GET(DT_CHOSEN(zephyr_ipc), ...).  Inert unless
+	 * CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG=y. */
+	ipc0: ipc {
+		compatible = "alp,ipc-v2n-rpmsg";
 		mboxes = <&mbox1 1>, <&mbox1 0>;
 		mbox-names = "tx", "rx";
 	};

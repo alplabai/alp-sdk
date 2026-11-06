@@ -1,0 +1,25 @@
+# Cortex-M33 system manager as an <alp/rpc.h> responder for the Linux A55.
+# The `ipc:` rpmsg entry is all it takes: the orchestrator emits
+# CONFIG_ALP_SDK_RPC_LINK=y into the m33_sm alp.conf, which pulls in the
+# V2N/V2M CM33 ipc_service backend (zephyr/drivers/ipc/ipc_alp_v2n_rpmsg.c).
+# The A55 side is any Linux app that opens the same channel with
+# alp_rpc_open(); build one from examples/multicore/rpmsg-v2n/linux.
+som:
+  sku: E1M-V2N101
+  hw_rev: r1
+
+preset: e1m-x-evk
+cores:
+  a55_cluster:
+    image: alp-image-edge    # stock alp-sdk rootfs; the A55 client app is yours
+  m33_sm:
+    app: ./src
+
+ipc:
+  - kind: rpmsg
+    endpoints: [a55_cluster, m33_sm]
+    carve_out_kb: 512
+    name: alp_default_rpmsg
+
+diagnostics:
+  log_level: info

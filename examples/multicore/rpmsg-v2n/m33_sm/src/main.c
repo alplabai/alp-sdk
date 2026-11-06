@@ -57,14 +57,11 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
-#include <zephyr/sys/barrier.h>
 
 #include <metal/device.h>
 #include <openamp/open_amp.h>
 
-#include <alp/protocol/amp_beacon.h>
-#include <alp/protocol/v2n_mhu_doorbell.h>
-
+#include "alp_v2n_beacon.h"
 #include "resource_table.h"
 
 LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
@@ -90,33 +87,9 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
 
 #define RSC_TABLE_ADDR DT_REG_ADDR(DT_NODELABEL(rsctbl))
 
-/*
- * Liveness beacon (alp-sdk #683, address root-cause fix): the resource
- * table itself gets memcpy'd into RSC_TABLE_ADDR by platform_init() below,
- * so it owns the low end of the `rsctbl` region -- the beacon lives at the
- * TOP of the region instead, out of the resource table's way.  A Linux-side
- * `devmem` of the beacon's A55 alias (see README.md) read after this app boots proves,
- * in one shot, that the M33 is alive, the DDR window is backed, and the
- * CM33<->A55 address translation in resource_table.h is correct -- and the
- * heartbeat word lets a re-read tell "alive" apart from "wrote once, then
- * faulted".
- *
- * Version 2 (#2586) adds the attach-epoch word (end-0x04 of the rsctbl page), which publishes
- * whether this firmware is bound to an A55 session: ODD = bound (bumped
- * after rpmsg_init_vdev() returned), EVEN = waiting for an attach (starts
- * at 0, bumped again after cleanup_system() on an A55 attach reset; see
- * rpmsg_link_reset()).  The A55 backend (src/backends/rpc/yocto_uio_drv.c,
- * uio_attach_reset()) requests a reset whenever it reads ODD, whatever
- * vdev.status says, and waits for EVEN.  It refuses a re-attach outright
- * when the version is below 2.
- */
-#define RSCTBL_BEACON_VERSION (2U)
-
-/* The beacon: the top 16 bytes of the rsctbl page, laid out by
- * <alp/protocol/amp_beacon.h> (shared with the A55 backend and the stock
- * shim).  DT_REG_SIZE of `rsctbl` is that page's size, from the SoC
- * metadata via the generated board .dts. */
-#define RSCTBL_BEACON ALP_AMP_BEACON_AT(RSC_TABLE_ADDR, DT_REG_SIZE(DT_NODELABEL(rsctbl)))
+/* Liveness beacon + attach epoch (alp-sdk #683, #2586): shared with the
+ * ipc_service backend, see zephyr/drivers/ipc/alp_v2n_beacon.h.  The beacon
+ * lives at the TOP of the rsctbl page, out of the resource table's way. */
 
 /* 2048 not 1024: the RX callback + echo thread now hold a struct sc_frame (~520 B)
  * on the stack for the queued-echo path (#707); the deep OpenAMP rx call chain
@@ -252,22 +225,12 @@ static void new_service_cb(struct rpmsg_device *rdev, const char *name, uint32_t
  * link that means "ring the MHU doorbell" (the actual payload is already
  * in shared memory -- the mailbox only ever carries a wakeup, never
  * data). */
-/* #697 cycle 10 (GIC-measured): the A55 GIC only receives the MHU-B CA55-routed
- * SWINT units 12-15 (-> INTID 436-439 = GIC_SPI 404-407); the RSP interrupt of
- * NS slot 5, which the FSP/mbox send raises, routes to NO A55 GIC line, so a
- * reply sent that way is never delivered.  Ring the A55 by writing the
- * doorbell's SET register directly instead.  (Forward A55->M33 is unaffected:
- * it uses R_MHU_NS5.MSG -> the M33's own NVIC IRQ 293.)  Which register that
- * is -- SWINT unit 12 SET (default) or RSP_INT_SET of NS slot 8 with
- * CONFIG_ALP_V2N_DOORBELL_RSP_CH8 -- and its offset come from
- * <alp/protocol/v2n_mhu_doorbell.h>; the A55 must be built for the same line. */
-#define ALP_M33_DOORBELL_SET (ALP_V2N_MHU_B_CM33_BASE + ALP_V2N_DOORBELL_SET_OFF)
-
+/* Reverse doorbell: a direct MHU-B write, see alp_v2n_doorbell_ring(). */
 int mailbox_notify(void *priv, uint32_t id)
 {
 	ARG_UNUSED(priv);
 	ARG_UNUSED(id);
-	*(volatile uint32_t *)ALP_M33_DOORBELL_SET = 1U;
+	alp_v2n_doorbell_ring();
 	return 0;
 }
 
@@ -347,8 +310,6 @@ static void platform_deinit(void)
 	mbox_set_enabled_dt(&rx_channel, false);
 	metal_finish();
 }
-
-static void rsctbl_attach_epoch_bump(void);
 
 static void cleanup_system(void)
 {
@@ -434,7 +395,7 @@ struct rpmsg_device *platform_create_rpmsg_vdev(unsigned int vdev_index,
 		goto failed;
 	}
 
-	rsctbl_attach_epoch_bump(); /* even -> odd: bound */
+	alp_v2n_beacon_epoch_bump(); /* even -> odd: bound */
 	return rpmsg_virtio_get_rpmsg_device(&rvdev);
 
 failed:
@@ -507,7 +468,7 @@ static void rpmsg_link_reset(void)
 	sc_ept.name[0] = '\0';
 	cleanup_system();
 	atomic_set(&link_resetting, 0);
-	rsctbl_attach_epoch_bump(); /* odd -> even: waiting; the A55 may proceed */
+	alp_v2n_beacon_epoch_bump(); /* odd -> even: waiting; the A55 may proceed */
 }
 
 static void rpmsg_mng_task(void *arg1, void *arg2, void *arg3)
@@ -547,7 +508,7 @@ static void rpmsg_mng_task(void *arg1, void *arg2, void *arg3)
 		                     NULL) != 0) {
 			LOG_ERR("failed to create responder endpoint");
 			cleanup_system();
-			rsctbl_attach_epoch_bump(); /* odd -> even: no longer bound */
+			alp_v2n_beacon_epoch_bump(); /* odd -> even: no longer bound */
 			return;
 		}
 
@@ -561,40 +522,6 @@ static void rpmsg_mng_task(void *arg1, void *arg2, void *arg3)
 	}
 }
 
-/* Writes the one-shot magic+version half of the beacon -- see the
- * header comment above. */
-static void rsctbl_beacon_publish(void)
-{
-	RSCTBL_BEACON->attach_epoch = 0U;
-	RSCTBL_BEACON->version      = RSCTBL_BEACON_VERSION;
-	/* Magic last: the A55 trusts epoch + version only once it reads the magic. */
-	barrier_dsync_fence_full();
-	RSCTBL_BEACON->magic = ALP_AMP_BEACON_MAGIC;
-	barrier_dsync_fence_full();
-}
-
-/* Flips the attach epoch's parity (even <-> odd).  Called after the virtio
- * device is bound (-> odd) and after it is gone (-> even). */
-static void rsctbl_attach_epoch_bump(void)
-{
-	barrier_dsync_fence_full();
-	RSCTBL_BEACON->attach_epoch = RSCTBL_BEACON->attach_epoch + 1U;
-	barrier_dsync_fence_full();
-}
-
-/* ~1 Hz heartbeat -- see the header comment above. */
-static uint32_t rsctbl_heartbeat_count;
-
-static void rsctbl_heartbeat_expiry(struct k_timer *timer)
-{
-	ARG_UNUSED(timer);
-	rsctbl_heartbeat_count++;
-	RSCTBL_BEACON->heartbeat = rsctbl_heartbeat_count;
-	barrier_dsync_fence_full();
-}
-
-K_TIMER_DEFINE(rsctbl_heartbeat_timer, rsctbl_heartbeat_expiry, NULL);
-
 int main(void)
 {
 	LOG_INF("rpmsg-v2n/m33_sm: starting (alp-sdk #683, Path B Phase 1)");
@@ -603,8 +530,7 @@ int main(void)
 	 * OpenAMP/libmetal/driver init below -- so a bench `devmem` read that
 	 * catches this firmware mid-fault still sees "alive, once" rather than
 	 * nothing at all. */
-	rsctbl_beacon_publish();
-	k_timer_start(&rsctbl_heartbeat_timer, K_SECONDS(1), K_SECONDS(1));
+	alp_v2n_beacon_start();
 
 	if (platform_init() != 0) {
 		LOG_ERR("platform_init failed");

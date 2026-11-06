@@ -355,6 +355,18 @@ if(CONFIG_USE_RZ_FSP_MHU_B)
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/r_mhu_b_ns)
 endif()
 
+# ipc_service backend for the V2N/V2M CM33 <-> A55 rpmsg link, so <alp/rpc.h>
+# (src/backends/rpc/zephyr_drv.c) runs on the CM33; the resource table + beacon
+# are shared with examples/multicore/rpmsg-v2n/m33_sm.  Config:
+# IPC_SERVICE_BACKEND_ALP_V2N_RPMSG (zephyr/kconfigs/ipc-v2n-rpmsg.kconfig).
+if(CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipc/ipc_alp_v2n_rpmsg.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipc/alp_v2n_beacon.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipc/resource_table.c)
+    zephyr_library_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipc)
+endif()
+
 # Renesas RZ/V2N CM33 watchdog (WDT0) -- vendored+adapted FSP r_wdt module.
 # hal_renesas ships r_wdt for rza/rzn/rzt only and upstream Zephyr's
 # wdt_renesas_rz.c cannot bind RZ/V2N (see wdt_renesas_rzv.c's header), so the rzt
