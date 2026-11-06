@@ -50,6 +50,29 @@ carve-out; the SDK TX cap `CONFIG_ALP_SDK_RPC_TX_FRAME_MAX` is 1024).
 The request is 256 B and the response 132 B.  A 1024-point FFT (4096 B
 request) cannot go in one frame -- chunk it across several calls.
 
+## Why the M33-SM side is raw OpenAMP, not `<alp/rpc.h>`
+
+The A55 requester goes through `<alp/rpc.h>` (`alp_rpc_call()` ->
+`src/backends/rpc/yocto_uio_drv.c`).  The V2N M33-SM slice does **not**: it
+copies the bench-proven raw OpenAMP bring-up of
+[`rpmsg-v2n`](../rpmsg-v2n/) (`m33_sm/src/main.c`, `resource_table.[ch]`)
+and serves the `fft` method itself, with the same `<method>\0<payload>`
+framing on the fixed endpoint address 1024.  Reasons:
+
+- The generic Zephyr backend (`src/backends/rpc/zephyr_drv.c`) rides on
+  `ipc_service` with its own generated resource table and has no V2N
+  bring-up (resource table in DDR, MHU doorbell).  It also publishes no AMP
+  beacon.
+- `yocto_uio_drv.c` refuses to open a channel until it reads the version-2
+  beacon (`<alp/protocol/amp_beacon.h>`) and completes its attach-epoch
+  handshake, so the M33 image must publish it.  The copied bring-up does.
+
+So the board.yaml `ipc:` carve-out is only a paper entry here, and
+`prj.conf` sets `CONFIG_MBOX`, `CONFIG_OPENAMP` and
+`CONFIG_OPENAMP_RSC_TABLE=n` by hand, as `rpmsg-v2n` does.  Build the M33
+image with the generated `alp.conf` layered on (as `testcase.yaml` does),
+otherwise CMSIS-DSP is missing and the worker returns zeros.
+
 ## Memory map
 
 Same layout as [`rpmsg-v2n`](../rpmsg-v2n/).  The tan-resolved 512 KiB

@@ -1,15 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Cortex-M33-SM / Zephyr slice -- the CMSIS-DSP FFT worker.
+# CMakeLists for the Cortex-M33-SM / Zephyr slice of the heterogeneous-offload
+# example (copied from rpmsg-v2n; see src/main.c).
+#
+# This is the build entry point Zephyr's machinery picks up when the
+# orchestrator dispatches the M33 slice (board target
+# `alp_e1m_v2n101_m33_sm`).  The slice's `cores.m33_sm.*` block of
+# ../board.yaml is rendered into a Kconfig fragment (generated/alp.conf)
+# by the build plan / scripts/gen_example_alp_conf.py, not by this file.
 
 cmake_minimum_required(VERSION 3.20)
 
+# ---------------------------------------------------------------------
+# 1. Resolve the Alp SDK root.
+# ALP_SDK_ROOT lets a customer point this example at an out-of-tree
+# SDK checkout; the fallback walks up four levels
+# (examples/multicore/<name>/<core> -> examples/multicore/<name>
+# -> examples/multicore -> examples -> repo root) so an in-tree
+# `west build` Just Works.
+# ---------------------------------------------------------------------
 if(DEFINED ENV{ALP_SDK_ROOT})
     set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
 else()
     get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../.. ABSOLUTE)
 endif()
 
+# ---------------------------------------------------------------------
+# 2. Python3 BEFORE Zephyr -- alp_project.py renders the IPC contract
+# header below.  find_package(Python3 ...) MUST run before
+# find_package(Zephyr ...) because Zephyr's CMake machinery pins a
+# Python interpreter the moment it imports.
+# ---------------------------------------------------------------------
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 # Generate <alp/system_ipc.h> from the board.yaml `ipc:` block.  The
@@ -32,11 +53,25 @@ if(NOT _alp_ipc_rv EQUAL 0)
         "(rv=${_alp_ipc_rv}); stderr: ${_alp_ipc_stderr}")
 endif()
 
+# ---------------------------------------------------------------------
+# 3. Zephyr.
+# ---------------------------------------------------------------------
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(heterogeneous_offload_m33_sm LANGUAGES C)
 
-# Expose the orchestrator's generated/ directory so the
-# `#include <alp/system_ipc.h>` in src/main.c resolves.
+# Expose the orchestrator's generated/ directory (still emitted above for
+# the other slices' tooling; src/main.c itself no longer includes
+# <alp/system_ipc.h> -- see its file header, alp-sdk #683 Phase 1).
 zephyr_include_directories(${CMAKE_BINARY_DIR}/generated)
 
-target_sources(app PRIVATE src/main.c)
+# METAL_MAX_DEVICE_REGIONS -- number of memory regions shared between
+# cores.  Default is 1 (the vrings/rpmsg buffers); this app's
+# platform_init() registers a SECOND region for the resource table, so it
+# must be redefined here (matches upstream's openamp_linux_zephyr sample).
+zephyr_compile_definitions(METAL_MAX_DEVICE_REGIONS=2)
+
+target_include_directories(app PRIVATE ${LIBMETAL_INCLUDE_DIR} ${OPENAMP_INCLUDE_DIR}
+                            ${PLATFORM_DIR})
+target_include_directories(app PRIVATE src)
+
+target_sources(app PRIVATE src/main.c src/resource_table.c)

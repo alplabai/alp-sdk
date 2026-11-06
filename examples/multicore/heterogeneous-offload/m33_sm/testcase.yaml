@@ -13,14 +13,15 @@ sample:
     half; the A55 side is bitbake-only.
 
 tests:
-  alp_sdk.examples.heterogeneous_offload.native_sim:
+  alp_sdk.examples.heterogeneous_offload.m33_sm:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
-      - native_sim/native/64
+      - alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33
+      - alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33
     tags:
       - alp-sdk
       - example
       - heterogeneous
-      - rpc
-      - mproc
+      - rpmsg
+      - v2n
     build_only: true
-    extra_args: EXTRA_CONF_FILE=generated/alp.conf CONFIG_ALP_SDK_RPC=y
