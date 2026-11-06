@@ -75,12 +75,19 @@ struct v2n_ept {
 	const struct ipc_ept_cfg *cfg;  /* NULL = slot free */
 	bool                      live; /* rpmsg endpoint exists */
 	bool                      bound_pending;
+	/* Teardown barrier (see v2n_deregister_endpoint()): `closing` stops new
+	 * callbacks / sends from starting, `in_cb` / `tx` count the ones that
+	 * did, and deregister waits for both to drain before the slot is reused.
+	 * `cfg->priv` and the cfg itself belong to the caller, who frees them as
+	 * soon as deregister returns. */
+	atomic_t closing;
+	atomic_t in_cb;
+	atomic_t tx;
 };
 
 struct v2n_data {
-	struct k_mutex               lock;    /* recursive; slots, link state, vdev lifecycle only */
-	atomic_t                     tx_busy; /* sends in flight outside `lock` */
-	struct k_sem                 kick;    /* doorbell or endpoint change -> manager */
+	struct k_mutex               lock; /* recursive; slots, link state, vdev lifecycle only */
+	struct k_sem                 kick; /* doorbell or endpoint change -> manager */
 	struct v2n_ept               ept[MAX_EPT];
 	struct metal_io_region       shm_io;
 	struct metal_io_region       rsc_io;
@@ -125,11 +132,16 @@ rpmsg_rx_cb(struct rpmsg_endpoint *rept, void *data, size_t len, uint32_t src, v
 {
 	ARG_UNUSED(src);
 	ARG_UNUSED(priv);
-	struct v2n_ept *e = CONTAINER_OF(rept, struct v2n_ept, rept);
-	/* Read once: deregister_endpoint() may clear it from another thread. */
-	const struct ipc_ept_cfg *cfg = e->cfg;
+	struct v2n_ept           *e = CONTAINER_OF(rept, struct v2n_ept, rept);
+	const struct ipc_ept_cfg *cfg;
 
-	if (cfg == NULL) {
+	/* Count in first, then look: deregister sets `closing` before it waits for
+	 * `in_cb` to drain, so either we see `closing` and back out, or it sees
+	 * our count and waits for the callback to return. */
+	atomic_inc(&e->in_cb);
+	cfg = e->cfg;
+	if (atomic_get(&e->closing) != 0 || cfg == NULL) {
+		atomic_dec(&e->in_cb);
 		return RPMSG_SUCCESS;
 	}
 	/* The A55's first frame teaches the peer address; only now can a send
@@ -143,6 +155,7 @@ rpmsg_rx_cb(struct rpmsg_endpoint *rept, void *data, size_t len, uint32_t src, v
 	if (cfg->cb.received != NULL) {
 		cfg->cb.received(data, len, cfg->priv);
 	}
+	atomic_dec(&e->in_cb);
 	return RPMSG_SUCCESS;
 }
 
@@ -289,7 +302,8 @@ static void manager(void *a, void *b, void *c)
 			 * runs on an application thread. */
 			k_mutex_lock(&d->lock, K_FOREVER);
 			for (unsigned int i = 0; i < MAX_EPT; i++) {
-				if (d->ept[i].cfg != NULL && !d->ept[i].live) {
+				if (d->ept[i].cfg != NULL && !d->ept[i].live &&
+				    atomic_get(&d->ept[i].closing) == 0) {
 					ept_create(d, i);
 				}
 			}
@@ -304,8 +318,10 @@ static void manager(void *a, void *b, void *c)
 		d->link_up = false;
 		k_mutex_unlock(&d->lock);
 		/* Sends are non-blocking, so this drains in microseconds. */
-		while (atomic_get(&d->tx_busy) != 0) {
-			k_msleep(1);
+		for (unsigned int i = 0; i < MAX_EPT; i++) {
+			while (atomic_get(&d->ept[i].tx) != 0) {
+				k_msleep(1);
+			}
 		}
 		k_mutex_lock(&d->lock, K_FOREVER);
 		for (unsigned int i = 0; i < MAX_EPT; i++) {
@@ -387,6 +403,7 @@ v2n_register_endpoint(const struct device *instance, void **token, const struct 
 	k_mutex_lock(&d->lock, K_FOREVER);
 	for (unsigned int i = 0; i < MAX_EPT; i++) {
 		if (d->ept[i].cfg == NULL) {
+			atomic_set(&d->ept[i].closing, 0);
 			d->ept[i].cfg           = cfg;
 			d->ept[i].bound_pending = false;
 			*token                  = &d->ept[i];
@@ -401,11 +418,32 @@ v2n_register_endpoint(const struct device *instance, void **token, const struct 
 	return ret;
 }
 
+/* Barrier: when this returns no callback or send on `token` is running or can
+ * start, so the caller may free the cfg and its priv.  `lock` is NOT held
+ * while waiting -- a callback may itself send, which takes it.  Called from the
+ * manager thread (an endpoint closing itself or a sibling from inside a
+ * callback) the in-callback wait is skipped: the only callback that could be
+ * running is the caller's own, and waiting for it would deadlock; the caller
+ * does not touch cfg/priv after deregister returns.
+ *
+ * Not covered by a native_sim test: it needs a live OpenAMP vdev + MHU-B, which
+ * only the board tree provides.  The reasoning above is the check; the V2M
+ * bench step is a close-while-receiving loop on the A55 side. */
 static int v2n_deregister_endpoint(const struct device *instance, void *token)
 {
 	ARG_UNUSED(instance);
 	struct v2n_data *d = &v2n;
 	struct v2n_ept  *e = token;
+
+	atomic_set(&e->closing, 1);
+	while (atomic_get(&e->tx) != 0) {
+		k_msleep(1); /* sends are non-blocking: microseconds */
+	}
+	if (k_current_get() != &mgr_thread) {
+		while (atomic_get(&e->in_cb) != 0) {
+			k_msleep(1);
+		}
+	}
 
 	k_mutex_lock(&d->lock, K_FOREVER);
 	if (e->live) {
@@ -427,12 +465,13 @@ static int v2n_send(const struct device *instance, void *token, const void *data
 
 	/* `lock` is held only to claim the send, never across it: a send from an
 	 * rpmsg callback runs on the manager thread, and a blocking wait for a TX
-	 * buffer there would stall RX and link-reset handling.  The link-reset
-	 * path waits for `tx_busy` to drain before tearing the vdev down. */
+	 * buffer there would stall RX and link-reset handling.  The per-endpoint
+	 * `tx` count lets deregister and the link-reset path wait for it. */
 	k_mutex_lock(&d->lock, K_FOREVER);
-	bool ok = d->link_up && e->live && e->rept.dest_addr != RPMSG_ADDR_ANY;
+	bool ok = d->link_up && e->live && atomic_get(&e->closing) == 0 &&
+	          e->rept.dest_addr != RPMSG_ADDR_ANY;
 	if (ok) {
-		atomic_inc(&d->tx_busy);
+		atomic_inc(&e->tx);
 	}
 	k_mutex_unlock(&d->lock);
 	if (!ok) {
@@ -440,7 +479,7 @@ static int v2n_send(const struct device *instance, void *token, const void *data
 	}
 
 	ret = rpmsg_trysend(&e->rept, data, len);
-	atomic_dec(&d->tx_busy);
+	atomic_dec(&e->tx);
 	if (ret == RPMSG_ERR_NO_BUFF) {
 		ret = -ENOMEM; /* A55 has not returned a TX buffer yet; retry later */
 	} else if (ret == RPMSG_ERR_BUFF_SIZE) {
