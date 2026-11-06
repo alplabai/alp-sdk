@@ -13,7 +13,7 @@
  * read-modify-write for writes.  erase and inline AES are NOSUPPORT.
  *
  * Registered at priority 80, below zephyr_flash (100) and zephyr_littlefs
- * (90), which decline SD_MMC with ALP_ERR_NOSUPPORT; alp_storage_open walks
+ * (110), which decline SD_MMC with ALP_ERR_NOSUPPORT; alp_storage_open walks
  * to this backend via alp_backend_select_next().  This backend declines
  * every other kind the same way.
  */
