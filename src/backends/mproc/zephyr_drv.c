@@ -85,6 +85,7 @@ struct shmem_be {
 
 struct mbox_be {
 	const struct device *dev;
+	const struct device *rx_dev; /* == dev unless an alp-mbox-rxN alias splits TX/RX */
 	uint32_t             channel;
 	alp_mbox_msg_cb_t    cb;
 	void                *cb_user;
@@ -315,6 +316,23 @@ static const struct device *const alp_mbox_devs[] = {
 	ALP_MBOX_DEV_OR_NULL(3),
 };
 
+/* Optional receive-side device per channel (alp-mbox-rxN).  MBOX frames
+ * that are one-directional in hardware (Alif MHUv2: a frame is either a
+ * sender or a receiver) cannot both send on and take callbacks from one
+ * node, so such boards alias the sender frame as alp-mboxN and the
+ * receiver frame as alp-mbox-rxN.  Absent alias -> same device both ways. */
+#define ALP_MBOX_RX_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_mbox_rx, idx)), okay), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_mbox_rx, idx)))), \
+	            (NULL))
+
+static const struct device *const alp_mbox_rx_devs[] = {
+	ALP_MBOX_RX_DEV_OR_NULL(0),
+	ALP_MBOX_RX_DEV_OR_NULL(1),
+	ALP_MBOX_RX_DEV_OR_NULL(2),
+	ALP_MBOX_RX_DEV_OR_NULL(3),
+};
+
 static void mbox_rx_cb(const struct device *dev,
                        mbox_channel_id_t    channel_id,
                        void                *user_data,
@@ -362,9 +380,13 @@ static alp_status_t z_mbox_open(const alp_mbox_config_t  *cfg,
 	if (cfg->channel >= ARRAY_SIZE(alp_mbox_devs)) return ALP_ERR_INVAL;
 	const struct device *dev = alp_mbox_devs[cfg->channel];
 	if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
+	const struct device *rx_dev = alp_mbox_rx_devs[cfg->channel];
+	if (rx_dev == NULL) rx_dev = dev;
+	if (!device_is_ready(rx_dev)) return ALP_ERR_NOT_READY;
 	struct mbox_be *be = _mbox_be_alloc();
 	if (be == NULL) return ALP_ERR_NOMEM;
 	be->dev        = dev;
+	be->rx_dev     = rx_dev;
 	be->channel    = cfg->channel;
 	state->be_data = be;
 	return ALP_OK;
@@ -427,9 +449,9 @@ z_mbox_set_callback(alp_mbox_backend_state_t *state, alp_mbox_msg_cb_t cb, void 
 	if (be == NULL) return ALP_ERR_NOT_READY;
 	be->cb      = cb;
 	be->cb_user = user;
-	int err     = mbox_register_callback(be->dev, be->channel, cb ? mbox_rx_cb : NULL, be);
+	int err     = mbox_register_callback(be->rx_dev, be->channel, cb ? mbox_rx_cb : NULL, be);
 	if (err == 0) {
-		err = mbox_set_enabled(be->dev, be->channel, cb ? true : false);
+		err = mbox_set_enabled(be->rx_dev, be->channel, cb ? true : false);
 	}
 	return errno_to_alp(err);
 #else
@@ -452,8 +474,8 @@ static void z_mbox_close(alp_mbox_backend_state_t *state)
 	 * already disabled above, so the stale registration is not known to
 	 * be reachable) -- this restores the documented invariant that
 	 * backend callbacks stop before their slot is released. */
-	(void)mbox_set_enabled(be->dev, be->channel, false);
-	(void)mbox_register_callback(be->dev, be->channel, NULL, NULL);
+	(void)mbox_set_enabled(be->rx_dev, be->channel, false);
+	(void)mbox_register_callback(be->rx_dev, be->channel, NULL, NULL);
 	_mbox_be_free(be);
 	state->be_data = NULL;
 #else
