@@ -151,6 +151,13 @@ rpmsg_rx_cb(struct rpmsg_endpoint *rept, void *data, size_t len, uint32_t src, v
 		if (cfg->cb.bound != NULL) {
 			cfg->cb.bound(cfg->priv);
 		}
+		/* The callback may have deregistered this endpoint (on this thread
+		 * deregister does not wait for us), after which `cfg` is the
+		 * caller's to free: do not touch it again. */
+		if (atomic_get(&e->closing) != 0 || e->cfg != cfg) {
+			atomic_dec(&e->in_cb);
+			return RPMSG_SUCCESS;
+		}
 	}
 	if (cfg->cb.received != NULL) {
 		cfg->cb.received(data, len, cfg->priv);
@@ -435,7 +442,11 @@ static int v2n_deregister_endpoint(const struct device *instance, void *token)
 	struct v2n_data *d = &v2n;
 	struct v2n_ept  *e = token;
 
+	/* Under `lock` so a v2n_send() that already claimed (also under `lock`) is
+	 * counted in `tx` before we start waiting, and later ones see `closing`. */
+	k_mutex_lock(&d->lock, K_FOREVER);
 	atomic_set(&e->closing, 1);
+	k_mutex_unlock(&d->lock);
 	while (atomic_get(&e->tx) != 0) {
 		k_msleep(1); /* sends are non-blocking: microseconds */
 	}
