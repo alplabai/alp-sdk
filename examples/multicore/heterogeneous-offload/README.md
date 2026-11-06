@@ -26,7 +26,7 @@ examples/multicore/heterogeneous-offload/
 │   ├── CMakeLists.txt   + FFT requester via alp_rpc_call)
 │   └── src/main.c
 └── m33_sm/             (m33_sm's Zephyr slice -- the FFT worker)
-    ├── CMakeLists.txt
+    ├── CMakeLists.txt  (builds ../../rpmsg-v2n/m33_sm/src/resource_table.c)
     ├── prj.conf
     └── src/main.c
 ```
@@ -71,7 +71,7 @@ So the board.yaml `ipc:` carve-out is only a paper entry here, and
 `prj.conf` sets `CONFIG_MBOX`, `CONFIG_OPENAMP` and
 `CONFIG_OPENAMP_RSC_TABLE=n` by hand, as `rpmsg-v2n` does.  Build the M33
 image with the generated `alp.conf` layered on (as `testcase.yaml` does),
-otherwise CMSIS-DSP is missing and the worker returns zeros.
+otherwise CMSIS-DSP is missing and the build stops with an `#error`.
 
 ## Memory map
 
@@ -86,8 +86,11 @@ transport (resource table, vrings, shared buffers) sits in the SoC's
 
 ## Boot order
 
-Identical to `rpmsg-v2n`: A55 → systemd → remoteproc loads the M33
-firmware → both sides discover `alp_default_rpmsg`.
+A55 → systemd → remoteproc attaches to the already-running M33 firmware
+(booted by BL22 before Linux).  The M33 publishes the AMP beacon first,
+creates its rpmsg endpoint at the fixed address 1024 once the A55 has
+attached, and the A55's `alp_rpc_open()` dials that address; there is no
+`alp_default_rpmsg` discovery on this link.
 
 ## Build
 
@@ -114,13 +117,21 @@ rebuilds incrementally in seconds. See
 
 After remoteproc brings up the M33 firmware:
 
+M33 console (Zephyr log, timestamps omitted):
+
 ```
-[m33_sm] FFT worker ready; waiting for 'fft' calls
+heterogeneous-offload/m33_sm: starting
+heterogeneous-offload/m33_sm: bringing up the rpmsg virtio device
+heterogeneous-offload/m33_sm: FFT worker started
+```
+
+A55 requester:
+
+```
+[a55] heterogeneous-offload requester coming up
 [a55]    generated 64-sample @ 400 Hz sine, calling fft...
-[m33_sm] processing 64-sample frame
 [a55]    fft returned; dominant bin=4 (~400.0 Hz)
 [a55]    generated 64-sample @ 800 Hz sine, calling fft...
-[m33_sm] processing 64-sample frame
 [a55]    fft returned; dominant bin=8 (~800.0 Hz)
 [heterogeneous-offload] done
 ```

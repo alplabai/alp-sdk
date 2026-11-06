@@ -14,6 +14,9 @@
  * endpoint at the fixed address APP_EPT_ADDR, and the version-2 AMP beacon
  * (<alp/protocol/amp_beacon.h>) with its attach-epoch handshake.  Only the
  * responder differs: rpmsg-v2n echoes, this file runs the FFT.
+ * resource_table.[ch] are NOT copied: CMakeLists.txt builds rpmsg-v2n's.
+ * The transport code duplicated here (and in rpmsg-v2n and microros) is meant
+ * to go away once the generic Zephyr RPC backend serves V2N: tracked in #3067.
  *
  * Wire contract (the A55 requester in ../linux/src/main.c agrees):
  *   frame    : <method>\0<payload>   (include/alp/rpc.h framing)
@@ -93,9 +96,9 @@ LOG_MODULE_REGISTER(hetero_offload_m33_sm, LOG_LEVEL_INF);
  * metadata via the generated board .dts. */
 #define RSCTBL_BEACON ALP_AMP_BEACON_AT(RSC_TABLE_ADDR, DT_REG_SIZE(DT_NODELABEL(rsctbl)))
 
-/* 2048 not 1024: the RX callback + FFT thread now hold a struct sc_frame (~520 B)
- * on the stack for the queued-frame path (#707); the deep OpenAMP rx call chain
- * needs the extra headroom. */
+/* 3072 (rpmsg-v2n uses 2048): the responder thread holds a struct sc_frame
+ * (~520 B) plus the 136 B reply and calls the CMSIS FFT and rpmsg_send(),
+ * whose OpenAMP call chain is deep; 1 KiB of margin over rpmsg-v2n. */
 #define APP_TASK_STACK_SIZE (3072)
 
 K_THREAD_STACK_DEFINE(thread_mng_stack, APP_TASK_STACK_SIZE);
@@ -147,9 +150,8 @@ static struct rpmsg_endpoint sc_ept;
  * under both Zephyr (cmsis-dsp module) and the alp-sdk wrappers. */
 #if __has_include("arm_math.h")
 #include "arm_math.h"
-#define HAS_CMSIS_DSP 1
 #else
-#define HAS_CMSIS_DSP 0
+#error "CMSIS-DSP required (board.yaml cmsis-dsp library; build with generated/alp.conf)"
 #endif
 
 #define FFT_LEN  64u
@@ -162,7 +164,6 @@ static float g_mags[MAGS_LEN];
 /* Run a single FFT + magnitude pass on `g_samples`. */
 static void run_fft(void)
 {
-#if HAS_CMSIS_DSP
 	arm_rfft_fast_instance_f32 fft;
 	arm_rfft_fast_init_f32(&fft, FFT_LEN);
 	arm_rfft_fast_f32(&fft, g_samples, g_complex, /*ifft=*/0);
@@ -176,13 +177,6 @@ static void run_fft(void)
 		const float im = g_complex[2u * i + 1u];
 		g_mags[i]      = sqrtf(r * r + im * im);
 	}
-#else
-	/* Fallback: zero-fill so the wire shape stays correct under
-     * native_sim without CMSIS-DSP. */
-	for (uint32_t i = 0; i < MAGS_LEN; ++i) {
-		g_mags[i] = 0.0f;
-	}
-#endif
 }
 
 
@@ -237,8 +231,10 @@ rpmsg_recv_cs_callback(struct rpmsg_endpoint *ept, void *data, size_t len, uint3
 	struct sc_frame f;
 	f.len = len < sizeof(f.data) ? len : sizeof(f.data);
 	memcpy(f.data, data, f.len);
-	/* Drop (don't block the OpenAMP RX path) if the echo queue is full -- it is
-	 * bounded and the A55 side never has more than a couple frames in flight. */
+	/* Never block the OpenAMP RX path.  If the queue is full the frame is
+	 * dropped WITHOUT a reply (rpmsg_send() from this callback could stall
+	 * on a TX buffer); the A55 serialises calls, so at most one request is
+	 * in flight and this cannot happen in normal use. */
 	(void)k_msgq_put(&sc_frame_q, &f, K_NO_WAIT);
 	return RPMSG_SUCCESS;
 }
@@ -475,7 +471,7 @@ static void app_rpmsg_client_sample(void *arg1, void *arg2, void *arg3)
 	/* One pass per A55 attach; see rpmsg_mng_task() for the handoff. */
 	for (;;) {
 		k_sem_take(&data_sc_sem, K_FOREVER);
-		LOG_INF("hetero-offload m33_sm: FFT worker started");
+		LOG_INF("heterogeneous-offload/m33_sm: FFT worker started");
 
 		for (;;) {
 			struct sc_frame f;
@@ -487,7 +483,10 @@ static void app_rpmsg_client_sample(void *arg1, void *arg2, void *arg3)
 			}
 			if (f.len != FFT_METHOD_LEN + sizeof g_samples ||
 			    memcmp(f.data, FFT_METHOD, FFT_METHOD_LEN) != 0) {
-				LOG_WRN("dropped %u B frame (not an fft request)", (unsigned)f.len);
+				LOG_WRN("bad %u B frame (not an fft request): empty reply", (unsigned)f.len);
+				/* An empty "fft" reply makes the A55 fail fast instead of
+				 * timing out, which would poison its channel. */
+				(void)rpmsg_send(&sc_ept, FFT_METHOD, FFT_METHOD_LEN);
 				continue;
 			}
 			memcpy(g_samples, f.data + FFT_METHOD_LEN, sizeof g_samples);
@@ -503,7 +502,7 @@ static void app_rpmsg_client_sample(void *arg1, void *arg2, void *arg3)
 			}
 		}
 
-		LOG_INF("hetero-offload m33_sm: FFT worker stopped");
+		LOG_INF("heterogeneous-offload/m33_sm: FFT worker stopped");
 		k_sem_give(&responder_stopped_sem);
 	}
 }
@@ -617,7 +616,7 @@ K_TIMER_DEFINE(rsctbl_heartbeat_timer, rsctbl_heartbeat_expiry, NULL);
 
 int main(void)
 {
-	LOG_INF("heterogeneous-offload/m33_sm: starting (alp-sdk #683, Path B Phase 1)");
+	LOG_INF("heterogeneous-offload/m33_sm: starting");
 
 	/* CRITICAL: the liveness beacon is the VERY FIRST action, ahead of
 	 * OpenAMP/libmetal/driver init below -- so a bench `devmem` read that

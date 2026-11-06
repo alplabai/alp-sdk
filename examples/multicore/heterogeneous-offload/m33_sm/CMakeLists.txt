@@ -74,4 +74,7 @@ target_include_directories(app PRIVATE ${LIBMETAL_INCLUDE_DIR} ${OPENAMP_INCLUDE
                             ${PLATFORM_DIR})
 target_include_directories(app PRIVATE src)
 
-target_sources(app PRIVATE src/main.c src/resource_table.c)
+# resource_table.[ch] are rpmsg-v2n's, not copies (same as microros-ros2-v2n).
+set(_rpmsg_v2n_src ${CMAKE_CURRENT_SOURCE_DIR}/../../rpmsg-v2n/m33_sm/src)
+target_include_directories(app PRIVATE ${_rpmsg_v2n_src})
+target_sources(app PRIVATE src/main.c ${_rpmsg_v2n_src}/resource_table.c)

@@ -93,6 +93,11 @@ static int call_fft_once(alp_rpc_channel_t *ch, float freq_hz)
 		printf("[a55]   alp_rpc_call rv=%d\n", (int)rv);
 		return -1;
 	}
+	if (mags_len != sizeof g_mags) {
+		/* The M33 answers a bad request with an empty "fft" reply. */
+		printf("[a55]   short fft reply: %zu B (expected %zu)\n", mags_len, sizeof g_mags);
+		return -1;
+	}
 
 	const uint32_t bin = dominant_bin();
 	const float    f   = (float)bin * SAMPLE_RATE / (float)FFT_LEN;
