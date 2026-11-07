@@ -17,16 +17,16 @@
 #
 # `merge_group` (2026-09, merge-queue speed pass): `python-smoke` and
 # `loader-smoke` now SKIP unconditionally on this event instead of
-# force-running the ubuntu-only leg. Neither job is a required context on
-# `dev` (see the NOTE below), and every commit reaching the merge queue
+# force-running the ubuntu-only leg. Only the `python-smoke · all` summary
+# is a required context on `dev` (it passes on a merge_group skip), and
+# every commit reaching the merge queue
 # already ran this exact job on `pull_request` first -- re-running it here
 # re-validates nothing new and only takes a runner slot from the same
 # shared pool the REQUIRED `twister-shard`/`distro-install` jobs are
 # waiting on (merge-queue-ejection-alarm.yml exists because of a real
 # runner-starvation ejection, alp-sdk#1952/#1887). See each job's own `if:`
 # comment for the mechanics. The `merge_group:` trigger below stays --
-# removing it would reopen #1415 for whichever future PR promotes
-# `python-smoke · all` to required.
+# removing it would reopen #1415 now that `python-smoke · all` is required.
 #
 # Operating mode:
 #
@@ -47,8 +47,9 @@
 #     30441032872) whose per-STEP conclusions -- not the job
 #     conclusions the override forged -- were 24/24 clean.
 #
-#     NOTE: this workflow's jobs are not in dev's or main's
-#     required-status-check list (verified via
+#     NOTE: `dev` requires ONLY the `python-smoke · all` summary context
+#     from this workflow. The matrix jobs themselves are not in dev's or
+#     main's required-status-check list (verified via
 #     `.../branches/{dev,main}/protection/required_status_checks`,
 #     neither of which lists any of the six real check-run names --
 #     `python-smoke (ubuntu-latest)`, `python-smoke (macos-latest)`,
@@ -172,9 +173,8 @@ on:
     branches: [main, dev]
   push:
     branches: [main]
-  # NOT yet load-bearing -- python-smoke/loader-smoke are not required
-  # contexts on `dev` or `main` today (see the NOTE above, alp-sdk#1528).
-  # Added ahead of that promotion anyway: `dev` runs an active merge-queue
+  # Load-bearing: `python-smoke · all` is a required context on `dev`
+  # (see the NOTE above, alp-sdk#1528). `dev` runs an active merge-queue
   # ruleset, and GitHub raises `merge_group` -- not `push` or
   # `pull_request` -- for a queued entry. pr-twister.yml and
   # pr-static-analysis.yml already needed this for their own required

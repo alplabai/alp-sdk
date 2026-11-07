@@ -34,6 +34,7 @@ that replaced it).
 | [`pr-generated-files.yml`](../../.github/workflows/pr-generated-files.yml)        | PR + push (paths)| active     | Catches drift in `<alp/soc_caps.h>` (re-runs `scripts/gen_soc_caps.py`) and `docs/abi/*.json` (re-runs `scripts/abi_snapshot.py`).             |
 | [`pr-metadata-validate.yml`](../../.github/workflows/pr-metadata-validate.yml)    | PR + push + merge queue | active | Validates every `metadata/socs/**/*.json` against the schema via `scripts/validate_metadata.py` + smoke-tests `scripts/alp_project.py` against `metadata/templates/board.yaml.example`, and hosts the `scripts/check_*.py` gate sweep + the `tests/scripts` pytest suite. The trigger is unfiltered; a `detect` job holds the path list. The static-named summary job `metadata-validate · all` always reports and is **intended to be a required context on `dev`** (the maintainer adds it to branch protection after #2972 merges; the raw `validate · soc-spec-v1` is not requireable alone). On `merge_group` the gate steps re-run but the pytest sweep is skipped (it ran on the PR; the queue run exists to catch cross-PR parity breaks cheaply). |
 | [`merge-queue-changelog-citations.yml`](../../.github/workflows/merge-queue-changelog-citations.yml)| merge queue + PR (paths, self-test) + manual | active | Re-grades changelog citations on the speculative `merge_group` ref against `github.event.merge_group.base_sha`. Its single job name is static, but not requireable as shaped — the `pull_request` leg is path-filtered to the workflow's own file, so an ordinary PR reports no check run and a required context would stall at `Expected — Waiting for status to be reported` (#1415). `pr-metadata-validate.yml` also runs on merge-queue entries (#2972) but skips its citation step there. |
+| [`pr-doc-drift.yml`](../../.github/workflows/pr-doc-drift.yml) | PR + push + merge queue | active | The `scripts/check_doc_*.py` / diagnostic / version-doc parity sweep in one `doc-drift` job. Unfiltered trigger; the static-named summary job `doc-drift · all` (`if: always()`) is a required context on `dev` (#2972). On `merge_group` the gate job runs, so the queue content is checked. |
 | [`pr-doxygen.yml`](../../.github/workflows/pr-doxygen.yml)                        | PR + push (paths)| active     | Generates Doxygen HTML from `include/alp/**`.  Runs with `FAIL_ON_WARNINGS=YES` — zero warnings required; PR fails on any warning. |
 | [`coverity.yml`](../../.github/workflows/coverity.yml)                            | weekly + manual  | active     | Coverity Scan submission against <https://scan.coverity.com/projects/alplabai-alp-sdk>.  Secrets (`COVERITY_TOKEN`, `COVERITY_EMAIL`) provisioned; project name in the `COVERITY_PROJECT` Actions variable.       |
 | [`pr-bitbake.yml`](../../.github/workflows/pr-bitbake.yml)                        | PR to `main` (paths) | active | Dispatch bridge to the private `alp-sdk-internal` repo's self-hosted Yocto runner — see [`runner-architecture.md`](runner-architecture.md). |
@@ -137,3 +138,19 @@ still be killed by the job-level timeout before its own fires --
 every file under `.github/workflows/`. Derive each ceiling from real
 observed run durations (`gh api .../actions/runs/<id>/jobs`), not a guess;
 comment the derivation at the site for anything non-obvious.
+
+## Branch protection (`dev` required contexts)
+
+`dev` requires exactly these status contexts (plus the merge-queue ruleset).
+Each is a static-named job that reports on `pull_request`, `push` and
+`merge_group`, so requiring it neither blocks path-unrelated PRs (#1474) nor
+hangs the queue (#1415):
+
+- `clang-format · diff-only` (`pr-static-analysis.yml`)
+- `distro install · all` (`pr-bootstrap-distro-install.yml`)
+- `twister · native_sim/native/64` (`pr-twister.yml`)
+- `python-smoke · all` (`cross-platform-zephyr.yml`)
+- `metadata-validate · all` (`pr-metadata-validate.yml`)
+- `doc-drift · all` (`pr-doc-drift.yml`; added by #2972)
+
+Never require a matrix-interpolated job name or a path-filtered job directly.

@@ -40,7 +40,9 @@ on:
   push:
     branches: [main, dev]
   # `clang-format · diff-only` is one of `dev`'s required contexts (with
-  # `distro install · all` and `twister · native_sim/native/64`), and
+  # `distro install · all`, `twister · native_sim/native/64`,
+  # `python-smoke · all`, `metadata-validate · all` and, after #2972,
+  # `doc-drift · all`), and
   # GitHub raises `merge_group` -- not `push` or `pull_request` -- for a
   # merge-queue entry, so without this a queued PR waits on a check that can
   # never fire (#1415). Neither `clang-format-diff` nor `cppcheck` carries a

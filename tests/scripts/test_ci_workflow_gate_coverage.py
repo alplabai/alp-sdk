@@ -210,3 +210,26 @@ def test_metadata_validate_summary_is_requireable() -> None:
     # every gate job's own `if:` must keep running under merge_group
     for name in gate_jobs:
         assert "merge_group" in jobs[name]["if"]
+
+
+def test_doc_drift_summary_is_requireable() -> None:
+    """#2972: `doc-drift · all` must report on pull_request, push and
+    merge_group so branch protection can require it."""
+    data = _load("pr-doc-drift.yml")
+    triggers = data.get("on", data.get(True))
+    assert "merge_group" in triggers
+    for t in ("pull_request", "push"):
+        assert "paths" not in triggers[t]
+
+    jobs = data["jobs"]
+    summary = jobs["summary"]
+    assert summary["name"] == "doc-drift · all"
+    assert "${{" not in summary["name"]
+    assert summary["if"].replace(" ", "") == "always()"
+    assert set(summary["needs"]) == {"doc-drift"}
+    # the gate job must not be skipped on merge_group
+    assert "if" not in jobs["doc-drift"]
+    run = summary["steps"][0]["run"]
+    assert "exit 1" in run
+    assert re.search(r"\*\)\s+echo \"::error::doc-drift concluded", run)
+
