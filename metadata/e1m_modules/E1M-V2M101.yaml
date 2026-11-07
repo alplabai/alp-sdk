@@ -264,6 +264,14 @@ pad_routes:
   - { e1m: E1M_X_DAC0, dispatch: gd32_bridge, dispatch_pin: PA4 }
   - { e1m: E1M_X_DAC1, dispatch: gd32_bridge, dispatch_pin: PA6 }
 
+  # GD32-owned pads that terminate on the IO MCU, not the RZ/V2N
+  # (v2n/gd32-io-mcu-map.tsv; metadata/pinmux/v2n.yaml `owner: "gd32"`).
+  # An absent pad means `direct`, so these MUST be listed or the pin
+  # allocator hands them to a Renesas function.  E1M-X I2C3 is the GD32
+  # bridge I2C proxy (SCL = PC8, SDA = PC9); CAN_STBY is GD32 PB13.
+  - { e1m: E1M_X_I2C3,   dispatch: gd32_bridge, dispatch_pin: "PC8/PC9" }
+  - { e1m: E1M_CAN_STBY, dispatch: gd32_bridge, dispatch_pin: PB13 }
+
   # Selected E1M-X GPIO pads via GD32 (the IOs not driven from the
   # Renesas side -- see the TSV for the full set).
   - { e1m: E1M_X_GPIO_IO8,  dispatch: gd32_bridge, dispatch_pin: PB10 }
@@ -307,10 +315,10 @@ pad_routes:
 helper_firmware:
   - name:          gd32_bridge
     chip:          gd32g553
-    # No prebuilt binary ships in the repo -- firmware/gd32-bridge/build/ is
-    # a gitignored build output, absent from every clone (#852).  Build it
-    # yourself per firmware/gd32-bridge/README.md before flashing, or wait
-    # for an Alp Lab firmware release.  `firmware_path` is deliberately
+    # No prebuilt binary ships in the repo.  The firmware lives in its own
+    # repository, alplabai/gd32-bridge-firmware (ADR 0031); build it there
+    # per that repository's README before flashing, or wait for an Alp Lab
+    # firmware release.  `firmware_path` is deliberately
     # ABSENT (not `TBD`) so nothing resolves a sentinel path.  It is
     # `flash_policy: recovery_only`, not `update_channel`, that decides this
     # entry's fate: `tan flash` declines it ahead of any `flash_method`
@@ -342,7 +350,7 @@ helper_firmware:
     #
     # Field updates go over the bridge link -- protocol v0.6 Path A,
     # slot-A/B application bootloader with commit + rollback
-    # (docs/gd32-bridge.md, firmware/gd32-bridge/src/ota.c) -- which is
+    # (docs/gd32-bridge.md, alplabai/gd32-bridge-firmware src/ota.c) -- which is
     # what `update_channel` declares.
     flash_policy:   recovery_only
     update_channel: alp_ota_spi_bridge

@@ -20,6 +20,9 @@
  *      software tier stores the log and its monotonic counter in Zephyr
  *      NVS, so entries survive reboot and firmware update. Without the
  *      partition it falls back to RAM (entries vanish on reboot).
+ *      With the partition, a failed NVS mount is reported (@c ALP_ERR_NOT_READY
+ *      from open and the log calls, retried on the next call), never
+ *      absorbed by the RAM store.
  *      Persistence does NOT change the assurance level: the software tier
  *      is tamper-EVIDENT, not tamper-proof -- @ref alp_update_log_verify
  *      detects out-of-band mutation, truncation, rollback, and reorder,

@@ -63,6 +63,7 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/mbox.h>
+#include <zephyr/sys/barrier.h>
 #include <zephyr/sys/util_macro.h>
 #endif
 
@@ -83,8 +84,22 @@ struct shmem_be {
 	size_t size;
 };
 
+/* Doorbell-only controllers carry no payload, so the bytes ride in the
+ * last ALP_MBOX_DB_SLOT_BYTES of alp-shmem0 (one slot, one message
+ * in flight: request/response use, not a queue).  The region must be
+ * non-cacheable or cache-maintained by the app, same as any alp_shmem. */
+#define ALP_MBOX_DB_SLOT_BYTES 64u
+struct alp_mbox_db_slot {
+	volatile uint32_t len;
+	volatile uint8_t  data[ALP_MBOX_DB_SLOT_BYTES - sizeof(uint32_t)];
+};
+#define ALP_MBOX_DB_PAYLOAD_MAX (sizeof(((struct alp_mbox_db_slot *)0)->data))
+
 struct mbox_be {
 	const struct device *dev;
+	int                      mtu;     /* mbox_mtu_get(dev); 0 = doorbell-only, <0 = unknown */
+	struct alp_mbox_db_slot *db_slot; /* non-NULL only for a doorbell-only controller */
+	const struct device     *rx_dev;  /* == dev unless an alp-mbox-rxN alias splits TX/RX */
 	uint32_t             channel;
 	alp_mbox_msg_cb_t    cb;
 	void                *cb_user;
@@ -315,6 +330,23 @@ static const struct device *const alp_mbox_devs[] = {
 	ALP_MBOX_DEV_OR_NULL(3),
 };
 
+/* Optional receive-side device per channel (alp-mbox-rxN).  MBOX frames
+ * that are one-directional in hardware (Alif MHUv2: a frame is either a
+ * sender or a receiver) cannot both send on and take callbacks from one
+ * node, so such boards alias the sender frame as alp-mboxN and the
+ * receiver frame as alp-mbox-rxN.  Absent alias -> same device both ways. */
+#define ALP_MBOX_RX_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_mbox_rx, idx)), okay), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_mbox_rx, idx)))), \
+	            (NULL))
+
+static const struct device *const alp_mbox_rx_devs[] = {
+	ALP_MBOX_RX_DEV_OR_NULL(0),
+	ALP_MBOX_RX_DEV_OR_NULL(1),
+	ALP_MBOX_RX_DEV_OR_NULL(2),
+	ALP_MBOX_RX_DEV_OR_NULL(3),
+};
+
 static void mbox_rx_cb(const struct device *dev,
                        mbox_channel_id_t    channel_id,
                        void                *user_data,
@@ -326,6 +358,15 @@ static void mbox_rx_cb(const struct device *dev,
 
 	const void *cb_data = data ? data->data : NULL;
 	size_t      cb_len  = data ? data->size : 0;
+
+	/* Doorbell-only controller: the ISR hands us NULL, the bytes are in
+	 * the slot.  Clamp the peer-written length to the slot. */
+	if (data == NULL && be->db_slot != NULL) {
+		barrier_dmem_fence_full();
+		cb_len = be->db_slot->len;
+		if (cb_len > ALP_MBOX_DB_PAYLOAD_MAX) return;
+		cb_data = (const void *)be->db_slot->data;
+	}
 
 #if defined(CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING)
 	/* Unwrap the placeholder envelope.  Malformed frames (magic
@@ -362,9 +403,29 @@ static alp_status_t z_mbox_open(const alp_mbox_config_t  *cfg,
 	if (cfg->channel >= ARRAY_SIZE(alp_mbox_devs)) return ALP_ERR_INVAL;
 	const struct device *dev = alp_mbox_devs[cfg->channel];
 	if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
+	const struct device     *rx_dev  = alp_mbox_rx_devs[cfg->channel];
+	int                      mtu     = mbox_mtu_get(dev);
+	struct alp_mbox_db_slot *db_slot = NULL;
+	if (mtu == 0) {
+		for (size_t i = 0; i < ALP_SHMEM_REGION_COUNT; ++i) {
+			if (strcmp(alp_shmem_regions[i].name, "alp_shmem0") == 0 &&
+			    alp_shmem_regions[i].size >= 2u * sizeof(*db_slot)) {
+				db_slot = (struct alp_mbox_db_slot *)((uint8_t *)alp_shmem_regions[i].base +
+				                                      alp_shmem_regions[i].size - sizeof(*db_slot));
+				break;
+			}
+		}
+		/* Doorbell-only and nowhere to carry the bytes: refuse at open. */
+		if (db_slot == NULL) return ALP_ERR_NOT_READY;
+	}
+	if (rx_dev == NULL) rx_dev = dev;
+	if (!device_is_ready(rx_dev)) return ALP_ERR_NOT_READY;
 	struct mbox_be *be = _mbox_be_alloc();
 	if (be == NULL) return ALP_ERR_NOMEM;
 	be->dev        = dev;
+	be->mtu        = mtu;
+	be->db_slot    = db_slot;
+	be->rx_dev     = rx_dev;
 	be->channel    = cfg->channel;
 	state->be_data = be;
 	return ALP_OK;
@@ -374,6 +435,33 @@ static alp_status_t z_mbox_open(const alp_mbox_config_t  *cfg,
 	return ALP_ERR_NOSUPPORT;
 #endif
 }
+
+#if defined(CONFIG_ALP_SDK_MPROC)
+/* Send `len` bytes.  Payload-capable controllers (mtu > 0) take the bytes
+ * in the mbox message; an oversize message is refused rather than
+ * truncated.  Doorbell-only controllers (mtu == 0, e.g. Alif MHUv2, whose
+ * send rejects any non-NULL message) get the bytes through the doorbell
+ * slot in the shared region and a NULL-message ring. */
+static alp_status_t mbox_tx(struct mbox_be *be, const void *data, size_t len)
+{
+	if (be->db_slot != NULL) {
+		if (len > ALP_MBOX_DB_PAYLOAD_MAX) return ALP_ERR_OUT_OF_RANGE;
+		struct alp_mbox_db_slot *slot = be->db_slot;
+		/* Payload first, then the length that publishes it, then the ring. */
+		if (len > 0u) memcpy((void *)slot->data, data, len);
+		barrier_dmem_fence_full();
+		slot->len = (uint32_t)len;
+		barrier_dmem_fence_full();
+		return errno_to_alp(mbox_send(be->dev, be->channel, NULL));
+	}
+	if (be->mtu > 0 && len > (size_t)be->mtu) return ALP_ERR_OUT_OF_RANGE;
+	struct mbox_msg msg = {
+		.data = data,
+		.size = len,
+	};
+	return errno_to_alp(mbox_send(be->dev, be->channel, &msg));
+}
+#endif /* CONFIG_ALP_SDK_MPROC */
 
 static alp_status_t
 z_mbox_send(alp_mbox_backend_state_t *state, const void *data, size_t len, uint32_t timeout_ms)
@@ -395,21 +483,13 @@ z_mbox_send(alp_mbox_backend_state_t *state, const void *data, size_t len, uint3
 	if (s != ALP_OK) {
 		return s;
 	}
-	struct mbox_msg msg = {
-		.data = be->tx_scratch,
-		.size = framed_len,
-	};
-	int rc = mbox_send(be->dev, be->channel, &msg);
-	if (rc == 0) {
+	s = mbox_tx(be, be->tx_scratch, framed_len);
+	if (s == ALP_OK) {
 		be->tx_sequence = next_seq;
 	}
-	return errno_to_alp(rc);
+	return s;
 #else
-	struct mbox_msg msg = {
-		.data = data,
-		.size = len,
-	};
-	return errno_to_alp(mbox_send(be->dev, be->channel, &msg));
+	return mbox_tx(be, data, len);
 #endif
 #else
 	(void)state;
@@ -427,9 +507,9 @@ z_mbox_set_callback(alp_mbox_backend_state_t *state, alp_mbox_msg_cb_t cb, void 
 	if (be == NULL) return ALP_ERR_NOT_READY;
 	be->cb      = cb;
 	be->cb_user = user;
-	int err     = mbox_register_callback(be->dev, be->channel, cb ? mbox_rx_cb : NULL, be);
+	int err     = mbox_register_callback(be->rx_dev, be->channel, cb ? mbox_rx_cb : NULL, be);
 	if (err == 0) {
-		err = mbox_set_enabled(be->dev, be->channel, cb ? true : false);
+		err = mbox_set_enabled(be->rx_dev, be->channel, cb ? true : false);
 	}
 	return errno_to_alp(err);
 #else
@@ -452,8 +532,8 @@ static void z_mbox_close(alp_mbox_backend_state_t *state)
 	 * already disabled above, so the stale registration is not known to
 	 * be reachable) -- this restores the documented invariant that
 	 * backend callbacks stop before their slot is released. */
-	(void)mbox_set_enabled(be->dev, be->channel, false);
-	(void)mbox_register_callback(be->dev, be->channel, NULL, NULL);
+	(void)mbox_set_enabled(be->rx_dev, be->channel, false);
+	(void)mbox_register_callback(be->rx_dev, be->channel, NULL, NULL);
 	_mbox_be_free(be);
 	state->be_data = NULL;
 #else

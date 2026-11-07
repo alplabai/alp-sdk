@@ -702,7 +702,7 @@ Once §6's runbook passes:
   PHY-reset-release.
 
 More patterns in [`docs/troubleshooting.md`](troubleshooting.md);
-ask on [community.alplab.ai](https://community.alplab.ai/) for
+open a [GitHub issue](https://github.com/alplabai/alp-sdk/issues) for
 anything not covered here.
 
 ## See also

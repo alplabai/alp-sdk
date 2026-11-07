@@ -1652,6 +1652,7 @@ ZTEST(alp_update_log, test_alif_se_build_entry_rejects_invalid_hash)
 alp_status_t
 alp_ulog_sw_tier_test_corrupt_persisted_entry(uint64_t seq, size_t offset, uint8_t xor_mask);
 alp_status_t alp_ulog_sw_tier_test_delete_persisted_entry(uint64_t seq);
+void         alp_ulog_sw_tier_test_fail_mount(bool fail);
 
 static void append_three_persisted_entries(void)
 {
@@ -1664,6 +1665,37 @@ static void append_three_persisted_entries(void)
 		zassert_equal(alp_update_log_append(log, &e), ALP_OK);
 	}
 	alp_update_log_close(log);
+}
+
+/* A failed NVS mount must surface as an error and recover on retry; it must
+ * never demote a persistent log to the RAM store (entries would be lost on
+ * reboot while append() reported ALP_OK). */
+ZTEST(alp_update_log, test_persist_mount_failure_is_reported_then_recovers)
+{
+	alp_ulog_sw_tier_test_reset(true); /* pristine store */
+
+	/* With the mount failing, a fresh open() must report the error (NULL). */
+	alp_ulog_sw_tier_test_fail_mount(true);
+	alp_update_log_t *log = alp_update_log_open();
+	if (log != NULL) {
+		/* Already-open singleton: appends must still fail, not hit RAM. */
+		alp_update_log_entry_t e = mk_entry(100, "1.0.0", ALP_UPDATE_STATUS_CONFIRMED);
+		zassert_not_equal(alp_update_log_append(log, &e), ALP_OK);
+		alp_update_log_close(log);
+	}
+
+	alp_ulog_sw_tier_test_fail_mount(false); /* mount now succeeds */
+	append_three_persisted_entries();
+
+	alp_ulog_sw_tier_test_reset(false); /* "reboot": keep flash only */
+	log = alp_update_log_open();
+	zassert_not_null(log);
+	uint64_t n = 0;
+	zassert_equal(alp_update_log_count(log, &n), ALP_OK);
+	zassert_equal(
+	    n, 3, "entries lost after a failed-then-recovered mount (got %llu)", (unsigned long long)n);
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(true);
 }
 
 ZTEST(alp_update_log, test_persist_entries_survive_reinit)
