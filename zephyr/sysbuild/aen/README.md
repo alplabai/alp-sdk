@@ -196,6 +196,13 @@ security and is never for production.  Your own key comes from
 `bash keys/generate_dev_key.sh`, and only an MCUboot re-provisioned with
 it will accept images signed by it.
 
+The key reaches the build only as the absolute
+`-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE` that the orchestrator (and tan)
+pass. Without it the build does **not** fail: Zephyr's sysbuild signs
+with MCUboot's bundled public `root-ec-p256.pem`, and the factory
+MCUboot rejects that image at boot. A hand-run `west build --sysbuild`
+must pass the -D itself (see the build line above).
+
 For production, regenerate the key from a secure source and
 hand the public half over to the bootloader build via a
 `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` override.  The private half
