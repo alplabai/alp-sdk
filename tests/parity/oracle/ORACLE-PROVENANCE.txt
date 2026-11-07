@@ -79,3 +79,16 @@ no longer declares `boot.signing`, so the planner's default key applies. This
 corrects a source-level path bug, not a comparator allowance, same class as
 alp-sdk#862 above. These two args are the only fields touched; every other
 value in this fixture is untouched, still frozen at 97ad481b.
+
+Hand-reviewed field correction (build-plan `blocked-ipc-carveout`
+warning): `multicore_rpmsg-aen.build-plan.json` `warnings` was extended with
+two `blocked-ipc-carveout` entries (coreId `a32_cluster` and `m55_hp`) next
+to the existing `yocto-machine-unbuildable` one. `E1M-AEN801`'s only
+memory_map region matching the `alp_default_rpmsg` ipc entry is `mram_main`,
+which is flash-class and so ineligible as an IPC carve-out; the carve-out is
+`blocked` and `alp/system_ipc.h` carries zero stubs for it. The planner now
+surfaces that in `warnings` (one per endpoint core), because the slice
+builds stay green while the channel fails at runtime. The fixture's
+`warnings` is the only field touched; `slices`, `command`, `env` and every
+other value are untouched, still frozen at 97ad481b. Content is covered
+byte-for-byte by `tests/fixtures/emit-snapshots/rpmsg-aen.build-plan.snap`.

@@ -251,8 +251,11 @@ The validator (P2.3 rule 1) requires:
 
 When `provider: mender` and at least one Zephyr slice is present,
 the west-libraries emitter (`--emit west-libraries`) auto-adds a
-`mender-mcu-client` entry to the `name-allowlist:` so the customer's
-`west update` pulls the module without hand-edits.  Hawkbit and
+top-level `mender-mcu-client` west project (name / url / revision / path,
+the `mendersoftware/mender-mcu` client) so the customer's `west update`
+pulls the module without hand-edits.  It is a project entry, not a
+`name-allowlist:` entry: the allowlist only filters projects Zephyr's own
+west.yml defines, and Mender's client is not one of them.  Hawkbit and
 MCUmgr are upstream Zephyr modules so they don't need a west.yml
 entry.
 
@@ -287,6 +290,13 @@ legacy layout.  Every pin is placed **before** the bump allocator
 runs, so the auto-allocated siblings step around it whatever its
 name-sort position -- `pinned_low` above sorts after `app_data` and
 `mcuboot_scratch` and still gets offset 0.
+
+Auto-placed offsets are stable only while the set of auto-placed names
+is unchanged: adding, renaming or removing one re-sorts the list and
+moves every later-sorting auto-placed partition, so an OTA'd image would
+mount existing littlefs/NVS data at the wrong address.  For a product
+that ships, pin `offset_kib:` on every partition whose data must
+survive an update; a pinned offset never moves when siblings change.
 
 `flash_device:` resolves against the SoM preset in this order:
 
@@ -494,7 +504,9 @@ PSA Crypto runs entirely non-secure (mbedTLS-only) and the overlay is
 not written.
 
 `attestation_root: optiga_trust_m` only validates when the SoM preset
-physically ships OPTIGA Trust M (AEN family + V2N family today); the
+physically ships OPTIGA Trust M with the part fitted (V2N family today;
+every E1M-AEN SKU shares one SoM PCB on which OPTIGA IC1 is DNP, so the
+loader refuses it there with `assembled: false`); the
 emitter additionally surfaces `CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y`
 and a comment pointing at the `src/security/optiga_trust_m_bridge.c`
 PSA <-> OPTIGA bridge driver.

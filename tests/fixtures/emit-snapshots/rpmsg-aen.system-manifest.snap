@@ -132,6 +132,16 @@ memory:
   - a32_cluster
   - m55_he
   - m55_hp
+- name: sram_ipc
+  source: som_preset
+  kind: unclassified
+  status: ok
+  base: 37617664
+  size_bytes: 65536
+  write_authority: customer_runtime
+  accessible_from:
+  - m55_he
+  - m55_hp
 
 # boot_order is empty -- add a `boot_order:` list to metadata/e1m_modules/E1M-AEN801.yaml when the
 # bring-up order is finalised.

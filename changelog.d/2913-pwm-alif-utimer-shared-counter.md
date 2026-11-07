@@ -1,0 +1,3 @@
+### Fixed -- Alif UTIMER PWM: the two drivers of one block no longer disturb each other (#2913)
+
+**`pwm_alif_utimer.c` keeps the shared counter running.** Driver A and B of a UTIMER share one counter and one reload register, but every `pwm_set_cycles()` stopped and re-zeroed that counter, so a duty change on one channel glitched its sibling, and a 0% duty request left the counter stopped and froze the sibling. A channel update now writes only that channel's compare and output control; the counter is stopped only when the last active channel goes to 0%, and the period is reprogrammed only by the sole active channel. A request whose period differs from an active sibling's returns `-EINVAL` and writes nothing. Bench-unverified (E8).

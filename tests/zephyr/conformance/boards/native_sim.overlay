@@ -20,6 +20,7 @@
         alp-spi0     = &spi0_emul;
         alp-uart0    = &uart0;
         alp-adc0     = &alp_adc_in0;
+        alp-adc1     = &alp_adc_in1;
         alp-counter0 = &counter0;
     };
 
@@ -31,6 +32,14 @@
     alp_adc_in0: alp-adc-in0 {
         compatible = "alp,adc-input";
         io-channels = <&adc0 0>;
+    };
+
+    /* 16-bit single-ended channel: drives the zephyr_drv sign-handling
+     * regression in src/behavior_adc_emul.c (a 0xC000+ sample must not
+     * be sign-extended). */
+    alp_adc_in1: alp-adc-in1 {
+        compatible = "alp,adc-input";
+        io-channels = <&adc0 1>;
     };
 
     soc {
@@ -86,5 +95,13 @@
         zephyr,reference = "ADC_REF_INTERNAL";
         zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
         zephyr,resolution = <12>;
+    };
+
+    channel@1 {
+        reg = <1>;
+        zephyr,gain = "ADC_GAIN_1";
+        zephyr,reference = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+        zephyr,resolution = <16>;
     };
 };

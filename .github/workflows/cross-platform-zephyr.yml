@@ -327,7 +327,7 @@ jobs:
         timeout-minutes: 5
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         timeout-minutes: 5
         with:
           python-version-file: .python-version
@@ -549,7 +549,7 @@ jobs:
         timeout-minutes: 5
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         timeout-minutes: 5
         with:
           python-version-file: .python-version
@@ -632,7 +632,7 @@ jobs:
               # the pull_request/push case below, this skip does not depend
               # on which paths changed.
               if [ "${EVENT_NAME}" = "merge_group" ]; then
-                echo "PASS: python-smoke intentionally skipped on merge_group -- already graded on this content via pull_request before the entry was enqueued"
+                echo "PASS: python-smoke intentionally skipped on merge_group -- NOT re-run on the rebased queue content; only its pull_request run (against the PR head) graded this change"
                 exit 0
               fi
               if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ]; } \

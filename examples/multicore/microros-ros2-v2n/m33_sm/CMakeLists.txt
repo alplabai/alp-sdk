@@ -69,9 +69,9 @@ project(microros_ros2_v2n_m33_sm LANGUAGES C)
 # Two libmetal regions: the rpmsg buffer pool + the resource table.
 zephyr_compile_definitions(METAL_MAX_DEVICE_REGIONS=2)
 
-# Reuse rpmsg-v2n's bench-proven vendor-shaped resource table verbatim
-# rather than forking it; the board's devicetree is the same.
-set(_rpmsg_v2n_src ${CMAKE_CURRENT_SOURCE_DIR}/../../rpmsg-v2n/m33_sm/src)
+# Reuse the SDK's bench-proven vendor-shaped resource table verbatim rather
+# than forking it; the board's devicetree is the same.
+set(_rpmsg_v2n_src ${ALP_SDK_ROOT}/zephyr/drivers/ipc)
 
 target_include_directories(app PRIVATE ${LIBMETAL_INCLUDE_DIR} ${OPENAMP_INCLUDE_DIR}
                             ${PLATFORM_DIR} src ${_rpmsg_v2n_src})

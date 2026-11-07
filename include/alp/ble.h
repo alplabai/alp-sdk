@@ -86,8 +86,11 @@ alp_ble_t *alp_ble_open(void);
 /**
  * @brief Release the host (last close shuts the controller down).  NULL safe.
  *
- * Idempotent: a second close on an already-closed handle is a safe
- * no-op.  Safe to call from @p ble's own @ref alp_ble_scan_cb_t (a
+ * The handle is shared and reference-counted: make exactly one
+ * alp_ble_close() per alp_ble_open(); the last close shuts the
+ * controller down.  An extra close while other references are live
+ * drops another module's reference, so do not close twice.  A close
+ * after the count has already reached 0 is a safe no-op.  Safe to call from @p ble's own @ref alp_ble_scan_cb_t (a
  * self-close -- see that typedef's doc comment, issue #756) and safe
  * to call concurrently from a different thread than the one that
  * called @ref alp_ble_scan_start.
