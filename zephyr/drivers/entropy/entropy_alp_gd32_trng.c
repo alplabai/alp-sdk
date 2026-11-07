@@ -34,16 +34,29 @@
 
 static int bridge_read(void *ctx, uint8_t *buf, size_t len)
 {
-	gd32g553_t *gd = NULL;
-
 	ARG_UNUSED(ctx);
-	if (alp_z_v2n_supervisor_acquire(&gd) != ALP_OK) {
-		return -EIO;
-	}
-	alp_status_t s = gd32g553_trng_read(gd, buf, len);
 
-	alp_z_v2n_supervisor_release();
-	return s == ALP_OK ? 0 : -EIO;
+	/* docs/gd32-bridge-protocol.md section 3.11: a tripped TRNG self-check
+	 * answers exactly one STATUS_IO (ALP_ERR_IO) while the firmware re-seeds;
+	 * the next TRNG_READ succeeds.  Retry once on IO before calling it down.
+	 * gd32g553_trng_read() itself already rides out STATUS_BUSY. */
+	for (int attempt = 0; attempt < 2; attempt++) {
+		gd32g553_t *gd = NULL;
+
+		if (alp_z_v2n_supervisor_acquire(&gd) != ALP_OK) {
+			return -EIO;
+		}
+		alp_status_t s = gd32g553_trng_read(gd, buf, len);
+
+		alp_z_v2n_supervisor_release();
+		if (s == ALP_OK) {
+			return 0;
+		}
+		if (s != ALP_ERR_IO) {
+			break;
+		}
+	}
+	return -EIO;
 }
 
 static int entropy_gd32_get_entropy(const struct device *dev, uint8_t *buffer, uint16_t length)
