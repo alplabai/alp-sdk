@@ -74,9 +74,11 @@
  *                         /INT -> P15_0 path (#2811).  A carrier / CC3501E GPIO18 (E1.I3,
  *                         open-drain) pulling it low latches EVF (STATUS 0Eh bit 1); the
  *                         backend sets EIE (CONTROL_2 10h bit 2) for the cycle and leaves it
- *                         off again at the wake decode.  Event Control (13h) is NOT written:
- *                         the power-on value (0x00, bench TBD: confirm it reads 0x00 and
- *                         that this is the edge / unfiltered setting wanted) is relied on.
+ *                         off again at the wake decode.  Event Control (13h) is written
+ *                         active low, level detect with the 3.9 ms filter (EHL 0, ET 01,
+ *                         TSS 0): a request already held low when the sleep starts re-latches
+ *                         EVF and ends the sleep at once instead of being missed; a pulse
+ *                         under ~4 ms may go unseen.
  *                         Reported as its own wake_source, never as ALP_POWER_WAKE_RTC.
  *   ALP_POWER_WAKE_TIMER  the LPTIMER (the `alp,power-wake-timer` chosen node,
  *                         WE_LPTIMER0) for wake_after_ms < 1000.  Its 32 kHz source
@@ -1000,8 +1002,8 @@ static void disarm(const armed_t *a)
 	}
 }
 
-/* Event Control (13h) is the one RV-3028 value the EVI wake relies on and this SDK never
- * writes (power-on 0x00): print it the first time EVI is armed so a bench run can verify it. */
+/* Event Control (13h) is written by the EVI arm (EHL 0, ET 01, TSS 0): print what the part
+ * holds the first time EVI is armed so a bench run can verify it reads 0x10 (+ TSOW). */
 static void evi_event_ctrl_print_once(void)
 {
 	static bool done;
