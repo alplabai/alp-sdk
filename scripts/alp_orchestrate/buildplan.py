@@ -760,6 +760,19 @@ def emit_build_plan(
     # byte-identical no matter where `--emit build-plan` is invoked from
     # (issue #596).
     base_dir = Path(board_yaml).resolve().parent
+    # An absolute build root under neither the project nor the SDK cannot
+    # be tokenised, so every slice command would null and a consumer
+    # honouring `nullCommand: skip` would report a green build that built
+    # nothing (issue #2953).  Refuse it up front.
+    # `.root`, not is_absolute(): on Windows a drive-less '\build' has a
+    # root but no drive, so is_absolute() is False although it is not
+    # relative to the project either.
+    if build_root.root and not any(
+            build_root.is_relative_to(r) for r in (base_dir, REPO)):
+        raise OrchestratorError(
+            f"--build-root '{build_root}' is outside both the project "
+            f"({base_dir}) and the SDK checkout ({REPO}); use a path "
+            f"under one of them (or a relative path)")
     slices_out: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
 

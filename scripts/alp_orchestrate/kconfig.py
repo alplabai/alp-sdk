@@ -1676,14 +1676,14 @@ def _emit_storage(project: "BoardProject") -> list[str]:
         # comment only.  Modern Zephyr does NOT define a per-partition
         # CONFIG_FS_LITTLEFS_PARTITION_<NAME> Kconfig -- the partition
         # gets matched via the DT `fixed-partitions` node + the
-        # chosen `zephyr,storage-partition` / FIXED_PARTITION_ID()
+        # chosen `zephyr,storage-partition` / PARTITION_ID()
         # macro at runtime.  Emitting a Kconfig stem trips Zephyr's
         # "assignment to undefined symbol" warning + aborts the build.
         for p in ok_partitions:
             if p.fs == "littlefs":
                 lines.append(
                     f"# partition[{p.name}] -> mount at runtime via "
-                    f"FIXED_PARTITION_ID({p.name}_partition)")
+                    f"PARTITION_ID({p.name}_partition)")
         blocked = [p for p in partitions if p.status == "blocked"]
         for p in blocked:
             lines.append(f"# BLOCKED storage[{p.name}]: "
