@@ -1,0 +1,30 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * An emulated GPIO controller plus a 4-entry alp,pin-array, so alp_gpio_open()
+ * resolves a real pin on native_sim.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	gpio_emul0: gpio_emul0 {
+		compatible = "zephyr,gpio-emul";
+		gpio-controller;
+		#gpio-cells = <2>;
+		rising-edge;
+		falling-edge;
+		high-level;
+		low-level;
+		ngpios = <8>;
+	};
+
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&gpio_emul0 0 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 1 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 2 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 3 GPIO_ACTIVE_HIGH>;
+	};
+};

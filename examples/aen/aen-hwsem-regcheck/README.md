@@ -52,7 +52,7 @@ That mirrors the dual-core gap already documented for the MHUv2
 doorbell (a real HP-core sender + active SESS pairs are required, J-Link
 debug-AP writes from one side do not arbitrate the other). The
 single-core smoke here is the buildable, single-image proof; the
-dual-core arbitration test is **TBD** (needs the dual-core boot).
+dual-core arbitration test is not yet written; `aen-dualcore-master` is the dual-core boot vehicle it would build on.
 
 ## Grounded facts (every concrete value cited)
 
@@ -89,7 +89,7 @@ wiring `alp_hwsem_*` onto it (cross-core) is a follow-on.
 
 ## Build
 
-Standalone Zephyr app (no `alp_project.py` board.yaml flow):
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout:
 
 ```sh
 export ZEPHYR_BASE=<zephyr-base>
@@ -100,6 +100,8 @@ west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
 
 The board overlay (`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`) auto-applies
 by the fully-qualified board name -- no `DTC_OVERLAY_FILE` needed.
+
+For E1M-AEN803 use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`; the board overlay `boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay` auto-applies the same way.
 
 ## Bench run (human-operated; not done by the SDK)
 

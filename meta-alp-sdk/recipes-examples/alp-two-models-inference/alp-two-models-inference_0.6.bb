@@ -20,7 +20,9 @@ DEPENDS = "alp-sdk"
 
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=dev"
 SRCREV  = "${AUTOREV}"
-PV      = "0.6.0"
+require recipes-core/alp-sdk/alp-sdk-version.inc
+# Links the per-machine libalp_sdk.so, so must not be shared across machines (#2850).
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 S = "${WORKDIR}/git/examples/v2n/v2n-two-models"
 

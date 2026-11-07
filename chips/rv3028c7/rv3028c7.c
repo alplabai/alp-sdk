@@ -935,16 +935,15 @@ alp_status_t rv3028c7_wake_service(rv3028c7_t *ctx, uint8_t *flags)
 
 	/* UF latches every second whether or not UIE is set (p.22, Sec.
      * 4.9), and TF/AF latch independently of TIE/AIE, so only a source
-     * whose interrupt enable is on is reported as a wake cause.  TF, AF
-     * and UF are cleared either way; EVF only with EIE on (then it is the
-     * wake cause, and it holds INT low until cleared, p.24). */
-	const uint8_t evf = (ctrl2 & RV3028_CTRL2_EIE) ? (status & RV3028_STATUS_EVF) : 0u;
-	const uint8_t latched =
-	    (uint8_t)((status & (RV3028_STATUS_TF | RV3028_STATUS_AF | RV3028_STATUS_UF)) | evf);
-	const uint8_t enabled = (uint8_t)(((ctrl2 & RV3028_CTRL2_EIE) ? RV3028_STATUS_EVF : 0) |
-	                                  ((ctrl2 & RV3028_CTRL2_TIE) ? RV3028_STATUS_TF : 0) |
+     * whose interrupt enable is on is reported as a wake cause.  All
+     * three latched flags are still cleared. */
+	const uint8_t enabled = (uint8_t)(((ctrl2 & RV3028_CTRL2_TIE) ? RV3028_STATUS_TF : 0) |
 	                                  ((ctrl2 & RV3028_CTRL2_AIE) ? RV3028_STATUS_AF : 0) |
-	                                  ((ctrl2 & RV3028_CTRL2_UIE) ? RV3028_STATUS_UF : 0));
+	                                  ((ctrl2 & RV3028_CTRL2_UIE) ? RV3028_STATUS_UF : 0) |
+	                                  ((ctrl2 & RV3028_CTRL2_EIE) ? RV3028_STATUS_EVF : 0));
+	/* EVF is the EVI wake (#2811): taken and cleared only with EIE on, else left alone. */
+	const uint8_t latched = status & (RV3028_STATUS_TF | RV3028_STATUS_AF | RV3028_STATUS_UF |
+	                                  (enabled & RV3028_STATUS_EVF));
 	if (flags != NULL) *flags = latched & enabled;
 	if (latched == 0) return ALP_OK;
 	return rv3028_status_clear(ctx, latched);

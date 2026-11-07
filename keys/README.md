@@ -19,6 +19,7 @@ signing.  Production keys never live in git.**
 | `mcuboot_dev_ecdsa_p256.pem`      | ECDSA-P256 own key (private) | NO (`.gitignore`'d) | Optional: your own development key, from `generate_dev_key.sh`. Only a module whose MCUboot you re-provisioned with this key will accept images signed by it. |
 | `mcuboot_prod_ecdsa_p256.pub.pem` | ECDSA-P256 prod pub  | YES (when it lands) | Public half only.  Compiled into the bootloader for verification.  Production private key never leaves OPTIGA Trust M. |
 | `alp_release_signing_ecdsa_p256.pub.pem` | ECDSA-P256 release pub | YES | Public half of the **SoM-release** signing key — a *separate* concern from MCUboot (it signs release bundles / provisioning records, not firmware images).  Used by `scripts/check_som_bundle.py` to verify bundle provenance.  See [`docs/som-release-signing.md`](../docs/som-release-signing.md).  The private half lives in alp-sdk-internal (pilot) / a hardware signer (production), never here. |
+| `alp_devkit_feed_signing.pub.asc` | OpenPGP RSA-3072 feed pub | YES | Public half of the key that signs the opkg **dev-kit package feed** (`Packages.sig`); baked into dev-kit images so `opkg` verifies the feed. Fingerprint `2B7807E20B75B471BF88FD7AC9AB032782D3143B`. See [`docs/build-yocto-v2n.md`](../docs/build-yocto-v2n.md), "Dev-kit package feed". The private half lives only in alp-sdk-internal and the internal runner secret store, never here. |
 
 ## Why a development key is committed
 

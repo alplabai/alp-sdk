@@ -15,7 +15,7 @@ the SDK consumes from the vendor, and what has not run on silicon.
 | EGL / GLES 3 / gbm userspace (`libEGL`, `libGLESv2`, `egl.pc`, `glesv2.pc`) | the same layer's `mali-library_1.3.0` (`virtual/egl`, `virtual/libgles2`, `virtual/libgbm`) | nothing -- consumed from the sysroot |
 | Distro/image switches (`opengles` distro feature, `PREFERRED_PROVIDER_*`, `IMAGE_INSTALL:append:mali-family = " libegl libgles2"`) | the same layer's `include/rz-graphics.inc` / `mali-graphics.inc`, set when the layer is loaded | nothing -- the reference wiring is reused, not copied |
 | Compositor | `weston` + `weston-init` (poky / meta-rz-distro) | `packagegroup-alp-display` (`IMAGE_FEATURES += "alp-display"`) |
-| Portable 2D API on the GPU | **this change** | `src/backends/gpu2d/yocto_gles.c` (ADR 0017 Tier-1.5), `PACKAGECONFIG[gles]` in `alp-sdk_0.6.bb` |
+| Portable 2D API on the GPU | **this change** | `src/backends/gpu2d/yocto_gles.c` (ADR 0017 Tier-1.5), `PACKAGECONFIG[gles]` in `alp-sdk_git.bb` |
 | Capability fact "this SoC has a GPU" | `metadata/socs/renesas/rzv2n/n44.json` `variants[].optional_features.gpu_mali_g31` (per die; four of the eight RZ/V2N dies are fused without the GPU) | the SoM-level capability resolver (`resolve_capabilities`) derives `gpu2d` from it; the SoC-level `ALP_SOC_GPU2D` / `ALP_CAP_GPU2D` stay 0 for n44 (the M33/Zephyr side has no GPU) |
 
 Vulkan is not supported by the Renesas layer (`DISTRO_FEATURES:remove =

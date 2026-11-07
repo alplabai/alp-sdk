@@ -35,6 +35,7 @@
 
 #include <alif/ensemble/ae822fa0e5597ls0.dtsi>
 #include <alif/ensemble/common/ensemble_rtss_hp.dtsi>
+#include <alif/ensemble_rtss_hp_wdog.dtsi>
 #include <alif/ensemble_e8_peripherals.dtsi>
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/i2c/i2c.h>
@@ -434,6 +435,18 @@
 			alp,restore = "pin_release";
 		};
 	};
+};
+
+/*
+ * GPIO ports carrying a SoM power-domain pad (the SoC peripherals dtsi leaves
+ * them disabled).  Without them the SoM power layer cannot drive those pads.
+ */
+&gpio5 {
+	status = "okay";
+};
+
+&gpio11 {
+	status = "okay";
 };
 
 /* Arm Ethos-U NPU: enable the ethosu85 node declared in the SoC peripherals dtsi (see ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN). */

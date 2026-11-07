@@ -5,7 +5,9 @@ Generate include/alp/soc_caps.h from metadata/socs/**/*.json.
 
 Each SoC's capability macros are gated by CONFIG_ALP_SOC_<TOKEN>.
 Apps select the active SoC via Kconfig (`CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y`
-or similar); the SDK's `alp_*_open` functions consult the matching
+or similar) on Zephyr, or via `-DALP_SOC=ALP_SOC_<TOKEN>` on plain CMake
+(baremetal/Yocto; the top-level CMakeLists.txt turns it into
+`CONFIG_ALP_SOC_<TOKEN>=1`); the SDK's `alp_*_open` functions consult the matching
 `ALP_SOC_*` macros to reject configurations that exceed the SoC's
 documented hardware caps.
 
@@ -508,7 +510,8 @@ def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
         " * by scripts/gen_soc_caps.py.  DO NOT EDIT BY HAND — regenerate.",
         " *",
         " * Each SoC's capability macros are gated by CONFIG_ALP_SOC_{TOKEN}.",
-        " * Apps select the active SoC via Kconfig.  When no SoC is",
+        " * Apps select the active SoC via Kconfig (Zephyr) or -DALP_SOC (plain",
+        " * CMake; the build plan emits it per SoM).  When no SoC is",
         " * selected the macros default to a permissive UINT16_MAX so",
         " * capability checks accept any config — apps that want runtime",
         " * validation must select a specific SoC.",

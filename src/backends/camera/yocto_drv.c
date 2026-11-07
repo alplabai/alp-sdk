@@ -58,7 +58,8 @@
  *      Bench-verified on E1M-V2M103 with an IMX296LQ colour sensor on CAM0:
  *      RAW10 (SBGGR10_1X10 -> CR10) data matches v4l2-ctl, 30.00 fps is
  *      delivered at a 30 fps request, and the sensor's VBLANK is restored on
- *      close.  A 60 fps request tops out near 40 fps (#2792).  The OV9281
+ *      close.  A 60 fps request topped out near 40 fps before the NEON unpack
+ *      (#2792); the post-NEON rate is NOT yet bench-verified.  The OV9281
  *      Y10 -> CR10 path was bench-proven earlier.  NOT bench-verified: the
  *      RAW8 mapping (k_raw8, Bayer8 -> V4L2_PIX_FMT_S*8 may need a
  *      CRU-specific fourcc; a mismatch is a loud ALP_ERR_INVAL from the S_FMT
@@ -98,6 +99,7 @@
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
 
+#include "cam_cr10_unpack.h"
 #include "camera_ops.h"
 #include "common/alp_errno.h"
 
@@ -105,6 +107,9 @@
 #define CAM_MAX_CHAIN 8u
 #define CAM_MAX_CODES 32u
 #define CAM_MAX_MEDIA 16
+
+/* rows bounced from the uncached mapping per copy phase (see cam_cr10_unpack_mapped) */
+#define CAM_CR10_BOUNCE_ROWS 4u
 
 /* RZ CRU 10-bit raw, 64-bit packed.  Newer uapi headers name it
  * V4L2_PIX_FMT_RAW_CRU10; the fourcc is the stable part. */
@@ -151,7 +156,7 @@ typedef struct cam {
 	bool     streaming;
 	bool     got_frame;
 
-	/* cached bounce row for the uncached V4L2 mapping (see cam_cr10_unpack_mapped) */
+	/* cached bounce rows for the uncached V4L2 mapping (see cam_cr10_unpack_mapped) */
 	uint8_t *scratch;
 
 	/* sensor VBLANK before our fps request, restored on close */
@@ -212,39 +217,6 @@ static void cam_munmap(void *p, size_t len)
 /* CR10 unpack                                                         */
 /* ------------------------------------------------------------------ */
 
-/** Little-endian 64-bit load from a 8-byte-aligned address (rows are 8-aligned). */
-static inline uint64_t cam_ld64le(const uint8_t *p)
-{
-	uint64_t w;
-	memcpy(&w, p, sizeof(w));
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-	w = __builtin_bswap64(w);
-#endif
-	return w;
-}
-
-/** Unpack one row of @p w pixels; @p row must be 8-byte aligned. */
-static void cam_cr10_unpack_row(const uint8_t *row,
-                                uint32_t       w,
-                                uint8_t       *dst,
-                                unsigned       out_bytes,
-                                unsigned       shift)
-{
-	for (uint32_t x = 0; x < w;) {
-		uint64_t word = cam_ld64le(row + (size_t)(x / 6u) * 8u);
-		/* one 64-bit word carries up to six pixels */
-		for (unsigned k = 0; k < 6u && x < w; ++k, ++x) {
-			uint32_t v = (uint32_t)((word >> (k * 10u)) & 0x3FFu) >> shift;
-			if (out_bytes == 1u) {
-				*dst++ = (uint8_t)v;
-			} else {
-				*dst++ = (uint8_t)(v & 0xFFu);
-				*dst++ = (uint8_t)(v >> 8);
-			}
-		}
-	}
-}
-
 /**
  * @brief Unpack straight from the V4L2 mmap buffer.
  *
@@ -252,8 +224,13 @@ static void cam_cr10_unpack_row(const uint8_t *row,
  * is a ~100 ns bus read: byte loads took ~345 ms/frame at 1456x1088, 8-byte
  * loads would still be ~40 ms.  glibc memcpy reads it with 16-32 byte loads,
  * so each row's ceil(w/6)*8 data bytes (the stride padding is never touched)
- * are bounced into the cached @p scratch row and unpacked from there.  Ceiling:
- * one extra cached copy of ~2 MB per frame; fine until a sensor outgrows it.
+ * are bounced into the cached @p scratch and unpacked from there with NEON
+ * (cam_cr10_unpack.h).  The bounce holds CAM_CR10_BOUNCE_ROWS rows so the
+ * copy phase issues back-to-back uncached reads (and prefetches the next
+ * rows) before the unpack phase runs on L1-resident data.  A cached mapping
+ * (V4L2_MEMORY_FLAG_NON_COHERENT) was not adopted: it needs the CRU queue to
+ * allow cache hints, which is unverified on silicon.  Ceiling: one extra
+ * cached copy of ~2 MB per frame; fine until a sensor outgrows it.
  */
 static void cam_cr10_unpack_mapped(const uint8_t *src,
                                    uint32_t       stride,
@@ -265,9 +242,19 @@ static void cam_cr10_unpack_mapped(const uint8_t *src,
                                    uint8_t       *scratch)
 {
 	size_t row_bytes = (size_t)((w + 5u) / 6u) * 8u;
-	for (uint32_t y = 0; y < h; ++y) {
-		memcpy(scratch, src + (size_t)y * stride, row_bytes);
-		cam_cr10_unpack_row(scratch, w, dst + (size_t)y * w * out_bytes, out_bytes, shift);
+	for (uint32_t y0 = 0; y0 < h; y0 += CAM_CR10_BOUNCE_ROWS) {
+		uint32_t n = h - y0 < CAM_CR10_BOUNCE_ROWS ? h - y0 : CAM_CR10_BOUNCE_ROWS;
+		if (y0 + n < h) __builtin_prefetch(src + (size_t)(y0 + n) * stride);
+		for (uint32_t r = 0; r < n; ++r) {
+			memcpy(scratch + (size_t)r * row_bytes, src + (size_t)(y0 + r) * stride, row_bytes);
+		}
+		for (uint32_t r = 0; r < n; ++r) {
+			cam_cr10_unpack_row(scratch + (size_t)r * row_bytes,
+			                    w,
+			                    dst + (size_t)(y0 + r) * w * out_bytes,
+			                    out_bytes,
+			                    shift);
+		}
 	}
 }
 
@@ -556,7 +543,7 @@ static alp_status_t cam_alloc_buffers(cam_t *c)
 	if (rb.count > CAM_NBUF) rb.count = CAM_NBUF;
 
 	if (c->unpack) {
-		c->scratch = malloc((size_t)((c->width + 5u) / 6u) * 8u);
+		c->scratch = malloc((size_t)((c->width + 5u) / 6u) * 8u * CAM_CR10_BOUNCE_ROWS);
 		if (c->scratch == NULL) return ALP_ERR_NOMEM;
 	}
 	for (unsigned i = 0; i < rb.count; ++i) {

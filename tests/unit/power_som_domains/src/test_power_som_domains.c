@@ -922,6 +922,7 @@ ZTEST(power_som_domains, test_nor_write_in_flight_blocks_the_quiesce)
 #define RTC_SF_PORF      0x01u
 #define RTC_C2_TIE       0x10u
 #define RTC_C2_AIE       0x08u
+#define RTC_C2_UIE_BIT   0x20u
 
 ZTEST(power_som_domains, test_rtc_wake_service_reports_enabled_flags_and_clears)
 {
@@ -961,68 +962,68 @@ ZTEST(power_som_domains, test_rtc_wake_service_reports_enabled_flags_and_clears)
 #define RTC_SF_EVF 0x02u
 #define RTC_C2_EIE 0x04u
 
-ZTEST(power_som_domains, test_rtc_event_service_reports_evf_and_disarms)
+ZTEST(power_som_domains, test_rtc_evi_arm_clears_stale_evf_before_setting_eie)
 {
-	bool fired = true;
-
-	/* Armed and latched: reported; EVF written 0 (the constant mask keeps every other flag) and
-	 * EIE cleared, so a later edge cannot hold /INT low into a sleep that arms something else. */
+	/* Stale EVF, EIE off: EVF cleared (constant mask, 0 only for EVF), then EIE set. */
 	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF | RTC_SF_PORF;
-	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_EIE | RTC_C2_TIE;
-	zassert_ok(alp_som_power_rtc_event_service(&fired));
-	zassert_true(fired);
-	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~RTC_SF_EVF, "constant-mask ack");
-	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], RTC_C2_TIE, "EIE cleared, TIE kept");
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_UIE_BIT;
+	rtc_regs()[0x13]             = 0x73u; /* EHL, ET = 11, TSOW, TSS: all but TSOW replaced */
+	zassert_ok(alp_som_power_rtc_evi_arm());
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~RTC_SF_EVF);
+	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], RTC_C2_UIE_BIT | RTC_C2_EIE);
+	/* Event Control 13h: active low, level detect with the 3.9 ms filter (ET = 01), TSS 0;
+	 * TSOW (bit 1) is kept. */
+	zassert_equal(rtc_regs()[0x13], 0x10u | 0x02u);
 
-	/* Armed, nothing latched: not fired, but still disarmed. */
-	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_PORF;
-	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_EIE;
-	zassert_ok(alp_som_power_rtc_event_service(&fired));
-	zassert_false(fired);
-	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], 0u);
-
-	/* EIE off: an EVF is not ours and is left latched, nothing written. */
-	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF;
-	rtc_regs()[RTC_CONTROL2_REG] = 0u;
-	zassert_ok(alp_som_power_rtc_event_service(&fired));
-	zassert_false(fired);
+	/* EIE already on: nothing is touched, a latched EVF is the wake and survives. */
+	rtc_regs()[RTC_STATUS_REG] = RTC_SF_EVF;
+	zassert_ok(alp_som_power_rtc_evi_arm());
 	zassert_equal(rtc_regs()[RTC_STATUS_REG], RTC_SF_EVF);
-
-	zassert_equal(alp_som_power_rtc_event_service(NULL), ALP_ERR_INVAL);
+	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], RTC_C2_UIE_BIT | RTC_C2_EIE);
 }
 
-ZTEST(power_som_domains, test_rtc_flags_pending_counts_an_enabled_evf)
+ZTEST(power_som_domains, test_rtc_evi_arm_refuses_a_backup_switchover_time_stamp)
 {
-	bool pending = true;
+	/* TSE with TSS = 1: the time stamp belongs to the backup switchover; nothing is written. */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF;
+	rtc_regs()[RTC_CONTROL2_REG] = 0x80u;
+	rtc_regs()[0x13]             = 0x01u;
+	zassert_equal(alp_som_power_rtc_evi_arm(), ALP_ERR_BUSY);
+	zassert_equal(rtc_regs()[0x13], 0x01u);
+	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], 0x80u);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], RTC_SF_EVF);
+}
+
+ZTEST(power_som_domains, test_rtc_evi_disarm_clears_eie_and_evf)
+{
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF;
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_UIE_BIT | RTC_C2_EIE;
+	zassert_ok(alp_som_power_rtc_evi_disarm());
+	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], RTC_C2_UIE_BIT);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~RTC_SF_EVF);
+}
+
+ZTEST(power_som_domains, test_rtc_evf_is_a_wake_only_with_eie)
+{
+	uint8_t flags   = 0u;
+	bool    pending = false;
 
 	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF;
-	rtc_regs()[RTC_CONTROL2_REG] = 0u;
-	zassert_ok(alp_som_power_rtc_flags_pending(&pending));
-	zassert_false(pending, "EVF with EIE off drives nothing");
 	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_EIE;
 	zassert_ok(alp_som_power_rtc_flags_pending(&pending));
 	zassert_true(pending);
-}
+	zassert_ok(alp_som_power_rtc_wake_service(&flags));
+	zassert_equal(flags, RTC_SF_EVF);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~RTC_SF_EVF);
 
-ZTEST(power_som_domains, test_rtc_event_arm_needs_a_bound_chip_and_arms_the_low_level)
-{
-	zassert_false(alp_som_power_rtc_event_ready());
-	zassert_equal(alp_som_power_rtc_event_arm(), ALP_ERR_NOT_READY);
-	zassert_equal(alp_som_power_rtc_event_disarm(), ALP_ERR_NOT_READY);
-
-	rv3028c7_t ctx = { .bus = (alp_i2c_t *)&g_chip_regs, .initialised = true };
-
-	g_evi_arms = g_evi_disarms = 0u;
-	zassert_ok(alp_som_power_bind_rv3028(&ctx));
-	zassert_true(alp_som_power_rtc_event_ready());
-	zassert_ok(alp_som_power_rtc_event_arm());
-	zassert_equal(g_evi_arms, 1u);
-	zassert_equal(g_evi_active_high, 0, "MODULE_STBY idles high: the event is the low level");
-	zassert_equal(g_evi_filter,
-	              (int)RV3028C7_EVI_FILTER_3_9_MS,
-	              "level detection: a held-low request re-latches");
-	zassert_ok(alp_som_power_rtc_event_disarm());
-	zassert_equal(g_evi_disarms, 1u);
+	/* EVF without EIE: not a wake cause and left set (only the EVI wake acknowledges it). */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF;
+	rtc_regs()[RTC_CONTROL2_REG] = 0u;
+	zassert_ok(alp_som_power_rtc_flags_pending(&pending));
+	zassert_false(pending);
+	zassert_ok(alp_som_power_rtc_wake_service(&flags));
+	zassert_equal(flags, 0u);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], RTC_SF_EVF);
 }
 
 ZTEST(power_som_domains, test_rtc_int_armed_reads_control2)

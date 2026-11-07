@@ -68,7 +68,9 @@ upstream-Zephyr build path is **bench-TBD**:
 
 ## Build
 
-Standalone Zephyr app (no `alp_project.py` board.yaml flow):
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout.
+For E1M-AEN803 use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` and the matching
+`boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay`:
 
 ```sh
 export ZEPHYR_BASE=<zephyr-base>

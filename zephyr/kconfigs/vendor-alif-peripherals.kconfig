@@ -585,11 +585,14 @@ config SDHC_BUFFER_ALIGNMENT
 
 config SDHC_DESCRIPTOR_USE_SECTION
 	bool "Place the SDHC ADMA descriptor table in a named linker section"
+	# ALP-SDK DELTA (#2858): on Ensemble the ADMA engine cannot read the
+	# M55's DTCM (measured on HE via the 0x58800000 alias and on E4 HP),
+	# so the table must sit in SRAM0, never in .bss.
+	default y if SOC_FAMILY_ENSEMBLE
 	help
-	  Off by default: the descriptor table lives in normal .bss.  Turn
-	  this on only if a board names a real region in
-	  CONFIG_SDHC_DESCRIPTOR_SECTION (e.g. for DMA-coherency or
-	  performance reasons) -- applying the attribute with an empty section
+	  On by default on Ensemble, where the section is SRAM0 (the ADMA
+	  engine cannot reach DTCM .bss); off elsewhere, where the table
+	  lives in normal .bss.  Applying the attribute with an empty section
 	  name is a hard link error (an orphan section literally named "")
 	  under -Wl,--fatal-warnings, not a silent no-op.  Turning this on
 	  without also setting a non-empty section name is a BUILD_ASSERT
@@ -604,6 +607,7 @@ config SDHC_DESCRIPTOR_USE_SECTION
 config SDHC_DESCRIPTOR_SECTION
 	string "Linker section for SDHC DMA descriptors"
 	depends on SDHC_DESCRIPTOR_USE_SECTION
+	default "SRAM0" if SOC_FAMILY_ENSEMBLE
 	default ""
 
 config SDHC_DWC_SDMA
@@ -625,6 +629,46 @@ config SDHC_DWC_DMA_ADDR_TRANSLATE
 	  Pulls in the hal_alif soc_memory_map.h (needs itcm/dtcm `global_base`
 	  props absent from the alp-sdk E8 dtsi).  Leave disabled until a card is
 	  reachable and DMA is validated.
+
+config SDHC_DWC_BOUNCE_BUFFER
+	bool "Bounce data the DMA engine cannot reach through a driver buffer"
+	default y if SOC_FAMILY_ENSEMBLE
+	depends on SDHC_DWC_ADMA || SDHC_DWC_SDMA
+	help
+	  ALP-SDK DELTA (#2858), not upstream.  The SDHC's own ADMA2/SDMA
+	  master cannot reach the M55's ITCM or DTCM on Alif Ensemble -- not
+	  at the CPU-local address and not through the TCM global_base alias.
+	  Zephyr apps link .bss, stacks and the SD stack's card_buffer into
+	  DTCM, so without this every transfer moves garbage or times out.
+
+	  With this on, a request whose buffer lies in a TCM (either address)
+	  is copied through a per-instance buffer placed in
+	  CONFIG_SDHC_DWC_BOUNCE_BUFFER_SECTION.  Block reads and writes
+	  larger than the buffer are split into several commands.  Buffers
+	  already in system SRAM go straight to the DMA engine.  An SDIO
+	  CMD53 bigger than the buffer from a TCM buffer fails with -ENOMEM.
+
+config SDHC_DWC_BOUNCE_BUFFER_SIZE
+	int "Bounce buffer size in bytes"
+	depends on SDHC_DWC_BOUNCE_BUFFER
+	default 8192
+	help
+	  A multiple of 512.  Larger means fewer commands per big transfer.
+
+config SDHC_DWC_BOUNCE_BUFFER_SECTION
+	string "Linker section for the bounce buffer"
+	depends on SDHC_DWC_BOUNCE_BUFFER
+	default "SRAM0"
+	help
+	  Must name a zephyr,memory-region the SDHC master can reach.  The
+	  Ensemble SoC dtsi declares SRAM0 (0x02000000) as one.
+
+	  Each core's image links its own SRAM0 sections from the start of
+	  the region, so an SD app on one M55 and another SRAM0 user (NPU
+	  arena, video buffer pool) on the other core collide unless one of
+	  them moves its window (e.g. a smaller sram0 reg in that core's
+	  overlay).  Do not also set `chosen { zephyr,sram = &sram0; }`;
+	  the build refuses that combination.
 
 config SDHC_RSP_136_HAS_CRC
 	bool "Realign 136-bit R2 responses stored without their CRC byte"

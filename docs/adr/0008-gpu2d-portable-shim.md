@@ -71,7 +71,7 @@ Backends (as implemented per issue #24):
   (the SKUs whose SoC JSON sets `dave2d: true`) at priority 100,
   driven through the documented `d2_*` API of the proprietary
   Alif D/AVE 2D pack (build-time pull only).  Bench-unverified at
-  authoring time.  Backend selection is per-SoC-exclusive (no
+  authoring time (amended 2026-10-21: bench-verified, #916).  Backend selection is per-SoC-exclusive (no
   per-op fallback in the dispatcher), so blend modes the engine
   cannot express single-pass (ADDITIVE / MULTIPLY) are delegated
   to the software path by the backend itself, via the internal
@@ -162,7 +162,7 @@ fallback.  Do not re-introduce a "Vivante on i.MX 93" backend.
 - [`src/backends/gpu2d/sw_fallback.c`](../../src/backends/gpu2d/sw_fallback.c)
   — the portable software 2D fallback (priority 0).
 - [`src/backends/gpu2d/alif_dave2d.c`](../../src/backends/gpu2d/alif_dave2d.c)
-  — the AEN D/AVE 2D real backend (priority 100, bench-unverified).
+  — the AEN D/AVE 2D real backend (priority 100, bench-verified since #916).
 - [`docs/soms/aen.md`](../soms/aen.md) — AEN-family SoM support
   overview for SDK-visible accelerator blocks.
 - [`docs/abi-markers.md`](../abi-markers.md) — explains why

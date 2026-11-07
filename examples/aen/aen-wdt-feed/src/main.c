@@ -2,11 +2,11 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-wdt-feed -- install + feed the Ensemble E8 CMSDK watchdog on the
- * E1M-AEN801 (M55-HE), via the UPSTREAM Zephyr wdt_cmsdk_apb driver (Tier-1, no
- * vendoring -- "arm,cmsdk-watchdog").  Drives the standard Zephyr watchdog API
- * (wdt_install_timeout / wdt_setup / wdt_feed / wdt_disable) on
- * DT_ALIAS(alp_wdt0) = &wdog0.
+ * aen-wdt-feed -- install + feed the Ensemble E4 / E8 CMSDK watchdog on the
+ * E1M-AEN801/803 (M55-HE) or E1M-AEN401 (M55-HP), via the UPSTREAM Zephyr
+ * wdt_cmsdk_apb driver (Tier-1, no vendoring -- "arm,cmsdk-watchdog").  Drives
+ * the standard Zephyr watchdog API (wdt_install_timeout / wdt_setup / wdt_feed /
+ * wdt_disable) on DT_ALIAS(alp_wdt0) = &wdog0.
  *
  * The watchdog is the safety belt: if the main loop hangs, the WDT resets the
  * SoC back to a known-good state.  This example installs a timeout, feeds it a

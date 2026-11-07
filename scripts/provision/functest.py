@@ -257,12 +257,14 @@ sleep 5; kill -INT $scan 2>/dev/null; wait $scan 2>/dev/null
 sort -u "$D/lescan.txt\""""
 # the scan is a child of the killed body: the process-group kill ends it; pkill is the fallback
 _BT_SCAN_RESTORE = "command -v pkill >/dev/null 2>&1 && pkill -INT -x hcitool 2>/dev/null; " + _BT_RESTORE
+# No sleeps (2026W38-0009 bench timing): the part sleeps ~10 ms after a completed read and NACKs
+# its address once; that NACK wakes it for only ~8 ms, so the retry must follow at once. A
+# register-pointer write does not put it back to sleep, so the read may follow the write directly.
+# An all-0xff read is no answer (seen with other traffic on the bus between the write and the read).
 _HIL_OPTIGA = """for i in $(seq 1 100); do
   if i2ctransfer -f -y @BRD@ w1@@ADDR@ 0x82 >/dev/null 2>&1; then
-    sleep 0.01
-    s=$(i2ctransfer -f -y @BRD@ r4@@ADDR@ 2>/dev/null) && { echo "HIL_OPTIGA_I2C_STATE $s"; echo HIL_OPTIGA_ACK; break; }
+    s=$(i2ctransfer -f -y @BRD@ r4@@ADDR@ 2>/dev/null) && [ "$s" != "0xff 0xff 0xff 0xff" ] && { echo "HIL_OPTIGA_I2C_STATE $s"; echo HIL_OPTIGA_ACK; break; }
   fi
-  sleep 0.05
 done"""
 _HIL_AUDIO = """grep -qF "$C" /proc/asound/cards 2>/dev/null || { echo card=absent; exit 0; }
 c=$(awk -v c="$C" 'index($0, c) && $1 ~ /^[0-9]+$/ {print $1; exit}' /proc/asound/cards)

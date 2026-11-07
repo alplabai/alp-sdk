@@ -8,11 +8,8 @@
  * with <alp/peripheral.h> alp_gpio_*. All three pads are SoC GPIO3 / GPIO4: not GPIO5 (the HP's
  * SD_N / IRQZ) and not the lpgpio island (the HP's CC3501E lines). volume_he.overlay maps them.
  *
- * THE ONE NON-PORTABLE LINE (alp-sdk#2808). A pad's input buffer (REN) is on only once pinctrl sets it, and
- * neither gpio_dw nor gpio-qdec applies a pinctrl state, so without it both inputs read idle
- * forever (the trap the aen-evk-demo overlay documents). The SDK has no portable pad-config API:
- * pinctrl_apply_state() on the overlay's /zephyr,user group is the Zephyr call (the pattern of
- * aen-camera-firstlight/trigger_gpio.overlay), nothing vendor-specific; it goes when #2808 lands.
+ * Both inputs are plain portable-API opens: on Alif the SDK itself turns the pad input buffer on
+ * when a pin is opened as an input (alp-sdk#2808), so there is no pinctrl in this file.
  */
 #include "volume_he.h"
 
@@ -23,7 +20,6 @@
 #include <alp/peripheral.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/led.h>
-#include <zephyr/drivers/pinctrl.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
@@ -31,9 +27,6 @@
 #include "../hud/hud.h"
 #include "../ipc/tr_knob.h"
 #include "../ipc/tr_vol.h"
-
-#define ENC_NODE DT_PATH(zephyr_user) /* carries pinctrl-0 only, volume_he.overlay */
-PINCTRL_DT_DEFINE(ENC_NODE);
 
 static volatile tr_vol_t *const s_rec = (volatile tr_vol_t *)TR_MEM_VOL;
 static volatile tr_bl_t *const  s_bl  = (volatile tr_bl_t *)TR_MEM_BL;
@@ -73,8 +66,6 @@ void tr_volume_he_init(void)
 	}
 #endif
 
-	int rc = pinctrl_apply_state(PINCTRL_DT_DEV_CONFIG_GET(ENC_NODE), PINCTRL_STATE_DEFAULT);
-
 	const alp_qenc_config_t cfg = ALP_QENC_CONFIG_DEFAULT(EVK_ENC_ROTARY);
 
 	s_enc = alp_qenc_open(&cfg);
@@ -90,17 +81,15 @@ void tr_volume_he_init(void)
 			s_sw = NULL;
 		}
 	}
-	printk(
-	    "[vol] %u%% at 0x%08x%s, backlight %u%% at 0x%08x: pads %d, encoder %s, switch %s, bench "
-	    "request word +4\n",
-	    (unsigned)s_he.pct,
-	    (unsigned)TR_MEM_VOL,
-	    warm ? " (warm: levels kept)" : "",
-	    (unsigned)s_knob.bl_pct,
-	    (unsigned)TR_MEM_BL,
-	    rc,
-	    s_enc != NULL ? "ok" : "none",
-	    s_sw != NULL ? "ok" : "none");
+	printk("[vol] %u%% at 0x%08x%s, backlight %u%% at 0x%08x: encoder %s, switch %s, bench "
+	       "request word +4\n",
+	       (unsigned)s_he.pct,
+	       (unsigned)TR_MEM_VOL,
+	       warm ? " (warm: levels kept)" : "",
+	       (unsigned)s_knob.bl_pct,
+	       (unsigned)TR_MEM_BL,
+	       s_enc != NULL ? "ok" : "none",
+	       s_sw != NULL ? "ok" : "none");
 	s_up = true;
 }
 

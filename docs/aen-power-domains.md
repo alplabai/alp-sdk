@@ -86,8 +86,8 @@ unverified.
 ## The STOP / STANDBY backend
 
 `src/backends/power/alif_se_power.c` implements `alp_power_request_sleep(STOP |
-STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and `STOP` on the E8 M55-HP (**bench-proven HP-only** on the E1M-AEN803) (section "The M55-HP" below). It is registered for
-`alif:ensemble:e8` behind `CONFIG_ALP_SDK_POWER_ALIF_SE` (default **n**,
+STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and `STOP` on the E8 M55-HP (**bench-proven HP-only** on the E1M-AEN803) (section "The M55-HP" below) and on the E4 M55-HP (E1M-AEN401: same registers per the AE402 DFP, customer-reported 14/14 RV-3028 wakes, not bench-run by Alp Lab; the AEN401 board now carries the same `alp,som-power` node and BRD_I2C bus as the E8 boards, and its `bkram` address is inferred from the E3 / E7 SVDs and the E8, so the wake record surviving STOP is unverified on E4). It is registered for
+`alif:ensemble:e8` and `alif:ensemble:e4` behind `CONFIG_ALP_SDK_POWER_ALIF_SE` (default **n**,
 experimental; STOP and STANDBY are bench-proven on the E1M-AEN803 M55-HE, STOP also on its
 M55-HP with only the HP booted). This core's (HE or HP) subsystem is powered off and the
 wake is a cold boot through the Secure Enclave, so the call does not return: read
@@ -118,9 +118,9 @@ vendor sample.
 | Bit | Armed by | Notes |
 |---|---|---|
 | `ALP_POWER_WAKE_RTC` | on-module RV-3028, `INT` -> P15_0 -> `WE_LPGPIO0` | primary RTC (the internal LPRTC is not trusted: ER001 / ER002, LFRC-only boot). With `wake_after_ms == 0` the caller's own alarm / countdown must already be armed, or the request is `ALP_ERR_INVAL`. |
+| `ALP_POWER_WAKE_EXT_EVENT` | on-module RV-3028 `EVI` pin (U21.8, the SoM net `MODULE_STBY` / E1.O2, R43 pull-up to +1V8), through the same `INT` -> P15_0 path | a carrier or radio signal, e.g. CC3501E `GPIO_18` (E1.I3, open-drain) routed to E1.O2, pulls EVI low; EVF (STATUS 0Eh bit 1) latches with EIE (CONTROL_2 10h bit 2) set for the cycle. Reported as its own `wake_source`, not `ALP_POWER_WAKE_RTC`. Event Control (13h) is written active low, level detect with the 3.9 ms filter (`EHL` 0, `ET` 01, `TSS` 0; `TSOW` kept): a request already held low when the sleep starts re-latches `EVF` and ends the sleep at once (early wake), a pulse under about 4 ms may go unseen. Bench-pending (#2811); `aen-power-stop` variant E. |
 | `ALP_POWER_WAKE_TIMER` | LPTIMER (`alp,power-wake-timer`, `WE_LPTIMER0`) for `wake_after_ms < 1000` | runs from the AON low-frequency clock. `wake_after_ms` is a **minimum**: the tick count is rounded up against the fastest the clock can run (LFRC 36045 Hz = +10 %, the top of its trim range; measured 34251.7 Hz; LFXO 32775 Hz), so on LFRC a short wake is never early but can be late: ~5 % at the 34251.7 Hz this module measured, up to ~16 % if the clock sits at the bottom of the trim range (-5 %, ~31130 Hz). |
 | `ALP_POWER_WAKE_GPIO` | application LPGPIO pads named by an `alp,power-wake-gpios` devicetree node, `WE_LPGPIO<n>` | advertised only when the node exists and none of its pads is wired by the SoM (see "LPGPIO wake pads" below). |
-| `ALP_POWER_WAKE_EXT_EVENT` | on-module RV-3028 External Event input `EVI` (U21.8) = `MODULE_STBY` (E1.O2, pull-up R43 to `+1V8`), `INT` -> P15_0 -> `WE_LPGPIO0` | #2811. **Active low, level detected** with the 3.9 ms filter (Event Control 13h `EHL` = 0, `ET` = 01, `TSS` = 0; `EIE` CONTROL_2 10h bit 2; `EVF` STATUS 0Eh bit 1; App. Manual Rev. 1.4 p.26 and p.71 note 6): while the line stays low `EVF` is set again after tDELAY (3.9 to 7.8 ms) even after it was cleared, so a request that is already held low when the sleep starts is not missed -- it re-latches, `/INT` reads asserted and the sleep ends at once (an early wake, `realised_mode` RUN, this bit). Limits: a pulse shorter than about 4 ms may go unseen, and a line held low keeps the SoC from sleeping on this source until it is released. Armed through `rv3028c7_event_arm()` just before the sleep; a stale `EIE` + `EVF` is cleared first for every plan that uses `/INT` (it would otherwise refuse with `rtc_int_asserted`, the same class as the stale TIE + TF); an event that lands between the arm and the entry is serviced before the disarm and reported. The wake decode reads `EVF`, writes it 0, clears `EIE` and reports this bit, not `ALP_POWER_WAKE_RTC`. Advertised only with the chip context bound (`alp_som_power_bind_rv3028`) and the `INT` pad present; every other backend answers `ALP_ERR_NOSUPPORT`. Needs no `wake_after_ms`. Carrier wiring: route E1.I3 (CC3501E `GPIO_18` / `WIFI_GPIO18`, open-drain, 1.8 V) to E1.O2 `MODULE_STBY`; on the EVK one jumper `WIFI_GPIO18` (`M2E_SDIO_WAKEn`, M.2 J16 pin 21) -> `MODULE_STBY` (header P14 pin 1); keep `J16` empty or let the card there be the driver (the net also reaches SoM pad `IO18`). Bench steps: `examples/aen/aen-power-stop/README.md`, variant (E). Bench-pending. |
 | (timed wake >= 1 s) | RV-3028 countdown (`rv3028c7_timer_start`) | whole seconds, rounded up. Needs the chip context bound (`alp_som_power_bind_rv3028`). |
 
 A timed wake reports the source the caller asked for, whichever hardware serves it:
@@ -198,7 +198,9 @@ snapshots back and verifies them.
 
 **Every pad the layer drives needs its GPIO controller enabled in the devicetree**
 (`&gpio5` for the backlight enable, `&gpio11` for the PHY reset, `&lpgpio` for the
-P15_n pads); a disabled controller makes that domain's quiesce fail with
+P15_n pads).  The stock AEN801 / AEN803 / AEN401 board trees enable all three, so no
+per-app overlay is needed on a stock board; a custom board that omits one makes that
+domain's quiesce fail with
 `ALP_ERR_NOT_READY` and the sleep is refused (bench U8). Every refusal prints
 `alif_se_power: refuse step=<n> reason=<...> rc=<raw>` on the console.
 

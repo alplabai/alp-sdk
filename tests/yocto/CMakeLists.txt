@@ -1013,6 +1013,30 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_camera
              COMMAND alp_test_peripheral_camera)
 
+    # CR10 unpack: AArch64 NEON == scalar == an independent packer (#2792).
+    # Header-only, so no alp::sdk link.  On a non-AArch64 host only the scalar
+    # path exists and the test checks it against the independent packer.
+    add_executable(alp_test_camera_cr10_unpack
+        ${CMAKE_CURRENT_SOURCE_DIR}/camera_cr10_unpack.c
+    )
+    target_include_directories(alp_test_camera_cr10_unpack PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/camera
+    )
+    target_compile_features(alp_test_camera_cr10_unpack PRIVATE c_std_99)
+
+    add_test(NAME alp_test_camera_cr10_unpack
+             COMMAND alp_test_camera_cr10_unpack)
+
+    # Microbenchmark (not a ctest): run on the target aarch64 board, not an emulator.
+    add_executable(alp_bench_camera_cr10
+        ${CMAKE_CURRENT_SOURCE_DIR}/camera_cr10_bench.c
+    )
+    target_include_directories(alp_bench_camera_cr10 PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/camera
+    )
+    target_compile_features(alp_bench_camera_cr10 PRIVATE c_std_99)
+
     # A static libalp_sdk.a must keep every Linux backend that sits in its own
     # TU beside the class's catch-all stub (#2790): only the stub is reachable
     # from the dispatcher.  Link a tiny binary against alp::sdk, then require

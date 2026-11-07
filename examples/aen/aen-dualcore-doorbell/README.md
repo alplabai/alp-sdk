@@ -40,6 +40,17 @@ This is the working substrate for HE↔HP IPC / a dual-core RPC.
 Recipe: dual ATOC with HP-APP `["load","boot"]` @0x50000000 + HE-APP `["load"]`
 @0x58000000; `app-gen-toc` + `app-write-mram`. Restore the canonical slot0 after.
 
+## Build
+
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. Build the HP and HE images for the same SoM; use `aen801` or `aen803`:
+
+```sh
+west build -p always -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/aen-dualcore-doorbell -d build/hp -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
+west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-dualcore-doorbell -d build/he -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
+```
+
+For E1M-AEN803 use `alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp` and `alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`.
+
 ## One correctness requirement (bench-found)
 
 **`CONFIG_DCACHE=n`.** `DB_BEACON`/`PEER_DB_BEACON` are read/written by both

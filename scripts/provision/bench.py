@@ -584,6 +584,9 @@ class Probe:
     def reset_run(self) -> None:
         raise NotImplementedError
 
+    def erase(self, addr: int, size: int) -> None:  # optional: erases the enclosing pages
+        raise BenchError("probe cannot erase")
+
 
 class JLinkProbe(Probe):
     """J-Link Commander, one process (= one probe session) per call.
@@ -661,11 +664,20 @@ class JLinkProbe(Probe):
     def reset_run(self) -> None:
         self._session(["r", "g"])
 
+    def erase(self, addr: int, size: int) -> None:
+        # Unproven: the Commander `erase <SAddr>,<EAddr>` range syntax, whether the end is
+        # inclusive, a possible chip erase, and the loader's page mapping were never tried.
+        raise BenchError(
+            "J-Link Commander range erase is not bench-proven on dual-bank GD32G553 (1 KB pages, "
+            "OBCTL.DBS=1); use the V2N-host SWD wrapper"
+        )
+
 
 class ScriptProbe(Probe):
     """The bench's probe wrapper script. Interface (subcommands):
     ``dp-id`` (prints 0x........), ``loadbin PATH ADDR``,
-    ``savebin PATH ADDR SIZE``, ``reset-run``; exit 0 on success."""
+    ``savebin PATH ADDR SIZE``, ``reset-run``, optional ``erase ADDR SIZE``
+    (erase the enclosing pages, verify 0xFF); exit 0 on success."""
 
     def __init__(self, wrapper: Path, runner=subprocess.run) -> None:
         self.wrapper = Path(wrapper)
@@ -707,6 +719,9 @@ class ScriptProbe(Probe):
 
     def reset_run(self) -> None:
         self._call("reset-run")
+
+    def erase(self, addr: int, size: int) -> None:
+        self._call("erase", f"{addr:#x}", f"{size:#x}")
 
 
 # --------------------------------------------------------------------------

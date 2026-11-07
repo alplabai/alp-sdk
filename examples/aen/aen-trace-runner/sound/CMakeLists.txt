@@ -67,7 +67,8 @@ target_include_directories(app PRIVATE ../src)
 option(TR_SND_V2 "Band-limited synth + soft limiter + level trims (TR_AUDIO_V2)" ON)
 option(TR_SND_V3 "Small-speaker voicing: 4th-order 450 Hz master high-pass + everything voiced from ~500 Hz (TR_AUDIO_V3, needs V2)" ON)
 set(TR_SND_RATE 16000 CACHE STRING "Synth and I2S3 rate: 16000 or 48000")
-set(TR_SND_VOLUME "" CACHE STRING "Digital volume 0..128 (empty = 128)")
+set(TR_SND_VOLUME "" CACHE STRING "Digital volume 0..255 (empty = 255, unity)")
+set(TR_SND_AMP_LEVEL "" CACHE STRING "TAS2563 amp analog level code, int or hex 0x01..0x10 (empty = 0x10, 16.0 dBV)")
 # Extra TAS2563 register writes for bench A/B, e.g. amp_regs_dvc_minus6db.h
 # (DVC -6 dB). Default NONE = the amps' POR DVC 0 dB: round 3 showed no amp
 # fault latch in any window with or without it, and it cost 6 dB at the mic.
@@ -77,6 +78,9 @@ target_compile_definitions(app PRIVATE TR_AUDIO_V2=$<BOOL:${TR_SND_V2}> TR_AUDIO
 	TR_AUDIO_V3=$<AND:$<BOOL:${TR_SND_V2}>,$<BOOL:${TR_SND_V3}>>)
 if(TR_SND_VOLUME)
 	target_compile_definitions(app PRIVATE TR_SND_VOLUME=${TR_SND_VOLUME}u)
+endif()
+if(TR_SND_AMP_LEVEL)
+	target_compile_definitions(app PRIVATE TR_SND_AMP_LEVEL=${TR_SND_AMP_LEVEL}u)
 endif()
 if(TR_SND_AMP_REGS_FILE AND NOT TR_SND_AMP_REGS_FILE STREQUAL "NONE")
 	target_compile_definitions(app PRIVATE TR_SND_AMP_REGS_FILE="${TR_SND_AMP_REGS_FILE}")

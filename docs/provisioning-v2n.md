@@ -199,6 +199,19 @@ step recorded `done` whose probe now says `Unsatisfied` runs again, and a
 state recorded against a **different bundle or tool revision** is moved to
 `superseded` so every step runs again.
 
+### Voided verification
+
+The state file numbers every step entry (`seq`) and keeps a forward-only marker,
+`last_mutation_seq`, moved by the first real write of a write step (`gd32_flash`,
+`write_xspi`, `write_cm33`, `write_emmc_boot`, `write_rootfs`) and by `boot_sd_linux`
+clearing the GD32 SD hold. A verification step whose newest entry is older than the marker
+is voided: it is not "done" for the next run, `record` drops its facts, strikes its keys in
+`<serial>.unit.yaml` as `unread (voided, a write step ran after the step that read it)`, and
+reports `verification voided by a later write or SD-hold change, run again: <steps>` as a
+ship blocker. `bootstrap`, `eeprom_manifest`, `secure_page` and `dxm1_npu_flash` do not move
+the marker (same bytes for the same bundle, each with its own readback). A state file from
+before this mechanism is renumbered by wall clock once, then never re-derived.
+
 ## Power safety
 
 The RTL8211F(I) PHY needs both 3.3 V and its 1.0 V rail at 0 V when the 3.3 V
@@ -284,8 +297,8 @@ are not yet confirmed by a run of this code on a bench.
 | `dsw1_scif` | operator: boot switch to SCIF download |
 | `bootstrap` | reuses the live SCIF ROM state `detect` left in this run (no second power cycle); cycles only if no ON has happened since. Flash Writer: `EM_W` area 1 (boot partition 1) sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
 | `dsw1_emmc_insert_sd` | operator: insert the provisioning microSD (DSW1 may stay on xSPI); U-Boot must autoboot (see "Operator flow: DSW1 and the microSD"). The result names the boot mode BL2 reported (`xSPI` for `SYS_LSI_MODE` `0x3c06`, else the observed value, or "boot mode not reported by BL2") |
-| `boot_sd_linux` | U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD, then the live SoM check: every non-optional on-module I2C device the SoM preset declares must ACK (the GD32 excepted) before any destructive step runs. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt. No IP is not a failure here: the checks run over the console and `gd32_flash` runs next |
-| `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, reset-and-run after every readback (see "The GD32 readback halts the MCU"), then `GET_VERSION` from the bridge at `0x70` (polled; the step fails if it never answers). With no network (the `boot_sd_linux` evidence says why: `network: none (gbeth DMA reset failed on <ports>)` or `none (no carrier)`) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
+| `boot_sd_linux` | A unit already on its eMMC Linux whose GD32 holds the microSD out (`BOOT_CONFIG` `SDMUX_EN_HIGH`, from an earlier `sd_out_emmc_boot`) gets the flag cleared first (evidence `gd32_boot_config_cleared`), so the cold cycle reconnects the card. U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD, then the live SoM check: every non-optional on-module I2C device the SoM preset declares must ACK (the GD32 excepted) before any destructive step runs. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt. No IP is not a failure here: the checks run over the console and `gd32_flash` runs next |
+| `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), an erase of the whole 8 KB OTA metadata area `0x08008000`-`0x08009FFF` first (older A/B records from earlier OTAs would otherwise outrank the new one and boot slot B; the probe needs `erase ADDR SIZE`, and a probe without it is refused before anything is written), then `loadbin` × 3 (the metadata record, bootloader, slot A), verify with `savebin` (the metadata area in full) in fresh probe sessions, then require the running image to be slot A (`OTA_GET_STATE`) with the build-id embedded in `slot-a.bin` (`GET_BUILD_ID`; evidence `gd32_active_slot`, `gd32_build_id`; a `slot-a.bin` that embeds no build-id is refused), reset-and-run after every readback (see "The GD32 readback halts the MCU"), then `GET_VERSION` from the bridge at `0x70` (polled; the step fails if it never answers). With no network (the `boot_sd_linux` evidence says why: `network: none (gbeth DMA reset failed on <ports>)` or `none (no carrier)`) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
 | `write_xspi` | from Linux: `bl2` → `mtd0`, `fip` → `mtd1`; md5 readback. A FIP whose erase would reach the CM33 image at `mtd1` + `0x1A0000` is refused |
 | `write_cm33` | from Linux: the bundle's `cm33` image → `mtd1` at `0x1A0000`; md5 readback of exactly the image size; probe = the same md5. Skipped (`bundle has no cm33 component`) when the bundle carries none. See "CM33 image" |
 | `write_emmc_boot` | release `bl2_mmc` + `fip` into `mmcblk<N>boot0` (boot partition 1, the one EXT_CSD`[179]=0x08` boots; `boot1` is never booted), md5 readback of the same device, EXT_CSD via mmc-utils |
@@ -295,9 +308,9 @@ are not yet confirmed by a run of this code on a bench.
 | `dxm1_npu_flash` | `v2n-m1` bundles that carry the DX-M1 set: firmware over the ROM UART path, probe = PCIe `0x0000` + `dxrt-cli -s` version, see below |
 | `pmic_verify` | compare registers against `--pmic-expect` |
 | `secure_page` | write the 64-byte Secure Data Page, read back, compare. Never locks |
-| `sd_out_emmc_boot` | no operator. On the provisioning SD Linux: persist the GD32 `BOOT_CONFIG` flag `SDMUX_EN_HIGH` (bridge I2C `0x70`, opcode `0x42`; the SET moves no pad until the next GD32 reset, so it cannot pull the root) and wait until a GET returns it; cold-boot into the eMMC Linux (refused if the root is still `mmcblk1`); drive IO29 `SDIO_MUX_EN` (active-low, `gd32-bridge-gpio` line 12) high; re-read the flag. The mux is **write-only**: reading the pad reconfigures it (#2701). `SDIO_MUX_SEL` is never touched. A unit already on the eMMC still SETs the flag and skips only the cold cycle. Precondition: the GD32 runs from slot A; a SET from slot B is refused with `NOSUPPORT` (`0x06`, docs/gd32-bridge-protocol.md 3.19), so OTA the same image into slot A first. The flag keeps the SD out across the cold cycles of `cold_boot_test`; the mux write alone would not survive a power cycle |
+| `sd_out_emmc_boot` | no operator. On the provisioning SD Linux: persist the GD32 `BOOT_CONFIG` flag `SDMUX_EN_HIGH` (bridge I2C `0x70`, opcode `0x42`; the SET moves no pad until the next GD32 reset, so it cannot pull the root) and wait until a GET returns it; cold-boot into the eMMC Linux (refused if the root is still `mmcblk1`); drive IO29 `SDIO_MUX_EN` (active-low, `gd32-bridge-gpio` line 12) high; re-read the flag. The mux is **write-only**: reading the pad reconfigures it (#2701). `SDIO_MUX_SEL` is never touched. A unit already on the eMMC still SETs the flag and skips only the cold cycle. Precondition: the GD32 runs from slot A; a SET from slot B is refused with `NOSUPPORT` (`0x06`, docs/gd32-bridge-protocol.md 3.19), so OTA the same image into slot A first. The flag keeps the SD out across the cold cycles of `cold_boot_test`; the mux write alone would not survive a power cycle. **GD32 without `BOOT_CONFIG`:** v0.3.0 (protocol 0.14.0) answers `NOSUPPORT`; `BOOT_CONFIG` ships from v0.3.1 (protocol 0.14.1). On a protocol below 0.14.1 the step then takes the operator path: it prompts (clean halt, power OFF, physically REMOVE the microSD), cold-boots, and passes only when Linux root is the eMMC (`resolve_emmc`) and `/sys/bus/mmc/devices` shows an `MMC` card and no `SD`/SDcombo one (an `SDIO` device such as the CYW55513 is not the microSD). A non-interactive run (no operator on stdin), or a unit whose root is already the eMMC, needs `--sd-removed-by-operator` (the operator already removed the card and the unit booted from the eMMC): the tool still halts and cold-cycles, then applies the same evidence check on the fresh boot. The gate fails closed: `NOSUPPORT` from a 0.14.1+ GD32 (slot B, a single-bank part, or a protocol-0.15 build without the opcode) stays an error; stop and report the GD32 build. Evidence: `sd_out_method` (`gd32-boot-config` or `operator-removed`), plus `gd32_protocol` and `sd_out_evidence` (root device and the enumerated mmc devices) on the operator path |
 | `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, ACT88760 reg `0x10` after boot, I2C scans (GD32 exempted only while `0x10` still reads `0x88`). An `end0` without carrier (PHY latch, #2582) gets one extra cold cycle, noted as `end0_no_carrier_retries` in the step evidence (not a ledger key); it fails if `end0` is still down. With the `rtc_backup` fixture and N >= 2 it also sets the RTC from the host clock after the first cycle, so `functional_test` can judge `rtc_retention` |
-| `census_final` | the census again, on the unit as shipped (after the last cold boot: xSPI boot, eMMC root). Every key it reads replaces the first census's value. A key the first census recorded and this one could **not** produce (a census group that fails drops its keys) is set to `unread (not re-read by census_final)`, so a value read in the microSD boot never stands in for the shipping boot; an unread ship-required key blocks the ship check. The ACT88760 GPIO4 keys are `cold_boot_test`'s and are left alone |
+| `census_final` | the census again, on the unit as shipped (after the last cold boot: xSPI boot, eMMC root). Every key it reads replaces the first census's value. The secure page is re-read read-only (never written or locked) and its `secure_page_sha256` compared with `<serial>.secure-page.staged.bin`: equal gives `secure_page_state: written-verified` (a locked page stays `locked`); a differing or unstaged page is `unread (...)` and blocks the ship check. A key the first census recorded and this one could **not** produce (a census group that fails drops its keys) is set to `unread (not re-read by census_final)`, so a value read in the microSD boot never stands in for the shipping boot; an unread ship-required key blocks the ship check. The ACT88760 GPIO4 keys are `cold_boot_test`'s and are left alone |
 | `clkgen_verify` | the on-SoM 5L35023B (`BRD_I2C`, `0x69`) OTP image against U-Boot's fixup |
 | `rtc_set` | the RV-3028-C7: system time from this host (UTC), `hwclock -w`, read back (within 30 s of the host, else refused); backup switchover to level mode through the driver's `RTC_PARAM_SET`; trickle read back |
 | `functional_test` | every interface the tool can reach, on the unit as shipped: one generated script, one remote invocation, one `test_ft_<check>` value per check; a failing or unreadable check fails the step unless it is listed informational, and only `test_functional: pass` ships. See "Functional test coverage" |
@@ -401,20 +414,28 @@ no Enter to a unit at a U-Boot prompt, in the SCIF ROM / Flash Writer, or halted
 
 The on-SoM Renesas 5L35023B (`BRD_I2C` / Linux `i2c-8` on the reference
 bench, 7-bit `0x69`) ships with a fixed factory OTP image that cannot be
-re-burned in-system. U-Boot patches 0007 (#2293) and 0012 rewrite reg `0x1f`
-(`0xc7`, SE2 = 24.576 MHz for the GD32 HXTAL), `0x21` (`0xc0`) and `0x24`
-(`0x8f`) every boot (a volatile fixup, not an OTP change); the step reads reg
+re-burned in-system. U-Boot patches 0007 (#2293) and 0013 (SE2 / GD32 HXTAL) rewrite reg `0x1f`
+(`0xc7`, SE2 = 24.576 MHz), `0x21` (`0xc0`) and `0x24`
+(`0x8f`) every boot (a volatile fixup, not an OTP change); a bundle built before
+patch 0013 (e.g. som-0.2.2) writes only patch 0007's `0x21` = `0xc0`, `0x24` = `0x8e` and
+leaves `0x1f` at OTP `0x46`. The expectation is therefore pinned per bundle: an optional
+`clkgen_fixup_regs` map in the `--functest-expect` overlay replaces the tool's default
+(`0x1f: 0xc7, 0x21: 0xc0, 0x24: 0x8f`); absent means the default. Registers and values are
+**quoted** hex strings (`"0x1f": "0x46"`; an unquoted `010` is octal in YAML and is not
+accepted), and the overlay must name its bundle with `bundle: {sku: ..., release_version: ...}`
+(the `bundle.json` fields). A malformed map, or a bundle that is not the one being provisioned,
+refuses the step. The step reads reg
 `0x00..0x24` **one byte at a time** (`i2cget`, never a combined
 `i2ctransfer` read -- this part bit-slips on those), compares against the
-OTP image with `0x1f`/`0x21`/`0x24` expected at their post-fixup values
-(and reports `SE2 24.576 MHz` in the step detail), and
+OTP image with the fixup registers expected at their post-fixup values, and
 confirms the boot console showed U-Boot's own `ALP: 5L35023B clock:` line.
 **A boot log without that line means the unit's U-Boot lacks patch 0007
 (#2293)** -- the step keeps failing (a production unit without the fixup is
 a real defect, not a soft warning it can look past). Ledger facts:
 `clkgen_otp_raw` (all 37 bytes as read, hex), `clkgen_i2c_addr`,
 `clkgen_uboot_fixup` (`seen: <the boot-log line>`, or `unread (...)` when no
-boot console was captured).
+boot console was captured), `clkgen_fixup_source` (`default (...)` or
+`functest-expect overlay clkgen_fixup_regs`, with the register values judged against).
 
 ### `dxm1_npu_flash`: the DX-M1 NPU firmware (V2M only)
 
@@ -663,7 +684,7 @@ scan works while `bluetoothd` runs, is unverified.**
 
 All pass criteria live in `scripts/provision/functest-expect-v2n.yaml`; the code holds the
 commands only. `--functest-expect FILE` (private, like `--pmic-expect`) is merged over it key by
-key, e.g. to pin the xSPI JEDEC ID, the remaining regulator output codes, a tighter band, or to
+key (it also carries `clkgen_fixup_regs`, read by `clkgen_verify`), e.g. to pin the xSPI JEDEC ID, the remaining regulator output codes, a tighter band, or to
 move a check in or out of `informational`. Values that already have a home are read there and
 not repeated: DRAM and eMMC size and the I2C addresses from the SoM preset, the CPU count from
 the SoC description, the carrier's devices and shunt resistors from `metadata/boards/<carrier>.yaml`,

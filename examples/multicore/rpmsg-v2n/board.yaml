@@ -51,7 +51,7 @@ cores:
 #
 # carve_out_kb: 512 below is sized for the real transport this
 # example's M33 side actually runs on -- OpenAMP's resource table
-# (512 rpmsg buffers x 512 B x 2 vrings, m33_sm/src/resource_table.h's
+# (512 rpmsg buffers x 512 B x 2 vrings, zephyr/drivers/ipc/resource_table.h's
 # RSC_TABLE_NUM_RPMSG_BUFF), which lives in a hand-authored DDR
 # window (see that board file's carve-out comment), not in
 # ocram_low.  It happens to equal the entire ocram_low region (512

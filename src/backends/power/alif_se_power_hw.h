@@ -119,7 +119,8 @@ uint32_t alif_se_hw_lprtc_ccvr(void);
  *  build (no bench scratch) returns 0 for both. */
 void alif_se_hw_lprtc_sample(uint32_t *ccvr, uint32_t *cpcvr);
 
-/** This image runs on the M55-HP (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP).  The HP has no TCM
+/** This image runs on the M55-HP (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP on the E8,
+ *  CONFIG_SOC_AE402FA0E5597LE0_RTSS_HP on the E4).  The HP has no TCM
  *  retention and only a SOFT_OFF-class sleep (see alif_se_power.c), so the backend branches
  *  on it; it is a function so the host test can drive both cores from one binary. */
 bool alif_se_hw_core_is_hp(void);

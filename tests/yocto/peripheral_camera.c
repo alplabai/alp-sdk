@@ -49,7 +49,7 @@ static void cam_cr10_unpack(const uint8_t *src,
                             unsigned       shift)
 {
 	for (uint32_t y = 0; y < h; ++y) {
-		cam_cr10_unpack_row(
+		cam_cr10_unpack_row_scalar(
 		    src + (size_t)y * stride, w, dst + (size_t)y * w * out_bytes, out_bytes, shift);
 	}
 }
@@ -522,14 +522,14 @@ static void test_cr10_unpack_mapped_reads_only_row_data(void)
 		}
 	}
 
-	uint8_t scratch[DATA + 8], want[W * H * 2], got[W * H * 2];
+	uint8_t scratch[DATA * CAM_CR10_BOUNCE_ROWS + 8], want[W * H * 2], got[W * H * 2];
 	memset(scratch, 0xA5, sizeof(scratch));
 	cam_cr10_unpack(src, STRIDE, W, H, want, 2, 0);
 	cam_cr10_unpack_mapped(src, STRIDE, W, H, got, 2, 0, scratch);
 	ALP_ASSERT_TRUE(memcmp(want, got, sizeof(want)) == 0);
-	/* the bounce row is exactly DATA bytes: the canary behind it is untouched */
+	/* only the H rows actually bounced are written: the canary behind them is untouched */
 	bool canary = true;
-	for (unsigned i = DATA; i < sizeof(scratch); ++i)
+	for (unsigned i = DATA * H; i < sizeof(scratch); ++i)
 		canary = canary && scratch[i] == 0xA5;
 	ALP_ASSERT_TRUE(canary);
 	ALP_ASSERT_EQ_INT(got[0] | (got[1] << 8), (int)val[0]);

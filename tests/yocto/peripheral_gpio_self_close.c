@@ -278,6 +278,22 @@ static void test_torn_down_line_fd_disables_slot_instead_of_spinning(void)
      * waits on below. */
 	ALP_ASSERT_EQ_INT(close(pipe_fds[0]), 0);
 
+	/* close() of an fd another thread is blocked on in poll() does NOT
+     * wake that poll() on Linux (the pipe's write end is still open),
+     * and the dispatcher polls with an infinite timeout.  If it
+     * re-entered poll() with the live fd before the close() above, it
+     * would sleep forever and never reach the POLLNVAL path -- a
+     * harness ordering race (issue #3048), not a product bug: a real
+     * gpiochip hot-removal wakes the line_fd's pollers with POLLERR/
+     * POLLHUP in-kernel.  Poke the dispatcher's own wake eventfd AFTER
+     * the close so it is guaranteed to re-snapshot and re-poll: either
+     * it was parked in poll() (woken, re-snapshots the stale fd
+     * number), or it had not yet polled (the wake is already pending).
+     * Both ways its next poll() sees the closed fd and reports
+     * POLLNVAL.  No other thread opens fds here, so the number cannot
+     * be recycled in between. */
+	irq_wake();
+
 	/* Pre-#1962 fix: this never fires within TEST_TIMEOUT_MS -- the
      * shared dispatcher spins poll() at 100% of a core forever instead
      * of ever disabling the slot. */

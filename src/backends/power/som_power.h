@@ -78,7 +78,9 @@ extern alp_som_bench_knobs_t alp_som_bench_knobs;
 #define ALP_SOM_ARM_RTC_TIMER 0x00000002u /**< RV-3028 countdown the SDK started. */
 #define ALP_SOM_ARM_RTC_INT   0x00000004u /**< RV-3028 /INT -> P15_0 armed by the caller. */
 #define ALP_SOM_ARM_LPGPIO    0x00000008u /**< One or more LPGPIO wake pads (P15_n) armed. */
-#define ALP_SOM_ARM_RTC_EVI   0x00000010u /**< RV-3028 EVI (MODULE_STBY) -> /INT -> P15_0 armed. */
+#define ALP_SOM_ARM_RTC_EVI   0x00000010u /**< RV-3028 EVI event (EIE) armed (#2811). */
+/** Any wake path that reaches the SoC through the RV-3028 /INT -> P15_0 pad. */
+#define ALP_SOM_ARM_RTC_ANY (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT | ALP_SOM_ARM_RTC_EVI)
 /** LPGPIO wake pads, one bit per line n of P15_n.  armed_hw bits 23:16 hold the pads this
  *  cycle armed (the STOP backend writes them).  Bits 15:9 and 31:24 stay free. */
 #define ALP_SOM_ARM_PADS_SHIFT 16u
@@ -323,8 +325,8 @@ uint32_t alp_som_power_lpgpio_claimed(void);
 alp_status_t alp_som_power_rtc_int_armed(bool *armed);
 
 /** RV-3028 interrupt service by devicetree I2C: reports the enabled, latched
- *  countdown / alarm flags (RV3028C7_WAKE_TF / _AF layout: 0x08 / 0x04) and
- *  clears every latched TF / AF / UF.  Needs no chip context, so it runs on the
+ *  countdown / alarm flags (RV3028C7_WAKE_TF / _AF / _EVF layout: 0x08 / 0x04 / 0x02) and
+ *  clears every latched TF / AF / UF (and EVF, when EIE is on).  Needs no chip context, so it runs on the
  *  cold-boot wake path. */
 alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags);
 
@@ -349,10 +351,19 @@ bool alp_som_power_stop_mode_stat_clear(void);
  *  such register, so nothing is ever classified as a pin reset there. */
 bool alp_som_power_reset_syndrome_trusted(void);
 
-/** True when an enabled RV-3028 countdown / alarm / external-event flag (TF / AF / EVF with EIE)
- *  is already latched.
+/** True when an enabled RV-3028 countdown / alarm flag (TF / AF) is already latched.
  *  Read only: nothing is cleared, so the wake decode still sees it. */
 alp_status_t alp_som_power_rtc_flags_pending(bool *pending);
+
+/** Arm the RV-3028 external-event wake (#2811): with EIE still off, write 0 to a stale EVF, then
+ *  set EIE (CONTROL_2 10h bit 2) so an EVI event drives /INT.  Event Control (13h) is set to
+ *  active low, level detect with the 3.9 ms filter (EHL 0, ET 01, TSS 0; TSOW kept), the same
+ *  values as rv3028c7_event_arm(); ALP_ERR_BUSY if the time stamp is bound to the backup
+ *  switchover (TSE + TSS). */
+alp_status_t alp_som_power_rtc_evi_arm(void);
+
+/** Clear EIE again and write 0 to EVF.  Idempotent. */
+alp_status_t alp_som_power_rtc_evi_disarm(void);
 
 /** Clear a stale UF (time-update flag) when UIE is off; nothing else is touched. */
 alp_status_t alp_som_power_rtc_clear_stale_uf(void);
@@ -360,8 +371,7 @@ alp_status_t alp_som_power_rtc_clear_stale_uf(void);
 /** Stop a countdown an earlier cycle left running or latched: clears TE and TIE and writes 0 to
  *  TF (and UF when UIE is off).  Unless @p keep_alarm, the alarm enable AIE is cleared and AF
  *  written 0 too; with it a caller-armed alarm is left untouched.  PORF / EVF / BSF / CLKF
- *  are never touched (a stale EIE + EVF is cleared by alp_som_power_rtc_event_service()).
- *  Called only before this backend arms its own countdown. */
+ *  are never touched.  Called only before this backend arms its own countdown. */
 alp_status_t alp_som_power_rtc_clear_stale_wake(bool keep_alarm);
 
 /** Read-only dump of RV-3028 STATUS 0Eh, CONTROL_1 0Fh, CONTROL_2 10h, Event Control 13h and
@@ -384,21 +394,6 @@ alp_status_t alp_som_power_rtc_countdown_start(uint32_t seconds, uint32_t *actua
 
 /** Stop the countdown and silence it, through rv3028c7_timer_stop(). */
 alp_status_t alp_som_power_rtc_countdown_cancel(void);
-
-/** True once an RV-3028 chip context is bound, the precondition for arming EVI. */
-bool alp_som_power_rtc_event_ready(void);
-
-/** Arm the RV-3028 External Event input (EVI = MODULE_STBY, active low, 3.9 ms level filter) as
- *  an /INT source through rv3028c7_event_arm().  ALP_ERR_NOT_READY when no chip context is bound. */
-alp_status_t alp_som_power_rtc_event_arm(void);
-
-/** Disarm EVI and clear EVF, through rv3028c7_event_disarm(). */
-alp_status_t alp_som_power_rtc_event_disarm(void);
-
-/** RV-3028 EVI wake service by devicetree I2C (needs no chip context, so it runs on the
- *  cold-boot wake path).  With EIE on: @p fired is true when EVF is latched, EVF is written 0 and
- *  EIE is cleared (disarm).  With EIE off nothing is read as ours and nothing is written. */
-alp_status_t alp_som_power_rtc_event_service(bool *fired);
 
 /** Wake decode, part 1: runs from the early cold-boot SYS_INIT on the cycle's
  *  record (a working copy), before any timer driver initialises, with no I2C.

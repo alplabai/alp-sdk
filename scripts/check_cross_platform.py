@@ -244,6 +244,9 @@ PY_SCAN_ROOTS: tuple[str, ...] = ("scripts", "tests", "examples")
 # whitelist exists so we can ratchet down the lint without flagging
 # the well-documented exceptions.
 INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
+    # Release-builder helper (needs gpg + the private feed key on the internal
+    # Linux runner); no Windows equivalent by design. Header note says so.
+    "scripts/package_devkit_feed.sh",
     # examples/aen/aen-trace-runner: the game's A32 release packaging /
     # J-Link flash scripts and its host-test runner -- Linux-side bench and
     # host tooling (SETOOLS, JLinkExe, cc), each with a header note.

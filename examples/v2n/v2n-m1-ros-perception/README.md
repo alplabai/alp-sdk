@@ -1,9 +1,9 @@
 # v2n-m1-ros-perception
 
-> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds against a
+> ⚠️ **`[UNTESTED]`** Builds against a
 > Yocto SDK that includes ROS 2 + the alp-sdk runtime.  Real
 > bring-up (V2N-M1 + DEEPX runtime + camera capture pipeline)
-> gates on v0.8 V2M HiL.
+> gates on V2M HiL.
 
 ROS 2 perception node for **V2N + V2N-M1**.
 
@@ -36,6 +36,15 @@ The `launch/perception.launch.py` shows how to remap `/alp/*`
 into a wider `/robot/*` namespace.
 
 ## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+### Building the ROS 2 package in the Yocto SDK
 
 This is a ROS 2 colcon package that lives inside the alp-sdk's
 Yocto SDK environment.
@@ -94,7 +103,7 @@ V2N-M1) `dx-rt`.
 ## Verification status
 
 `[UNTESTED]` -- builds clean against the Yocto SDK; HiL
-bring-up gates on v0.8 V2M.  The `sensor_msgs` publishers
+bring-up gates on V2M HiL.  The `sensor_msgs` publishers
 exercise the alp-sdk chip drivers (ICM-42670, INA236)
 through their portable surfaces -- once V2N silicon is in the
 lab, switching the topics' tick rate up is a one-line change

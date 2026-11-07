@@ -79,7 +79,7 @@ for one of three distinct reasons (re-verify against the live tree --
     Zephyr's OWN manifest does, resolvable only from a real checkout,
     the same network-heavy oracle `check_west_manifest_module_resolution.py`
     documents as its own "KNOWN LIMIT" and deliberately avoids:
-    cmsis-dsp, cmsis-nn, littlefs, lvgl, mbedtls, nanopb, tflite-micro,
+    cmsis-dsp, cmsis-nn, fatfs, littlefs, lvgl, mbedtls, nanopb, tflite-micro,
     and -- the motivating case for this gate, #1254/#1280 -- ZCBOR.
     Their recipe<->metadata-version axis still runs (a real drift on
     that axis is still caught); only recipe<->west does not. (8

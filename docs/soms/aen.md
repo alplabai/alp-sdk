@@ -419,6 +419,11 @@ it sets the real wraparound rather than a display scale.
 
 ## Bring-up
 
+On the E1M EVK 2641-R3 the on-board RP2040 (`U55`, CMSIS-DAP) is the primary
+debugger and a SEGGER J-Link is optional; see
+[`aen-rp2040-debug-probe.md`](../aen-rp2040-debug-probe.md) (not
+bench-verified; VID/PID TBD).
+
 The general bring-up procedure in
 [`docs/getting-started.md`](../getting-started.md) covers AEN as
 the first-class target.  AEN ships at v0.1; most cross-family
@@ -429,6 +434,13 @@ examples already work against it.
 * `metadata/e1m_modules/aen/from-alif.tsv` -- E1M pad → Alif silicon.
 * `metadata/e1m_modules/aen/from-cc3501e.tsv` -- E1M pad → CC3501E MCU.
 * `metadata/e1m_modules/aen/inter-chip.tsv` -- Alif ↔ CC3501E wiring.
+* **GPIO / qenc inputs need no pinctrl in the app.** On the Alif Ensemble a pad's input
+  buffer (REN) is only set by pinctrl, and neither `gpio_dw` nor `gpio-qdec` sets it, so an
+  input would read idle. The SDK's gpio and gpio-qdec backends do it when a pin is opened as
+  an input (`alp_gpio_configure(..., ALP_GPIO_INPUT, ...)`, `alp_qenc_open()`): the pad is
+  muxed to GPIO, REN is set and the requested pull becomes the pad bias (ADR 0017 Tier-1.5,
+  `CONFIG_ALP_GPIO_PAD_INPUT`, `src/backends/gpio/gpio_pad_alif.c`; #2808). An app only
+  needs its own pinctrl for a pad it drives through a non-GPIO function.
 
 ## Example apps targeting AEN
 

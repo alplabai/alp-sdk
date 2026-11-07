@@ -45,7 +45,7 @@
  *     1    LPTIMER, 500 ms                      ALP_POWER_WAKE_TIMER
  *     2    RV-3028 countdown, 3 s               ALP_POWER_WAKE_RTC
  *     3    RV-3028 alarm (next minute change)   ALP_POWER_WAKE_RTC
- *          (variant E: RV-3028 EVI, MODULE_STBY low   ALP_POWER_WAKE_EXT_EVENT)
+ *          (variant E: EVI event on MODULE_STBY)   ALP_POWER_WAKE_EXT_EVENT
  *
  * A timed wake under 1 s uses the LPTIMER; from 1 s up it uses the RV-3028
  * countdown, because the internal low-frequency clock is not trustworthy (the SES
@@ -64,7 +64,7 @@
  * One stable line per check, grep-able:
  *
  *     POWER_STOP: cycle<n> <check> <PASS|FAIL>
- *     POWER_STOP: SUMMARY cycles=<n> pass=<n> fail=<n>
+ *     POWER_STOP: SUMMARY cycles=<n> pass=<n> fail=<n> scope=last_boot
  *
  * checks per cycle, printed after the wake that ended it:
  *     record_valid  the SDK's wake record survived and decoded
@@ -81,10 +81,6 @@
  *
  * Each is a config fragment (variants/<name>.conf); the default image is unchanged.
  *
- *   CONFIG_AEN_STOP_EVI_WAKE       cycle 3 sleeps on ALP_POWER_WAKE_EXT_EVENT (the RV-3028 EVI
- *                                  input = MODULE_STBY) instead of the alarm and waits for it
- *                                  to go low; expected wake_source
- *                                  ALP_POWER_WAKE_EXT_EVENT (0x100).  Bench wiring in the README.
  *   CONFIG_AEN_STOP_MODE_STANDBY   every cycle sleeps in ALP_POWER_MODE_STANDBY; the
  *                                  check "mode_stop" becomes "mode_standby" (realised_mode
  *                                  must read STANDBY).
@@ -102,8 +98,17 @@
  * STANDBY, TCM retention, the timing (wake-to-main() 92.6 ms) and the HP-running case are
  * bench-proven on the E1M-AEN803 (see the README).
  *
- * A cold power cycle (not a reset) starts the sequence over: the counter lives in
- * SRAM that a reset keeps and a power cycle loses.
+ * Where the cycle counter lives decides what restarts the sequence.  Bench build
+ * (BKRAM_BENCH_SCRATCH): the counter is in BKRAM, which a reset keeps and a power cycle loses,
+ * so a cold power cycle starts over.  Product build (variants/product-noscratch.conf): the
+ * counter is in RV-3028 User RAM 1 on the backup supply, so it survives a power cycle too; a
+ * counter with no wake record behind it is reported as record_valid FAIL and the sequence
+ * restarts from cycle 1 (see disarm_stale_alarm()).
+ *
+ * SUMMARY covers only the boot that printed it.  Every STOP wake is a cold boot, so pass and
+ * fail restart at 0 and the line counts the verdicts printed on this boot (the cycle just
+ * judged, plus a refused request for the next one); grep the per-cycle
+ * "POWER_STOP: cycleN <check> PASS|FAIL" lines to judge the whole run.
  */
 
 #include <stdbool.h>
@@ -174,14 +179,16 @@ typedef struct {
 
 /* The countdown is the RV-3028's only if the backend does not route it to the LPTIMER. */
 BUILD_ASSERT(CONFIG_AEN_STOP_RTC_MS >= 1000, "the countdown cycle must be at least 1 s");
-#ifdef CONFIG_AEN_STOP_EVI_WAKE
-/* Variant (E): the third cycle sleeps on the RV-3028 External Event input instead of an alarm.
- * The backend arms EVI itself (active low, 3.9 ms level filter, EIE on, EVF clear); the app only asks for the wake
- * source.  There is no timer: the cycle waits until MODULE_STBY is pulled low. */
+#ifdef CONFIG_AEN_STOP_EVI_CYCLE
+/* Variant (E): the third cycle waits for an external event on the RV-3028 EVI pin instead of
+ * the alarm (#2811).  Pull MODULE_STBY (E1.O2) low within the timeout: from the CC3501E
+ * (GPIO18 on E1.I3, open-drain) or, on the bench, a jumper wire from MODULE_STBY (EVK header P14 pin 1) to any GND.
+ * The countdown is only a safety net so an unwired board does not sleep for ever; if IT is
+ * what wakes the SoC, wake_source reads ALP_POWER_WAKE_TIMER and the verdict is FAIL. */
 #define ALARM_CYCLE \
-	{ "RV-3028 EVI (MODULE_STBY low)", \
-	  ALP_POWER_WAKE_EXT_EVENT, \
-	  0u, \
+	{ "RV-3028 EVI event (" STRINGIFY(CONFIG_AEN_STOP_EVI_TIMEOUT_MS) " ms safety timer)", \
+	  ALP_POWER_WAKE_EXT_EVENT | ALP_POWER_WAKE_TIMER, \
+	  CONFIG_AEN_STOP_EVI_TIMEOUT_MS, \
 	  ALP_POWER_WAKE_EXT_EVENT, \
 	  false }
 #else
@@ -284,8 +291,9 @@ static void print_knobs(void)
 
 /* Raw always-on registers, as evidence for the bench record.  The first boot after
  * the SE cold start is the baseline; the ones after a wake show what the SE left. */
-#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
-/* This core's own AON control register (M55-HP: AON_BASE + 0x00; the HE's sits at + 0x10). */
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP) || defined(CONFIG_SOC_AE402FA0E5597LE0_RTSS_HP)
+/* This core's own AON control register (M55-HP on the E8 and the E4: AON_BASE + 0x00; the
+ * HE's sits at + 0x10).  The backend selects it the same way (alif_se_power_hw.c). */
 #define CORE_CTRL_NAME "RTSS_HP_CTRL"
 #define CORE_CTRL_ADDR 0x1A604000u
 #else
@@ -838,10 +846,6 @@ static void start_cycle(unsigned n)
 #if CONFIG_AEN_STOP_RETAIN_TCM_KB > 0
 	tcm_fill(n); /* last, so nothing the sleep entry needs is written after the pattern */
 #endif
-	if (c->wake_bitmap == ALP_POWER_WAKE_EXT_EVENT) {
-		printk("POWER_STOP: cycle%u waits for MODULE_STBY (E1.O2, header P14 pin 1) to go LOW\n",
-		       n);
-	}
 	printk("POWER_STOP: cycle%u enter %s (%s)\n", n, SLEEP_MODE_NAME, c->what);
 	k_msleep(100); /* let the UART FIFO drain before the clocks go away */
 
@@ -900,6 +904,31 @@ static void check_clocks(unsigned cycle)
 }
 #endif
 
+/* Disarm and clear a stale RV-3028 alarm.  Call on every path that starts a fresh sequence
+ * (done == 0), not only when the counter read 0 at boot: the stale-counter and no-wake-record
+ * paths in main() also reset it to 0, and a power-cycled product build keeps both the counter
+ * and the alarm (User RAM 1 and AIE/AF are on the backup supply). */
+static void disarm_stale_alarm(void)
+{
+	/* A fresh run owns no alarm yet.  The RV-3028 is backup-powered, so an alarm this
+	 * app armed in a run that lost power mid-sleep keeps AIE and AF set across every
+	 * power cycle, and the backend then refuses each later RTC sleep at step 7
+	 * (rtc_wake_already_latched: it keeps a caller's alarm for WAKE_RTC sleeps).
+	 * Disarm and clear it here, before the first cycle.  A counter of 0 can also be a
+	 * failed counter read; that is still before this run arms anything, so the worst
+	 * case is disarming an alarm a lost run left behind. */
+	bool fired = false;
+
+	if (rv3028c7_alarm_int_enable(&g_rtc, false) != ALP_OK ||
+	    rv3028c7_alarm_check_and_clear(&g_rtc, &fired) != ALP_OK) {
+		printk("POWER_STOP: stale RV-3028 alarm clear FAIL err=%d (an RTC sleep may "
+		       "refuse rtc_wake_already_latched)\n",
+		       (int)alp_last_error());
+	} else if (fired) {
+		printk("POWER_STOP: stale RV-3028 alarm from an earlier run cleared\n");
+	}
+}
+
 int main(void)
 {
 #ifdef CONFIG_AEN_STOP_WAKE_TIMING
@@ -925,25 +954,6 @@ int main(void)
 	unsigned done = cycle_get();
 
 	printk("POWER_STOP: boot valid=%d counter=%u\n", (int)bi.valid, done);
-	if (done == 0u) {
-		/* A fresh run owns no alarm yet.  The RV-3028 is backup-powered, so an alarm this
-		 * app armed in a run that lost power mid-sleep keeps AIE and AF set across every
-		 * power cycle, and the backend then refuses each later RTC sleep at step 7
-		 * (rtc_wake_already_latched: it keeps a caller's alarm for WAKE_RTC sleeps).
-		 * Disarm and clear it here, before the first cycle.  A counter of 0 can also be a
-		 * failed counter read; that is still before this run arms anything, so the worst
-		 * case is disarming an alarm a lost run left behind. */
-		bool fired = false;
-
-		if (rv3028c7_alarm_int_enable(&g_rtc, false) != ALP_OK ||
-		    rv3028c7_alarm_check_and_clear(&g_rtc, &fired) != ALP_OK) {
-			printk("POWER_STOP: stale RV-3028 alarm clear FAIL err=%d (an RTC sleep may "
-			       "refuse rtc_wake_already_latched)\n",
-			       (int)alp_last_error());
-		} else if (fired) {
-			printk("POWER_STOP: stale RV-3028 alarm from an earlier run cleared\n");
-		}
-	}
 	print_ses_version();
 	print_regs();
 	/* BKRAM after the boot-time clock restore: served from the RAM shadow (live=0) means the
@@ -997,11 +1007,17 @@ int main(void)
 #endif
 	}
 
+	if (done == 0u) {
+		disarm_stale_alarm(); /* every fresh sequence, however the counter got to 0 */
+	}
+
 	if (done < N_CYCLES) {
 		start_cycle(done + 1u);
 	}
 
-	printk("POWER_STOP: SUMMARY cycles=%u pass=%u fail=%u\n", done, g_pass, g_fail);
+	/* pass/fail are .bss and restart at every cold-boot wake, so they judge this boot only
+	 * (the cycle just judged, plus a refused request for the next one); scope=last_boot says so on the line itself. */
+	printk("POWER_STOP: SUMMARY cycles=%u pass=%u fail=%u scope=last_boot\n", done, g_pass, g_fail);
 	for (;;) {
 		k_sleep(K_SECONDS(10));
 		printk("POWER_STOP: awake (done)\n");

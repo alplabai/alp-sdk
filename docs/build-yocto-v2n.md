@@ -60,6 +60,12 @@ MACHINE=e1m-v2n101-a55 bitbake alp-image-edge
 #  V2N-M1: e1m-v2m101-a55 / e1m-v2m102-a55 / e1m-v2m103-a55)
 ```
 
+Each `e1m-*` machine conf defaults `ALP_SDK_SOC ?= "ALP_SOC_..."` (V2N and
+V2N-M1: `ALP_SOC_RENESAS_RZV2N_N44`), so the plain-`bitbake` flow above still
+builds libalp_sdk with the right SoC capability profile
+(`ALP_SOC_REF_STR`, `ALP_HAS()`, the UIO/MHU rpc backend). A build plan's
+generated `local.conf` sets the same variable with `?=` and wins.
+
 Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
 - `alp-image-edge-*.wic[.gz]` — full SD/eMMC image (bootloader excluded;
   it's already on xSPI).
@@ -276,6 +282,70 @@ When off (the default) the build is unchanged. When on, the kernel deploys
 > path, not a bootable board, and the §4 "Fast dev iteration" copy-`Image`
 > recipe does not apply while it is on. Booting the FIT comes with the
 > phase-2 U-Boot work.
+
+## Dev-kit package feed (opkg)
+
+Dev boards can take `alp-sdk` and `alp-sdk-dev` without a
+reflash, from a **signed opkg feed** published per image release line and per
+machine. **Dev kits only: this is not a field-update channel.** Field devices
+stay on image-based A/B OTA (Mender).
+
+**Adding the feed.** An `alp-image-edge` image built with
+`require conf/distro/include/alp-devkit-feed.inc` (in `local.conf`) already has
+it (`alp-image-prod` never does: it fails the build if the fragment is set): opkg with GPG and HTTPS support, `/etc/opkg/alp-devkit-feed.conf`
+(`option check_signature 1`) and the Alp feed public key
+(`keys/alp_devkit_feed_signing.pub.asc`, fingerprint
+`2B7807E20B75B471BF88FD7AC9AB032782D3143B`) in the opkg keyring. The fragment also switches the build to the ipk
+packager (`PACKAGE_CLASSES = "package_ipk"`; the poky default is rpm), so a
+dev-kit image is a different build from a stock one. Then, on the board:
+
+```sh
+opkg update && opkg upgrade alp-sdk
+```
+
+`opkg update` fails if the index signature does not verify; there is no
+unsigned fallback.
+
+**Where it lives.** The feed of release line `0.17` for machine
+`e1m-v2n101-a55` is the GitHub Release tagged `feed-v0.17-e1m-v2n101-a55`
+(`feed-v<major.minor>-<MACHINE>`). opkg needs `<base>/Packages.gz` and every
+`<base>/<ipk>` by name under one base URL, and a release's assets are a flat
+namespace, so the feed is **one release per line and machine** whose assets are
+a single merged `Packages`, `Packages.gz`, `Packages.sig` and the ipks
+(the allowlisted packages of `all` + the machine arch); the base URL is
+`https://github.com/alplabai/alp-sdk/releases/download/<tag>`. The release is
+refreshed in place, so the URL stays stable. Each release also carries
+`<tag>.tar.gz`, the same files for hosts that cannot use the URL
+as a base: unpack it and use `src/gz alp-devkit file:///path/to/feed` in a
+`/etc/opkg/*.conf`.
+
+**ABI.** Keep the image and the feed on the same line. While the SDK is 0.x the
+minor is part of the soname (`libalp_sdk.so.0.17`), so an upgrade cannot load an
+incompatible library into an app linked against the old one: moving to the next
+line means a new image, not `opkg upgrade`. The feed publishes only an
+allowlist of our packages (`alp-sdk`, `alp-sdk-dev`,
+`alp-devkit-feed-config`) from the `all` and machine-arch dirs; it carries no
+tune-arch (`cortexa55`/`aarch64`) packages and no poky/BSP packages. It can
+therefore only **upgrade packages already in the image** whose dependencies are
+already installed: a package that adds a new dependency, or `alp-sdk-dev` when the
+image lacks its tune-arch RDEPENDS, cannot be resolved from it. The example
+packages are not published: they are tune-arch until their recipes become
+MACHINE_ARCH (#2850 item 2). The packager fails when an allowlisted package is
+missing from the index, a stanza has no `SHA256sum:`, an ipk name falls outside
+`[A-Za-z0-9._-]`, or there are more assets than a GitHub release allows (1000).
+
+**Building and signing (release builder only).** Signing uses Yocto's
+`sign_package_feed` (`PACKAGE_FEED_SIGN`, `PACKAGE_FEED_GPG_NAME`,
+`PACKAGE_FEED_GPG_PASSPHRASE_FILE`, `PACKAGE_FEED_GPG_SIGNATURE_TYPE`), enabled
+by `require conf/distro/include/alp-devkit-feed-sign.inc` plus
+`GPG_PATH = "<gnupg home holding the key>"`. It is opt-in so a customer build is
+never forced to sign. The private key lives only in `alp-sdk-internal/signing/`
+and in the internal runner's secret store; signing never runs in public
+Actions. After `bitbake alp-image-edge package-index`,
+`scripts/package_devkit_feed.sh --ipk-dir tmp/deploy/ipk --machine <MACHINE> --tag <tag> --out <dir>`
+merges the arches into the flat feed, signs it, verifies the signature against the
+committed public key and writes the tarball (`--out` must be empty or new); the
+internal `devkit-feed` workflow uploads the result to the release.
 
 ## Notes
 

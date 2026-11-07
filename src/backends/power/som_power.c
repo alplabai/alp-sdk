@@ -233,8 +233,8 @@ static bool _pads_applied;
 static alp_status_t pin_assert(const struct gpio_dt_spec *s, bool asserted)
 {
 	if (s->port == NULL || !device_is_ready(s->port)) {
-		/* A pad whose GPIO controller is disabled in the devicetree: the board or the
-		 * app overlay must enable it (&gpio5 / &gpio11 for the backlight and PHY reset). */
+		/* A pad whose GPIO controller is disabled in the devicetree: the stock board
+		 * trees enable these ports (&gpio5 / &gpio11 for the backlight and PHY reset). */
 		printk("som_power: pad P?_%u unusable: GPIO controller %s\n",
 		       (unsigned)s->pin,
 		       (s->port == NULL) ? "disabled in the devicetree" : "not ready");
@@ -353,20 +353,26 @@ static alp_status_t rv3028_clkout_restore(const struct i2c_dt_spec *i2c, bool pr
  * Arming the countdown goes through the chip driver instead (rtc hook,
  * som_power_rv3028.c): that procedure (App Manual Sec. 4.8.2) is not duplicated. */
 
-#define RV3028_REG_SECONDS   0x00u
-#define RV3028_REG_STATUS    0x0Eu
-#define RV3028_REG_CONTROL_2 0x10u
-#define RV3028_STATUS_PORF   0x01u
-#define RV3028_STATUS_EVF    0x02u
-#define RV3028_STATUS_AF     0x04u
-#define RV3028_STATUS_TF     0x08u
-#define RV3028_STATUS_UF     0x10u
-#define RV3028_STATUS_FLAGS  0x7Fu /* every latchable flag; EEbusy (bit7) is read-only */
-#define RV3028_CTRL2_EIE     0x04u
-#define RV3028_CTRL2_UIE     0x20u
-#define RV3028_CTRL1_TE      0x04u
-#define RV3028_CTRL2_AIE     0x08u
-#define RV3028_CTRL2_TIE     0x10u
+#define RV3028_REG_SECONDS    0x00u
+#define RV3028_REG_STATUS     0x0Eu
+#define RV3028_REG_CONTROL_2  0x10u
+#define RV3028_REG_EVENT_CTRL 0x13u
+#define RV3028_EVCTRL_EHL     0x40u
+#define RV3028_EVCTRL_ET      0x30u
+#define RV3028_EVCTRL_ET_3_9  0x10u /* ET = 01: level detect, 3.9 ms filter */
+#define RV3028_EVCTRL_TSS     0x01u
+#define RV3028_CTRL2_TSE      0x80u
+#define RV3028_STATUS_PORF    0x01u
+#define RV3028_STATUS_EVF     0x02u
+#define RV3028_STATUS_AF      0x04u
+#define RV3028_STATUS_TF      0x08u
+#define RV3028_STATUS_UF      0x10u
+#define RV3028_STATUS_FLAGS   0x7Fu /* every latchable flag; EEbusy (bit7) is read-only */
+#define RV3028_CTRL2_UIE      0x20u
+#define RV3028_CTRL1_TE       0x04u
+#define RV3028_CTRL2_EIE      0x04u
+#define RV3028_CTRL2_AIE      0x08u
+#define RV3028_CTRL2_TIE      0x10u
 
 static const struct i2c_dt_spec *rtc_i2c(void)
 {
@@ -468,8 +474,7 @@ alp_status_t alp_som_power_rtc_clear_stale_uf(void)
  * here: the countdown (TE, TIE) and, unless @p keep_alarm (the caller may have armed its own
  * alarm), the alarm enable (AIE); cleared: TF, AF (not with keep_alarm) and, with UIE off, UF.
  * Each flag is cleared by writing 0 to it, every other bit is written as 1 (ignored by the
- * part), so PORF / EVF / BSF / CLKF survive here: a stale EIE + EVF is cleared by
- * alp_som_power_rtc_event_service() (#2811), which the backend calls for every /INT plan. */
+ * part), so PORF / EVF / BSF / CLKF survive: EVF with EIE on is the EVI wake (#2811). */
 alp_status_t alp_som_power_rtc_clear_stale_wake(bool keep_alarm)
 {
 	const struct i2c_dt_spec *i2c = rtc_i2c();
@@ -505,6 +510,65 @@ alp_status_t alp_som_power_rtc_clear_stale_wake(bool keep_alarm)
 	}
 	return (i2c_reg_write_byte_dt(
 	            i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~clear)) == 0)
+	           ? ALP_OK
+	           : ALP_ERR_IO;
+}
+
+/* EVI wake (#2811).  EIE is CONTROL_2 10h bit 2, EVF is STATUS 0Eh bit 1 (a flag clears by
+ * writing 0, a 1 is ignored: same constant-mask write as above).  EVF is cleared while EIE is
+ * still off, so the stale one cannot hold /INT low the moment EIE comes on. */
+alp_status_t alp_som_power_rtc_evi_arm(void)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   c2 = 0, ev = 0;
+
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0 ||
+	    i2c_reg_read_byte_dt(i2c, RV3028_REG_EVENT_CTRL, &ev) != 0) {
+		return ALP_ERR_IO;
+	}
+	if ((c2 & RV3028_CTRL2_EIE) == 0u) {
+		/* Active low, level detect with the 3.9 ms filter, source = the EVI pin (TSS 0): a
+		 * request already held low when the sleep starts re-latches EVF and is not missed (an
+		 * edge detector would never see it, App. Manual Rev. 1.4 p.26 and p.71 note 6).  TSOW
+		 * is kept; a time stamp bound to the backup switchover (TSE + TSS) is not taken over. */
+		if ((c2 & RV3028_CTRL2_TSE) != 0u && (ev & RV3028_EVCTRL_TSS) != 0u) {
+			return ALP_ERR_BUSY;
+		}
+		ev = (uint8_t)((ev & ~(RV3028_EVCTRL_EHL | RV3028_EVCTRL_ET | RV3028_EVCTRL_TSS)) |
+		               RV3028_EVCTRL_ET_3_9);
+		if (i2c_reg_write_byte_dt(i2c, RV3028_REG_EVENT_CTRL, ev) != 0) {
+			return ALP_ERR_IO;
+		}
+		if (i2c_reg_write_byte_dt(
+		        i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_EVF)) != 0 ||
+		    i2c_reg_write_byte_dt(i2c, RV3028_REG_CONTROL_2, (uint8_t)(c2 | RV3028_CTRL2_EIE)) !=
+		        0) {
+			return ALP_ERR_IO;
+		}
+	}
+	return ALP_OK;
+}
+
+alp_status_t alp_som_power_rtc_evi_disarm(void)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   c2  = 0;
+
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0) {
+		return ALP_ERR_IO;
+	}
+	if ((c2 & RV3028_CTRL2_EIE) != 0u &&
+	    i2c_reg_write_byte_dt(i2c, RV3028_REG_CONTROL_2, (uint8_t)(c2 & ~RV3028_CTRL2_EIE)) != 0) {
+		return ALP_ERR_IO;
+	}
+	return (i2c_reg_write_byte_dt(
+	            i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_EVF)) == 0)
 	           ? ALP_OK
 	           : ALP_ERR_IO;
 }
@@ -548,11 +612,14 @@ alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags)
 		return ALP_ERR_IO;
 	}
 	/* A flag is a wake cause only with its interrupt enable on; UF latches every
-	 * second regardless of UIE, so it is never one here. */
+	 * second regardless of UIE, so it is never one here.  EVF with EIE on is the EVI
+	 * wake (#2811) and is acknowledged with the rest; with EIE off it is left alone. */
 	*flags =
 	    (uint8_t)(((st & RV3028_STATUS_TF) && (c2 & RV3028_CTRL2_TIE) ? RV3028_STATUS_TF : 0u) |
-	              ((st & RV3028_STATUS_AF) && (c2 & RV3028_CTRL2_AIE) ? RV3028_STATUS_AF : 0u));
-	hit = (uint8_t)(st & (RV3028_STATUS_TF | RV3028_STATUS_AF | RV3028_STATUS_UF));
+	              ((st & RV3028_STATUS_AF) && (c2 & RV3028_CTRL2_AIE) ? RV3028_STATUS_AF : 0u) |
+	              ((st & RV3028_STATUS_EVF) && (c2 & RV3028_CTRL2_EIE) ? RV3028_STATUS_EVF : 0u));
+	hit = (uint8_t)((st & (RV3028_STATUS_TF | RV3028_STATUS_AF | RV3028_STATUS_UF)) |
+	                (*flags & RV3028_STATUS_EVF));
 	if (hit == 0u) {
 		return ALP_OK; /* nothing latched: no STATUS write */
 	}
@@ -566,42 +633,6 @@ alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags)
 		return ALP_ERR_IO;
 	}
 	return ALP_OK;
-}
-
-alp_status_t alp_som_power_rtc_event_service(bool *fired)
-{
-	const struct i2c_dt_spec *i2c = rtc_i2c();
-	uint8_t                   st = 0, c2 = 0;
-
-	if (fired == NULL) {
-		return ALP_ERR_INVAL;
-	}
-	*fired = false;
-	if (i2c == NULL) {
-		return ALP_ERR_NOT_READY;
-	}
-	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_STATUS, &st) != 0 ||
-	    i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0) {
-		return ALP_ERR_IO;
-	}
-	if ((c2 & RV3028_CTRL2_EIE) == 0u) {
-		return ALP_OK; /* EVI not armed: nothing of ours to report or clear */
-	}
-	*fired = (st & RV3028_STATUS_EVF) != 0u;
-	/* Disarm: an EIE left on would hold /INT (P15_0) low on the next edge and refuse the next
-	 * sleep, whichever source it arms.  Enable first, flag after, so nothing re-latches. */
-	if (i2c_reg_write_byte_dt(i2c, RV3028_REG_CONTROL_2, (uint8_t)(c2 & ~RV3028_CTRL2_EIE)) != 0) {
-		return ALP_ERR_IO;
-	}
-	if (!*fired) {
-		return ALP_OK;
-	}
-	/* Same constant-mask acknowledge as alp_som_power_rtc_wake_service(): 0 for EVF, 1 for every
-	 * other latchable flag (App. Manual Rev. 1.4 p.22: a flag is cleared by writing 0). */
-	return (i2c_reg_write_byte_dt(
-	            i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_EVF)) == 0)
-	           ? ALP_OK
-	           : ALP_ERR_IO;
 }
 
 static uint8_t rv_bcd(uint8_t v, bool *ok)
