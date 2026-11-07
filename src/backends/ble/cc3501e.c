@@ -268,12 +268,18 @@ cc35_scan_start(alp_ble_radio_state_t *state, bool active, alp_ble_scan_cb_t cb,
 	if (rc != ALP_OK) return rc;
 
 	for (size_t i = 0u; i < count; ++i) {
+		/* recs[i].name_len is the raw wire length (0..255) while name[]
+		 * holds only CC3501E_BLE_NAME_MAX bytes (cc3501e_ble_scan()
+		 * truncates the copy, not the length): clamp so the callback
+		 * can never read past the record. */
+		uint8_t adv_len = (recs[i].name_len > CC3501E_BLE_NAME_MAX) ? (uint8_t)CC3501E_BLE_NAME_MAX
+		                                                            : recs[i].name_len;
 		alp_ble_scan_result_t r = {
 			.addr.type = recs[i].addr_type,
 			.rssi_dbm  = recs[i].rssi_dbm,
 			.adv_type  = 0u,
 			.adv_data  = (const uint8_t *)recs[i].name,
-			.adv_len   = recs[i].name_len,
+			.adv_len   = adv_len,
 		};
 		memcpy(r.addr.addr, recs[i].addr, sizeof(r.addr.addr));
 		cb(&r, user);
