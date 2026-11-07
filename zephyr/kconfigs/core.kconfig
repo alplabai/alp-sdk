@@ -366,8 +366,12 @@ config ALP_SDK_CONSOLE_CMD_GPIO
 	bool "alp gpio command"
 	depends on ALP_SDK_CONSOLE
 	default y
+	imply GPIO_GET_CONFIG
 	help
 	  Compile the `alp gpio` sub-command (read always; write under UNSAFE).
+	  `read` refuses a pin that is not an input when the GPIO controller
+	  implements pin_get_config (GPIO_GET_CONFIG, implied here); on a
+	  controller without it the read still never reconfigures the pin.
 
 config ALP_SDK_CONSOLE_CMD_I2C
 	bool "alp i2c command"
