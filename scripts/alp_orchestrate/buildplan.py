@@ -760,7 +760,10 @@ def emit_build_plan(
     # be tokenised, so every slice command would null and a consumer
     # honouring `nullCommand: skip` would report a green build that built
     # nothing (issue #2953).  Refuse it up front.
-    if build_root.is_absolute() and not any(
+    # `.root`, not is_absolute(): on Windows a drive-less '\build' has a
+    # root but no drive, so is_absolute() is False although it is not
+    # relative to the project either.
+    if build_root.root and not any(
             build_root.is_relative_to(r) for r in (base_dir, REPO)):
         raise OrchestratorError(
             f"--build-root '{build_root}' is outside both the project "
