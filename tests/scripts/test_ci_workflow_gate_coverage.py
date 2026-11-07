@@ -34,6 +34,14 @@ def _load(name: str) -> dict:
 def _paths(name: str, trigger: str) -> list[str]:
     data = _load(name)
     triggers = data.get("on", data.get(True))
+    if name == "pr-metadata-validate.yml":
+        # Unfiltered trigger + `detect` job's paths-filter (#2972).
+        step = next(
+            s
+            for s in data["jobs"]["detect"]["steps"]
+            if s.get("uses", "").startswith("dorny/paths-filter@")
+        )
+        return list(yaml.safe_load(step["with"]["filters"])["relevant"])
     return list(triggers[trigger]["paths"])
 
 
@@ -172,3 +180,33 @@ def test_test_coverage_audit_uses_fail_on_gaps() -> None:
             if "check_test_coverage.py" in r:
                 hits.append(r)
     assert hits and all("--fail-on-gaps" in r for r in hits)
+
+
+def test_metadata_validate_summary_is_requireable() -> None:
+    """#2972: `metadata-validate · all` must report on pull_request, push and
+    merge_group, so branch protection can require it without hanging the queue
+    (#1415) or blocking PRs that touch no filtered path (#1474)."""
+    data = _load("pr-metadata-validate.yml")
+    triggers = data.get("on", data.get(True))
+    assert "merge_group" in triggers
+    for t in ("pull_request", "push"):
+        assert "paths" not in triggers[t], f"{t} must be unfiltered; use detect"
+
+    jobs = data["jobs"]
+    summary = jobs["summary"]
+    assert summary["name"] == "metadata-validate · all"
+    assert "${{" not in summary["name"], "required context name must be static"
+    assert summary["if"].replace(" ", "") == "always()"
+    gate_jobs = set(jobs) - {"summary", "detect"}
+    assert gate_jobs, "no gate jobs found"
+    assert set(summary["needs"]) == gate_jobs | {"detect"}
+
+    verdict = next(s for s in summary["steps"] if "VALIDATE_RESULT" in s.get("env", {}))
+    run = verdict["run"]
+    assert "exit 1" in run
+    assert "failure|cancelled" in run  # detect failed/cancelled -> fail
+    # a gate job result other than success/legit-skip falls through to exit 1
+    assert re.search(r"\*\)\s+echo \"::error::validate concluded", run)
+    # every gate job's own `if:` must keep running under merge_group
+    for name in gate_jobs:
+        assert "merge_group" in jobs[name]["if"]

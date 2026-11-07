@@ -108,7 +108,6 @@ memory:
   write_authority: customer_runtime
   accessible_from:
   - m55_he
-  - m55_hp
 - name: atoc
   source: som_preset
   kind: flash

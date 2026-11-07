@@ -843,6 +843,26 @@ def _aen_missing_region_message(
         "symmetric two-slot layout")
 
 
+_AEN_NOT_OWNER_LINES = [
+    '\t\t\t\tstatus = "disabled"; /* owned by the other M55 core (#2984) */',
+]
+
+
+def _aen_unowned_partitions(
+    memory_map: "list[dict[str, Any]] | None", role: str,
+) -> "set[str]":
+    """Partition labels whose memory_map region excludes this core."""
+    core_id = f"m55_{role}"
+    return {
+        label
+        for label, region_name in (("storage", "storage"),)
+        for r in (memory_map or [])
+        if r.get("name") == region_name
+        and isinstance(r.get("accessible_from"), list)
+        and core_id not in r["accessible_from"]
+    }
+
+
 def _aen_flash_partitions(
     total_kib: int, role: str | None = None,
     memory_map: "list[dict[str, Any]] | None" = None,
@@ -1933,6 +1953,10 @@ def _aen_dts(
         *([f"#include <alif/ensemble_rtss_{role}_wdog.dtsi>"]
           if part in ("E4", "E8") else []),
         f"#include <{peripherals_dtsi}>",
+        # E8 M55-HE-local peripherals (M55HE_IRQS[] numbering): HE boards only,
+        # so an M55-HP image never sees the HE vector-map lines (#2984).
+        *(["#include <alif/ensemble_e8_he_peripherals.dtsi>"]
+          if part == "E8" and role == "he" else []),
         "#include <zephyr/dt-bindings/gpio/gpio.h>",
         "#include <zephyr/dt-bindings/i2c/i2c.h>",
         f'#include "{dir_name}-pinctrl.dtsi"',
@@ -2127,6 +2151,10 @@ def _aen_dts(
         "storage": "storage",
         "atoc": "atoc",
     }
+    # A partition whose memory_map region is not accessible_from this core is
+    # kept (the MPU table sizes its window from it) but disabled, so no flash
+    # map entry exists and PARTITION_ID()/FIXED_PARTITION users fail at build.
+    not_owned = _aen_unowned_partitions(memory_map, role) if disjoint_slot0 else set()
     for i, (label, off, size) in enumerate(partitions):
         node = partition_node_labels[label]
         dt_label = partition_dt_labels[label]
@@ -2134,6 +2162,7 @@ def _aen_dts(
             f"\t\t\t{node}: partition@{off:x} {{",
             f'\t\t\t\tlabel = "{dt_label}";',
             f"\t\t\t\treg = <{hex(off)} DT_SIZE_K({size})>;",
+            *(_AEN_NOT_OWNER_LINES if label in not_owned else []),
             "\t\t\t};",
         ]
         if i != len(partitions) - 1:
@@ -2154,6 +2183,18 @@ def _aen_dts(
         "};",
         "",
     ]
+    if part == "E8":
+        # lptimer0 is a single-owner timer (its channel registers and its IRQ,
+        # an M55HE_IRQS[] line, are shared): off on both cores by default, each
+        # app that needs it (STOP wake timer, counter) enables it in its own
+        # board overlay (#2984).
+        lines += [
+            "/* lptimer0 is per-app: an app that needs it enables it in its board overlay. */",
+            "&lptimer0 {",
+            '\tstatus = "disabled";',
+            "};",
+            "",
+        ]
     lines += _aen_brd_i2c_dts(links, part)
     lines += _aen_e1m_i2c0_dts(links)
     if power_domains:
@@ -3086,6 +3127,7 @@ def _v2n_dts(
         "\tchosen {",
         "\t\tzephyr,sram = &sram;",
         "\t\tzephyr,ram-console = &ram_console;",
+        "\t\tzephyr,entropy = &gd32_trng;",
         "\t\t/*",
         "\t\t * No CM33 serial console on this board.  The only console is the",
         "\t\t * A55's (Linux, on the shared debug UART); sci0 here is the EVK",
@@ -3133,6 +3175,16 @@ def _v2n_dts(
         "\talp_pins: alp-pins {",
         '\t\tcompatible = "alp,pin-array";',
         f"\t\tgpios = <&{cs0['gpio_node']} {cs0['gpio_pin']} GPIO_ACTIVE_LOW>;",
+        "\t};",
+        "",
+        "\t/*",
+        "\t * The GD32 supervisor's TRNG as the Zephyr entropy source (#2951).  Zephyr's",
+        "\t * mbedTLS (TF-PSA-Crypto) reads zephyr,entropy; the driver",
+        "\t * (zephyr/drivers/entropy/entropy_alp_gd32_trng.c) is compiled only under",
+        "\t * CONFIG_ALP_SDK_SECURITY_V2N_TRNG_ENTROPY, so without it this node is inert.",
+        "\t */",
+        "\tgd32_trng: gd32-trng {",
+        '\t\tcompatible = "alp,gd32-trng";',
         "\t};",
     ]
     if pads:
