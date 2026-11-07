@@ -104,18 +104,22 @@ config ALP_SDK_SECURITY_V2N_TRNG_ENTROPY
 	  Compile the mbedtls_hardware_poll() implementation in
 	  src/backends/security/zephyr_drv.c that drains true-random bytes
 	  from the GD32G553 supervisor's NIST SP800-90B pre-certified
-	  TRNG.  The mbedtls profile (metadata/library-profiles/mbedtls/
-	  mbedtls_config.h) sets MBEDTLS_NO_PLATFORM_ENTROPY, so
-	  mbedtls's entropy module asks the SDK to supply the platform
-	  entropy poll callback; this option provides that symbol on
-	  V2N.  The portable alp_random_bytes() transparently benefits
-	  -- PSA Crypto's DRBG seeds from this source the first time
-	  it's drawn from.  No effect on alp_random_bytes's public
-	  contract (still ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_IO /
-	  ALP_ERR_INVAL); the GD32 dependency is invisible to apps.
-	  Off-V2N builds leave this OFF -- mbedtls picks whatever
-	  hardware_poll the active vendor's HAL registered, or falls
-	  back to ALP_ERR_IO on alp_random_bytes if nothing is wired.
+	  TRNG.
+
+	  NOT YET CONNECTED TO ZEPHYR'S mbedTLS (#2951): nothing on a
+	  Zephyr build calls mbedtls_hardware_poll() -- the SDK mbedtls
+	  profile's MBEDTLS_NO_PLATFORM_ENTROPY is not applied to the
+	  Zephyr build, and Zephyr's mbedTLS never defines
+	  MBEDTLS_ENTROPY_HARDWARE_ALT -- and the V2N CM33 boards have no
+	  Zephyr entropy node.  Enabling this therefore does NOT satisfy
+	  the weak-RNG check (ALP_SDK_MBEDTLS_WEAK_RNG); that still needs
+	  an ENTROPY_HAS_DRIVER source or CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY.
+	  The remaining wiring (a Zephyr entropy driver over the GD32 TRNG
+	  op) is tracked in #2951 and needs bench verification on
+	  E1M-V2N101.
+
+	  No effect on alp_random_bytes's public contract (still ALP_OK /
+	  ALP_ERR_NOT_READY / ALP_ERR_IO / ALP_ERR_INVAL).
 
 config ALP_SDK_SECURITY_SE_CRYPTOCELL
 	bool "Route <alp/security.h> to the Alif SE CryptoCell (hardware crypto)"
