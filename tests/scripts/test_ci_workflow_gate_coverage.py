@@ -140,6 +140,15 @@ def test_cppcheck_step_fails_on_error_severity(tmp_path: Path) -> None:
 
     assert run(bad) != 0
     assert run(ok) == 0
+    # A crashed cppcheck leaves an empty (or no) report: that must fail too.
+    assert run("") != 0
+    (tmp_path / "cppcheck.xml").unlink()
+    assert (
+        subprocess.run(
+            [bash, "-c", tail], cwd=tmp_path, capture_output=True, check=False
+        ).returncode
+        != 0
+    )
 
 
 def test_cppcheck_baseline_suppressions_are_scoped() -> None:

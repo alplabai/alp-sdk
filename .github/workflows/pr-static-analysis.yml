@@ -318,6 +318,12 @@ jobs:
                   echo "::error::cppcheck reported ${n_hard} severity=error finding(s) in src/ or chips/ (see cppcheck.xml artifact)"
                   exit 1
               fi
+          else
+              # cppcheck writes an XML header even with zero findings, so a
+              # missing or empty report means it crashed or rejected its
+              # arguments (e.g. a broken --library cfg): fail, don't pass.
+              echo "::error::cppcheck produced no cppcheck.xml (crash or bad arguments)"
+              exit 1
           fi
 
       - name: Upload cppcheck.xml
