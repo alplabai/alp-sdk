@@ -1080,8 +1080,20 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  * @ref alp_uart_rx_ringbuf_attach (Zephyr:
  * CONFIG_ALP_SDK_UART_RX_RINGBUF=y): while one is attached this call
  * takes bytes from the ring, woken by the RX interrupt rather than
- * polling, and returns @ref ALP_ERR_IO if the ring itself overflowed
- * since the last read/pop.
+ * polling, and returns @ref ALP_ERR_IO if bytes were lost (ring
+ * overflow or a hardware FIFO overrun seen by the RX interrupt) since
+ * the last read/pop.  Loss already recorded when the call starts is
+ * reported before any byte is consumed.
+ *
+ * On @ref ALP_ERR_IO the contents of @p data are unspecified and bytes
+ * may already have been consumed from the ring or FIFO -- treat the
+ * stream as having a gap and resynchronise.
+ *
+ * Concurrency: with a ring attached, this call and
+ * @ref alp_uart_rx_ringbuf_pop are the SAME single consumer of the ring;
+ * call them from one thread, or serialise them in the caller.  If the
+ * ring is detached while this call waits, it returns promptly
+ * (@ref ALP_ERR_NOT_READY when no byte had arrived).
  *
  * @param[in]  port        Handle from @ref alp_uart_open.
  * @param[out] data        Destination buffer.
@@ -1131,8 +1143,10 @@ const alp_capabilities_t *alp_uart_capabilities(const alp_uart_t *port);
 /*     buffers in-kernel; baremetal lands once UART IRQ wiring does).  */
 /*                                                                     */
 /* Concurrency: alp_uart_rx_ringbuf_pop / _count run from the          */
-/* consumer thread only; the producer side (UART IRQ) runs inside      */
-/* the SDK and uses LwRB's single-producer-single-consumer guarantees. */
+/* consumer thread only, and alp_uart_read() on the parent port is     */
+/* the same consumer while a ring is attached (one thread, or          */
+/* caller-serialised); the producer side (UART IRQ) runs inside the    */
+/* SDK and uses LwRB's single-producer-single-consumer guarantees.     */
 /* ------------------------------------------------------------------ */
 
 typedef struct alp_uart_rx_ringbuf alp_uart_rx_ringbuf_t;

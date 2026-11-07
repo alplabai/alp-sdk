@@ -121,6 +121,16 @@ int main(void)
 	       got,
 	       alp_uart_rx_ringbuf_count(rb));
 
+	/* ALP_ERR_IO means the RX interrupt lost bytes (ring full, or the
+     * hardware FIFO overran before the ISR ran) since the last pop.  The
+     * `got` bytes it still delivered are valid, but the stream has a gap
+     * right after them -- resynchronise (e.g. drop the partial frame)
+     * instead of splicing the next bytes onto them.  To avoid the gap,
+     * pop more often or give the ring a bigger backing store. */
+	if (s == ALP_ERR_IO) {
+		printf("[ringbuf] data lost: %zu valid bytes, then a gap\n", got);
+	}
+
 	/* Detach when the ringbuf is no longer needed.  Disables the
      * IRQ-driven RX path so the underlying alp_uart_t reverts to
      * normal polled-read semantics.  After detach the caller's

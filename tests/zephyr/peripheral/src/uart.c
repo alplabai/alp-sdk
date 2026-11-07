@@ -17,6 +17,7 @@
 #include <zephyr/ztest.h>
 
 #include "alp/peripheral.h"
+#include "lsr_uart.h"
 
 /* alp-uart1 is a zephyr,uart-emul alias -- native_sim's overlays define
  * it (boards/native_sim.overlay, boards/native_sim_native_64.overlay)
@@ -248,6 +249,34 @@ ZTEST(alp_peripheral, test_uart_read_polled_overrun_reports_io_not_ok)
 	/* The error is consumed by the report; the bytes that did fit are readable. */
 	zassert_equal(alp_uart_read(u, dst, sizeof(dst), 10), ALP_OK);
 	alp_uart_close(u);
+}
+
+/* #2934: on ns16550 (Alif UART0..3) uart_poll_in() reads LSR, which clears
+ * the same OE/PE/FE latch uart_err_check() reports.  An overrun raised after
+ * poll N is wiped by poll N+1, so a check only before/after the loop never sees
+ * it.  port 2 is src/lsr_uart.c, whose poll_in() clears the latch the same way. */
+ZTEST(alp_peripheral, test_uart_read_overrun_mid_loop_survives_lsr_clearing_poll)
+{
+	lsr_uart_reset();
+	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
+	    .port_id   = 2,
+	    .baudrate  = 115200,
+	    .data_bits = 8,
+	    .stop_bits = 1,
+	    .parity    = ALP_UART_PARITY_NONE,
+	});
+	zassert_not_null(u);
+
+	static const uint8_t burst[4] = { 1, 2, 3, 4 };
+	lsr_uart_push(burst, sizeof(burst));
+	lsr_uart_overrun_after_polls(2);
+
+	uint8_t dst[4];
+	zassert_equal(alp_uart_read(u, dst, sizeof(dst), 50),
+	              ALP_ERR_IO,
+	              "an overrun between polls must not be wiped by the next poll");
+	alp_uart_close(u);
+	lsr_uart_reset();
 }
 
 /* #1639 (review follow-up): uart_emul's .configure stores whatever it
@@ -520,6 +549,103 @@ ZTEST(alp_peripheral, test_uart_read_drains_attached_ring)
 	/* The bytes went through the ring, not the device FIFO. */
 	uint8_t spare;
 	zassert_equal(uart_poll_in(_uart1_emul_dev, &spare), -1);
+	alp_uart_close(u);
+}
+
+/* #2934: a hardware FIFO overrun (IRQ latency) never reaches the ring, so the
+ * ISR itself must notice it via uart_err_check().  uart_emul latches OVERRUN
+ * when told to; the valid bytes that did arrive are still delivered. */
+ZTEST(alp_peripheral, test_uart_rx_ringbuf_isr_counts_hw_overrun)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+	static uint8_t         backing[64];
+	alp_uart_rx_ringbuf_t *rb = alp_uart_rx_ringbuf_attach(u, backing, sizeof(backing));
+	zassert_not_null(rb);
+
+	static const uint8_t ten[10] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+	uart_emul_set_errors(_uart1_emul_dev, UART_ERROR_OVERRUN);
+	zassert_equal(uart_emul_put_rx_data(_uart1_emul_dev, ten, sizeof(ten)), 10u);
+	k_msleep(100);
+
+	uint8_t dst[32];
+	size_t  got = 0;
+	zassert_equal(alp_uart_rx_ringbuf_pop(rb, dst, sizeof(dst), &got), ALP_ERR_IO);
+	zassert_equal(got, 10u, "valid bytes are still delivered");
+	zassert_equal(alp_uart_rx_ringbuf_pop(rb, dst, sizeof(dst), &got), ALP_OK);
+	alp_uart_close(u);
+}
+
+/* #2934: loss already recorded is reported BEFORE read() consumes anything. */
+ZTEST(alp_peripheral, test_uart_read_reports_loss_before_consuming_ring_bytes)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+	static uint8_t         backing[64];
+	alp_uart_rx_ringbuf_t *rb = alp_uart_rx_ringbuf_attach(u, backing, sizeof(backing));
+	zassert_not_null(rb);
+
+	static const uint8_t five[5] = { 9, 8, 7, 6, 5 };
+	uart_emul_set_errors(_uart1_emul_dev, UART_ERROR_OVERRUN);
+	(void)uart_emul_put_rx_data(_uart1_emul_dev, five, sizeof(five));
+	k_msleep(100);
+
+	uint8_t dst[5];
+	zassert_equal(alp_uart_read(u, dst, sizeof(dst), 50), ALP_ERR_IO);
+	zassert_equal(alp_uart_rx_ringbuf_count(rb), 5u, "IO must not have consumed the ring");
+	zassert_equal(alp_uart_read(u, dst, sizeof(dst), 50), ALP_OK);
+	zassert_mem_equal(dst, five, sizeof(five));
+	alp_uart_close(u);
+}
+
+/* #2934: a standalone detach must not wait out a blocked ring-backed read. */
+static alp_uart_t      *_blocked_port;
+static volatile int64_t _blocked_ms;
+static volatile int     _blocked_rc;
+static K_SEM_DEFINE(_blocked_started, 0, 1);
+static K_THREAD_STACK_DEFINE(_blocked_stack, 2048);
+static struct k_thread _blocked_thread;
+
+static void _blocked_reader(void *a, void *b, void *c)
+{
+	uint8_t dst[4];
+	int64_t t0 = k_uptime_get();
+	k_sem_give(&_blocked_started);
+	_blocked_rc = alp_uart_read(_blocked_port, dst, sizeof(dst), 5000);
+	_blocked_ms = k_uptime_get() - t0;
+}
+
+ZTEST(alp_peripheral, test_uart_rx_ringbuf_detach_wakes_blocked_read)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+	static uint8_t         backing[64];
+	alp_uart_rx_ringbuf_t *rb = alp_uart_rx_ringbuf_attach(u, backing, sizeof(backing));
+	zassert_not_null(rb);
+
+	_blocked_port = u;
+	_blocked_rc   = 1;
+	k_thread_create(&_blocked_thread,
+	                _blocked_stack,
+	                K_THREAD_STACK_SIZEOF(_blocked_stack),
+	                _blocked_reader,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(5),
+	                0,
+	                K_NO_WAIT);
+	zassert_equal(k_sem_take(&_blocked_started, K_MSEC(1000)), 0);
+	k_msleep(50); /* reader is now parked on rx_sem */
+
+	int64_t t0 = k_uptime_get();
+	alp_uart_rx_ringbuf_detach(rb);
+	int64_t detach_ms = k_uptime_get() - t0;
+
+	zassert_equal(k_thread_join(&_blocked_thread, K_MSEC(1000)), 0);
+	zassert_true(detach_ms < 1000, "detach took %lld ms", (long long)detach_ms);
+	zassert_true(_blocked_ms < 1000, "read returned after %lld ms", (long long)_blocked_ms);
+	zassert_equal(_blocked_rc, ALP_ERR_NOT_READY);
 	alp_uart_close(u);
 }
 
