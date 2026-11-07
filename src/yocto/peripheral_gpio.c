@@ -124,7 +124,13 @@ static struct alp_gpio g_gpio_pool[ALP_SDK_YOCTO_MAX_GPIO_HANDLES];
  * TSan coverage caught a real race here: alp_gpio_open()/
  * alp_gpio_close() used to mutate in_use/line_fd with no lock at all,
  * while the dispatcher thread (once started) reads those same fields
- * for EVERY slot, not just ones with IRQs enabled. */
+ * for EVERY slot, not just ones with IRQs enabled.
+ *
+ * Lock order: g_irq.mu is the ONLY mutex in this file and is a leaf --
+ * no call is made while holding it (callbacks run outside it, irq_wake()
+ * and close() after it), so there is no ordering to violate.  Every read
+ * and write of in_use/irq_enabled/irq_cb/irq_user/line_fd on the
+ * irq-facing paths takes it (#3050). */
 static struct {
 	pthread_mutex_t mu;
 	pthread_t       thread;
@@ -711,12 +717,17 @@ void alp_gpio_close(alp_gpio_t *pin)
 	/* Detach from the dispatcher before releasing the fd so the
      * dispatcher's next snapshot pass observes the cleared slot
      * before any subsequent reuse of the pool entry. */
-	if (pin->irq_enabled) {
-		pthread_mutex_lock(&g_irq.mu);
+	pthread_mutex_lock(&g_irq.mu);
+	/* #3050: the dispatcher's #1962 teardown writes irq_enabled under g_irq.mu, so read it
+	 * there too; g_irq.mu is the only lock in this file and nothing is taken under it. */
+	bool was_enabled = pin->irq_enabled;
+	if (was_enabled) {
 		pin->irq_enabled = false;
 		pin->irq_cb      = NULL;
 		pin->irq_user    = NULL;
-		pthread_mutex_unlock(&g_irq.mu);
+	}
+	pthread_mutex_unlock(&g_irq.mu);
+	if (was_enabled) {
 		irq_wake();
 	}
 	pool_release(pin);

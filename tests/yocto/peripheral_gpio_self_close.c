@@ -308,10 +308,47 @@ static void test_torn_down_line_fd_disables_slot_instead_of_spinning(void)
 	(void)close(pipe_fds[1]);
 }
 
+/* ------------------------------------------------------------------ */
+/* 4. Issue #3050: close()/irq_disable() read in_use/irq_enabled       */
+/*    under g_irq.mu while the dispatcher's #1962 teardown writes it.  */
+/* ------------------------------------------------------------------ */
+
+/* Closing the pipe's WRITE end raises POLLHUP on the read end, which
+ * sends the dispatcher down its #1962 per-slot teardown (a locked write
+ * of irq_enabled) at an arbitrary moment relative to the close() or
+ * irq_disable() below.  Before the #3050 fix those two read in_use /
+ * irq_enabled with no lock -- a C11 data race that is only visible to
+ * ThreadSanitizer (see the alp_test_can_gpio_tsan target); this test is
+ * the stimulus, and also asserts the slot ends up closed either way. */
+static void test_close_and_disable_vs_dispatcher_teardown(void)
+{
+	reset_fixture();
+
+	for (int i = 0; i < 200; ++i) {
+		int              pipe_fds[2];
+		struct alp_gpio *pin = open_fake_pin(pipe_fds);
+		ALP_ASSERT_TRUE(pin != NULL);
+		ALP_ASSERT_EQ_INT(alp_gpio_irq_enable(pin, ALP_GPIO_EDGE_RISING, noop_cb, NULL), ALP_OK);
+
+		(void)close(pipe_fds[1]); /* POLLHUP -> dispatcher teardown */
+		if (i & 1) {
+			(void)alp_gpio_irq_disable(pin);
+		}
+		alp_gpio_close(pin); /* pool_release() closes pipe_fds[0] */
+
+		pthread_mutex_lock(&g_irq.mu);
+		bool in_use = pin->in_use;
+		bool irq_on = pin->irq_enabled;
+		pthread_mutex_unlock(&g_irq.mu);
+		ALP_ASSERT_TRUE(!in_use && !irq_on);
+	}
+}
+
 int main(void)
 {
 	test_self_close_from_callback_no_deadlock();
 	test_cross_pin_close_from_callback_no_deadlock();
 	test_torn_down_line_fd_disables_slot_instead_of_spinning();
+	test_close_and_disable_vs_dispatcher_teardown();
 	ALP_TEST_SUMMARY();
 }

@@ -1,0 +1,3 @@
+### Fixed — Yocto GPIO `alp_gpio_irq_disable()` and `alp_gpio_close()` read `in_use`/`irq_enabled` under `g_irq.mu` (#3050)
+
+**The two calls no longer race the IRQ dispatcher's teardown.** `src/yocto/peripheral_gpio.c` read `pin->in_use` and `pin->irq_enabled` with no lock while `pool_release()` and the dispatcher's per-slot teardown wrote them under `g_irq.mu`, a C11 data race. Both reads now happen under `g_irq.mu` (the only mutex in the file, taken as a leaf), and the wake-eventfd write still precedes the fd release. `alp_test_peripheral_gpio_self_close` gained a close/disable-versus-teardown loop that ThreadSanitizer reported before the fix and passes clean after (not exercised on silicon).
