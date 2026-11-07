@@ -39,6 +39,8 @@
 #include <metal/device.h>
 #include <openamp/open_amp.h>
 
+#include <alp/protocol/v2n_mhu_doorbell.h>
+
 #include "resource_table.h"
 #include "rpmsg_link.h"
 
@@ -60,8 +62,10 @@ LOG_MODULE_REGISTER(rpmsg_link, LOG_LEVEL_INF);
 #define SHM_SIZE       DT_REG_SIZE(SHM_NODE)
 #define RSC_TABLE_ADDR DT_REG_ADDR(DT_NODELABEL(rsctbl))
 
-/* CM33 -> A55 doorbell: MHU-B SWINT unit 12 SET (see rpmsg-v2n main.c). */
-#define ALP_M33_MHU_SWINT12_SET (0x504808C4U)
+/* CM33 -> A55 doorbell: the line selected by <alp/protocol/v2n_mhu_doorbell.h> (SWINT unit 12 by
+ * default, rsp_ch8_ns with CONFIG_ALP_V2N_DOORBELL_RSP_CH8), so this firmware rings the same line
+ * the A55 backend listens on. */
+#define ALP_M33_DOORBELL_SET (ALP_V2N_MHU_B_CM33_BASE + ALP_V2N_DOORBELL_SET_OFF)
 
 /* <alp/rpc.h> method that carries XRCE datagrams; the length includes the NUL. */
 #define XRCE_METHOD     "xrce"
@@ -147,7 +151,7 @@ int mailbox_notify(void *priv, uint32_t id)
 {
 	ARG_UNUSED(priv);
 	ARG_UNUSED(id);
-	*(volatile uint32_t *)ALP_M33_MHU_SWINT12_SET = 1U;
+	*(volatile uint32_t *)ALP_M33_DOORBELL_SET = 1U;
 	return 0;
 }
 
