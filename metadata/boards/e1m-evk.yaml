@@ -481,6 +481,47 @@ hw_revisions:
       (`include/alp/boards/alp_e1m_evk_routes.h` is generated
       from it).
 
+  r3:
+    min_sdk_version: "0.17.0"
+    max_sdk_version: ~
+    status: preview
+    board_id:
+      adc_channel:    TBD
+    # Routes that differ from the default (2626-R2) block above.  Builds
+    # opt in with -DALP_E1M_EVK_HW_REV_R3 (see gen_board_header.py); the
+    # default revision stays r2.  Source: UG-E1M-001 (2641-R3 netlist).
+    # No R3 board has been bench-tested; the r2 LED map above is the
+    # bench-verified one (2026-07-28) and is not changed.
+    route_overrides:
+      gpio:
+        - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_RED,
+            board_alias: BOARD_PIN_LED_RED,
+            doc: "RGB LED red (D19, pad B5) -- the PWM3 pad driven as a digital GPIO." }
+        - { e1m: E1M_GPIO_PWM0, macro: EVK_PIN_LED_GREEN,
+            board_alias: BOARD_PIN_LED_GREEN,
+            doc: "RGB LED green (D19, pad A6) -- the PWM0 pad driven as a digital GPIO." }
+        - { e1m: E1M_GPIO_PWM1, macro: EVK_PIN_LED_BLUE,
+            board_alias: BOARD_PIN_LED_BLUE,
+            doc: "RGB LED blue (D19, pad B6) -- the PWM1 pad driven as a digital GPIO." }
+      pwm:
+        - { e1m: E1M_PWM3, macro: EVK_PWM_LED_RED,
+            board_alias: BOARD_PWM_LED_RED,
+            doc: "RGB LED red channel (pad B5)." }
+        - { e1m: E1M_PWM0, macro: EVK_PWM_LED_GREEN,
+            board_alias: BOARD_PWM_LED_GREEN,
+            doc: "RGB LED green channel (pad A6)." }
+        - { e1m: E1M_PWM1, macro: EVK_PWM_LED_BLUE,
+            board_alias: BOARD_PWM_LED_BLUE,
+            doc: "RGB LED blue channel (pad B6)." }
+    # The 2641-R3 encoder header J18 carries only ENC1-3 X/Y; there is no
+    # push switch, so the r2 EVK_PIN_ENCODER_SW (E1M_GPIO_IO4) does not exist.
+    route_removals: [EVK_PIN_ENCODER_SW]
+    notes: |
+      E1M-EVK-2641-R3 carrier.  Differs from r2 in the RGB LED channel
+      map and the absent encoder push switch (see route_overrides /
+      route_removals).  Everything else is assumed equal to r2 until an
+      R3 board is on the bench.
+
 status:
   preliminary:              false
   partial_hw_config:        false               # wiring authoritative via the `e1m_routes:` block
