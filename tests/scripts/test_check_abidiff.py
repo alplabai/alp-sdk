@@ -99,10 +99,10 @@ def test_soname_only_not_fooled_by_filtered_change():
     assert not mod.soname_only(rep)
 
 
-# Fixture in libabigail's documented abidiff report shape (SONAME-only change).
-# ponytail: not recorded from a live run (no abidiff on the authoring host);
-# replace with real rc2-vs-HEAD output when one is available.
-GOLDEN = Path(__file__).parent / "fixtures" / "abidiff_soname_only.txt"
+# Real abidiff 2.9.0 output; see fixtures/abidiff/README.md.
+FIX = Path(__file__).parent / "fixtures" / "abidiff"
+GOLDEN = FIX / "soname_only.txt"
+BREAK = (FIX / "break.txt").read_text(encoding="utf-8")
 
 
 def test_soname_only_golden_report():
@@ -204,3 +204,108 @@ def test_baseline_tag_of_other_minor_is_report_only(tmp_path, monkeypatch):
 def test_main_abidiff_tool_error_fails(tmp_path, monkeypatch, rc):
     _wire(tmp_path, monkeypatch, rc, "")
     assert mod.main() == 1
+
+
+# --- waivers (#2851), driven by real abidiff output ---------------------
+
+YAML_ENTRY = """- symbol: {symbol}
+  kind: {kind}
+  reason: "{reason}"
+  issue: "{issue}"
+  until: "{until}"
+"""
+
+
+def _entry(symbol, kind="function", reason="reviewed", issue="#2851", until="0.19"):
+    return YAML_ENTRY.format(symbol=symbol, kind=kind, reason=reason, issue=issue, until=until)
+
+
+ALL_WAIVERS = "".join([
+    _entry("gone"), _entry("sig"), _entry("use_cfg"),
+    _entry("g_level", "variable"), _entry("g_mode", "variable"),
+])
+
+
+def _waive(tmp_path, monkeypatch, yaml_text, rc=12, stdout=BREAK):
+    _wire(tmp_path, monkeypatch, rc, stdout)
+    d = tmp_path / "docs" / "abi"
+    d.mkdir(parents=True)
+    (d / "abidiff-waivers.yaml").write_text(yaml_text, encoding="utf-8")
+
+
+def test_real_report_parses_into_entries():
+    ents = mod.parse_entries(BREAK)
+    assert [(e["kind"], e["name"]) for e in ents] == [
+        ("function", "gone"), ("function", "sig"), ("function", "use_cfg"),
+        ("variable", "g_level"), ("variable", "g_mode")]
+    assert "struct cfg" in ents[2]["types"]
+
+
+def test_unwaived_break_fails(tmp_path, monkeypatch):
+    _waive(tmp_path, monkeypatch, "[]\n")
+    assert mod.main() == 1
+
+
+def test_partial_waiver_still_fails(tmp_path, monkeypatch):
+    _waive(tmp_path, monkeypatch, _entry("gone") + _entry("sig"))
+    assert mod.main() == 1
+
+
+def test_waived_break_passes_and_reports(tmp_path, monkeypatch, capsys):
+    _waive(tmp_path, monkeypatch, ALL_WAIVERS)
+    assert mod.main() == 0
+    out = capsys.readouterr().out
+    assert "waived: function gone (#2851, until 0.19): reviewed" in out
+
+
+def test_type_waiver_covers_changed_struct(tmp_path, monkeypatch):
+    text = _entry("gone") + _entry("sig") + _entry("struct cfg", "type") + \
+        _entry("g_level", "variable") + _entry("g_mode", "variable")
+    _waive(tmp_path, monkeypatch, text)
+    assert mod.main() == 0
+
+
+def test_wrong_kind_does_not_waive(tmp_path, monkeypatch):
+    _waive(tmp_path, monkeypatch, ALL_WAIVERS.replace("kind: variable", "kind: function"))
+    assert mod.main() == 1
+
+
+def test_expired_waiver_fails_even_without_diff(tmp_path, monkeypatch, capsys):
+    _waive(tmp_path, monkeypatch, _entry("gone", until="0.17"), rc=0, stdout="")
+    assert mod.main() == 1
+    assert "expired" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("bad", [
+    _entry("gone", reason=""),
+    _entry("gone", issue="2851"),
+    _entry("gone", until="soon"),
+    _entry("gone", kind="macro"),
+    "- symbol: gone\n  kind: function\n  until: \"0.19\"\n",
+    "not: a list\n",
+    "- [broken\n",
+])
+def test_malformed_waiver_fails(tmp_path, monkeypatch, bad):
+    _waive(tmp_path, monkeypatch, bad + "\n", rc=0, stdout="")
+    assert mod.main() == 1
+
+
+def test_waiver_never_masks_abidiff_error(tmp_path, monkeypatch):
+    _waive(tmp_path, monkeypatch, ALL_WAIVERS, rc=13)
+    assert mod.main() == 1
+
+
+def test_soname_only_real_report_passes(tmp_path, monkeypatch):
+    _wire(tmp_path, monkeypatch, 12, GOLDEN.read_text(encoding="utf-8"))
+    assert mod.main() == 0
+
+
+def test_error_bit_with_real_soname_text_fails(tmp_path, monkeypatch):
+    for rc in (1, 2, 13):
+        _wire(tmp_path, monkeypatch, rc, GOLDEN.read_text(encoding="utf-8"))
+        assert mod.main() == 1
+
+
+def test_shipped_waiver_file_is_valid():
+    ok, bad = mod.load_waivers(mod.REPO / mod.WAIVER_FILE, mod.sdk_minor(mod.REPO))
+    assert bad == []

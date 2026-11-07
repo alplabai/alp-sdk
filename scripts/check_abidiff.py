@@ -43,6 +43,14 @@ so it is visible on the run page.
 A missing abidiff SKIPS loudly (exit 0, banner on stderr) unless
 --require-tool is given (CI), in which case it fails.
 
+Waivers (#2851): docs/abi/abidiff-waivers.yaml lists reviewed, time-boxed
+exceptions (`symbol`, `kind`, `reason`, `issue`, `until`; format in that
+file's header).  A change whose abidiff entry is covered by a valid waiver
+is dropped and the applied waivers are printed; anything else still fails.
+A malformed waiver, a missing reason/issue, or one whose `until` minor has
+been reached by metadata/sdk_version.yaml FAILS the gate.  The gate as a
+whole stays advisory in CI (not a required context).
+
 Usage:
     python3 scripts/check_abidiff.py [--require-tool] [--baseline-tag TAG]
 """
@@ -62,6 +70,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 ABI_ERROR, ABI_USAGE, ABI_CHANGE, ABI_INCOMPATIBLE = 1, 2, 4, 8
+
+WAIVER_FILE = Path("docs") / "abi" / "abidiff-waivers.yaml"
+WAIVER_KINDS = ("function", "variable", "type")
 
 BUILD_ARGS = [
     "-DALP_OS=yocto",
@@ -134,6 +145,100 @@ def evaluate(rc: int, same_minor: bool) -> tuple[bool, str]:
     )
 
 
+def load_waivers(path: Path, minor: str) -> tuple[list[dict], list[str]]:
+    """(valid waivers, problems).  Any problem fails the gate."""
+    import yaml
+
+    if not path.is_file():
+        return [], []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        return [], [f"{path.name}: unparsable YAML: {e}"]
+    if data is None:
+        data = []
+    if not isinstance(data, list):
+        return [], [f"{path.name}: top level must be a list of waivers"]
+    cur = tuple(int(x) for x in minor.split("."))
+    ok, bad = [], []
+    for i, w in enumerate(data):
+        tag = f"{path.name} entry {i + 1}"
+        if not isinstance(w, dict):
+            bad.append(f"{tag}: not a mapping")
+            continue
+        tag += f" ({w.get('symbol')!r})"
+        errs = []
+        extra = set(w) - {"symbol", "kind", "reason", "issue", "until"}
+        if extra:
+            errs.append(f"unknown keys {sorted(extra)}")
+        for k in ("symbol", "reason"):
+            if not (isinstance(w.get(k), str) and w[k].strip()):
+                errs.append(f"`{k}` missing or empty")
+        if w.get("kind") not in WAIVER_KINDS:
+            errs.append(f"`kind` must be one of {'|'.join(WAIVER_KINDS)}")
+        if not (isinstance(w.get("issue"), str) and re.fullmatch(r"#\d+", w["issue"])):
+            errs.append("`issue` must be a quoted string like \"#2851\"")
+        u = w.get("until")
+        if not (isinstance(u, str) and re.fullmatch(r"\d+\.\d+", u)):
+            errs.append("`until` must be a quoted minor string like \"0.19\"")
+        elif tuple(int(x) for x in u.split(".")) <= cur:
+            errs.append(f"expired: `until` {u} reached (SDK is {minor}); fix the ABI "
+                        "break's follow-up or remove the waiver")
+        if errs:
+            bad.append(f"{tag}: " + "; ".join(errs))
+        else:
+            ok.append(w)
+    return ok, bad
+
+
+def parse_entries(report: str) -> list[dict]:
+    """Top-level `[D]`/`[C]` entries of an abidiff report.
+
+    Each: kind (function|variable), name, types (struct/union/enum names the
+    entry's block mentions).
+    """
+    entries: list[dict] = []
+    for ln in report.splitlines():
+        m = re.match(r"  \[[DC]\] '(.*?)'(.*)", ln)
+        if m:
+            decl, rest = m[1], m[2]
+            if decl.startswith("function "):
+                kind, nm = "function", re.search(r"(\w+)\(", decl)
+            else:
+                kind, nm = "variable", re.search(r"(\w+)$", decl)
+            sym = re.search(r"\{(\w+)\}", rest)
+            entries.append({"kind": kind,
+                            "name": sym[1] if sym else (nm[1] if nm else decl),
+                            "types": set()})
+        elif entries and ln.startswith("   "):
+            entries[-1]["types"].update(re.findall(r"'((?:struct|union|enum) \w+)'", ln))
+    return entries
+
+
+def apply_waivers(report: str, waivers: list[dict]) -> tuple[bool, list[dict]]:
+    """(everything covered, waivers applied).
+
+    True only when every Removed/Changed in the summaries was parsed into an
+    entry and each entry is covered; otherwise the caller keeps abidiff's rc.
+    """
+    entries = parse_entries(report)
+    expected = sum(
+        int(n) for ln in re.findall(r"changes summary: (.*)", report)
+        for n in re.findall(r"(\d+) (?:Removed|Changed)", ln)
+    )
+    if not entries or len(entries) != expected:
+        return False, []
+    used: list[dict] = []
+    for e in entries:
+        hit = [w for w in waivers
+               if (w["kind"] == e["kind"] and w["symbol"] == e["name"])
+               or (w["kind"] == "type" and w["symbol"] in e["types"])]
+        if not hit:
+            return False, []
+        used += [w for w in hit if w not in used]
+    return True, used
+
+
 def soname_only(report: str) -> bool:
     """True when abidiff's only finding is the ELF SONAME rename.
 
@@ -188,6 +293,13 @@ def main() -> int:
     ap.add_argument("--keep", action="store_true", help="keep the temp build dirs")
     args = ap.parse_args()
 
+    root = args.root
+    minor = sdk_minor(root)
+    waivers, problems = load_waivers(root / WAIVER_FILE, minor)
+    if problems:
+        for p in problems:
+            print(f"FAIL: {p}", file=sys.stderr)
+        return 1
     for tool in ("abidiff", "cmake"):
         if not shutil.which(tool):
             msg = f"{tool} not found"
@@ -203,8 +315,6 @@ def main() -> int:
             print("=" * 70, file=sys.stderr)
             return 0
 
-    root = args.root
-    minor = sdk_minor(root)
     tags = subprocess.run(["git", "-C", str(root), "tag", "--list", "v*"],
                           capture_output=True, text=True, encoding="utf-8", check=True).stdout.split()
     tag = args.baseline_tag or pick_baseline(minor, tags)
@@ -247,6 +357,13 @@ def main() -> int:
         if not (rc & (ABI_ERROR | ABI_USAGE)) and same_minor and s1 != s2 and soname_only(proc.stdout):
             print("note: only the SONAME rename differs (pre-#2839 baseline); ignored")
             rc = 0
+        if rc & (ABI_CHANGE | ABI_INCOMPATIBLE) and not rc & (ABI_ERROR | ABI_USAGE) and waivers:
+            covered, used = apply_waivers(proc.stdout, waivers)
+            if covered:
+                for w in used:
+                    print(f"waived: {w['kind']} {w['symbol']} ({w['issue']}, until "
+                          f"{w['until']}): {w['reason']}")
+                rc = 0
         # same_minor is false only with a --baseline-tag override.
         failed, why = evaluate(rc, same_minor)
         print(("FAIL: " if failed else "OK: ") + why)
