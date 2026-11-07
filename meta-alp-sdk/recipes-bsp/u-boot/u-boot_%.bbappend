@@ -434,6 +434,22 @@ SRC_URI:append:rzv2n-family = "     file://0016-rzv2n-dev-ALP-E1M-persistent-env
 # phy reg when the PHY is not where the DT says.
 SRC_URI:append:rzv2n-family = " file://0017-rzv2n-dev-ALP-E1M-gbeth-phy-address-fixup.patch"
 
+# 0018 (alp-sdk#2960, #2964): CONFIG_BOOTCOMMAND is split into a rootfs-select
+# block and a kernel-load block; two opt-in Kconfig symbols swap them and the
+# default command stays byte for byte what 0016 left.
+#  - mender-boot.cfg (CONFIG_ALP_E1M_MENDER) is added only when Mender's U-Boot
+#    integration is on (MENDER_FEATURES has mender-uboot): the slot comes from
+#    mender_boot_part / mender_boot_part_hex, and bootcount / bootlimit /
+#    altbootcmd give the rollback.  meta-mender-core's own bootcmd patch
+#    (0003-Disable-CONFIG_BOOTCOMMAND..., MENDER_UBOOT_AUTO_CONFIGURE) is
+#    switched off in mender.inc, because it would replace this bootcmd.
+#  - fit-signed.cfg (CONFIG_ALP_E1M_FIT) is added only for ALP_FIT_SIGNED=1
+#    (conf/include/alp-fit-signing.inc): bootm on boot/fitImage, with the
+#    signing key put into the control dtb by uboot-sign.bbclass.
+SRC_URI:append:rzv2n-family = " file://0018-rzv2n-dev-ALP-E1M-mender-ab-and-signed-fit-boot.patch"
+SRC_URI:append:rzv2n-family = "${@bb.utils.contains('MENDER_FEATURES', 'mender-uboot', ' file://mender-boot.cfg', '', d)}"
+SRC_URI:append:rzv2n-family = "${@' file://fit-signed.cfg' if d.getVar('ALP_FIT_SIGNED') == '1' else ''}"
+
 # Fallback dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  The dtb basename is
 # now derived at boot (0014); CONFIG_ALP_E1M_FDTFILE (patch 0002) is only
 # the fallback for a missing/invalid manifest, an unknown family, or a

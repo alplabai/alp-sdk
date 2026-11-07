@@ -542,6 +542,23 @@ bitbake alp-image-edge
 `flash` the `.wic.gz` for first-boot provisioning; subsequent
 updates ride the `.mender` artefact through the Mender server.
 
+### How the A/B boot works with U-Boot
+
+`mender.inc` turns on meta-mender's U-Boot integration (`mender-uboot`) and
+points it at the environment U-Boot actually uses: eMMC boot partition 2
+(`/dev/mmcblk0boot1`, copies at `0x220000` / `0x230000`, 64 KiB each), so
+`fw_setenv` from the Mender client and U-Boot read and write the same
+store. U-Boot patch `0018` makes the ALP `bootcmd` boot the slot Mender
+chose (eMMC partition 2 or 3, from `mender_boot_part`), counts boots in
+`bootcount` and, once `bootlimit` is exceeded with `upgrade_available=1`,
+runs Mender's `altbootcmd` to roll back. The root device and the mmc spec are
+literals in `bootcmd`; only a number (`2` or `3`) is read from the saved
+environment. Without Mender the default boot is unchanged.
+
+Writing `/dev/mmcblk0boot1` from Linux needs
+`echo 0 > /sys/block/mmcblk0boot1/force_ro` first (the kernel exposes boot
+partitions read-only); this layer does not do that for you.
+
 ### Mender status + scope
 
 - Recipe wiring lands in v0.6 (this revision).
@@ -554,6 +571,30 @@ updates ride the `.mender` artefact through the Mender server.
   up a hosted or self-hosted Mender server independently (per
   the project memory note "OTA server owned by Hakan, separate repo").
 - Reference rollout: [`docs/ota.md`](../docs/ota.md).
+
+## Pinned sources and how to bump them
+
+Every recipe that builds from this repository (`alp-sdk`, `alp-chips`, the
+examples and the ROS nodes) shares one `PV` and one `SRCREV`, both in
+`recipes-core/alp-sdk/alp-sdk-version.inc`, and every `SRC_URI` names
+`branch=main`. `SRCREV` is the commit the `v<PV>` release tag points at, so
+two builds of the same layer commit fetch the same sources. Nothing uses
+`${AUTOREV}` (`tests/scripts/test_yocto_srcrev_pin.py` fails if one does, or
+if a recipe fetches another branch).
+
+Bumping, after the release tag exists:
+
+```bash
+git fetch origin --tags
+git rev-parse 'v<new version>^{commit}'      # the commit to pin
+# edit alp-sdk-version.inc: PV = "<new version>", SRCREV = "<that sha>"
+```
+
+`scripts/bump_version.py` rewrites `PV` at release time; `SRCREV` can only
+be set once the tag commit exists, so it follows in the next change. To build
+unreleased work, override with `EXTERNALSRC` (see
+`recipes-examples/alp-drpai-inference/alp-drpai-inference_0.6.bb`) rather
+than floating the pin.
 
 ## Licence
 
