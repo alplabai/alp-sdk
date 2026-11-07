@@ -71,6 +71,14 @@ EXTRA_OECMAKE += "${@'-DALP_SDK_V2N_DOORBELL_RSP_CH8=ON' if d.getVar('ALP_V2N_DO
 ALP_SDK_INFERENCE_AUTO_ORDER ?= ""
 EXTRA_OECMAKE:append = "${@' -DALP_SDK_INFERENCE_AUTO_ORDER=' + d.getVar('ALP_SDK_INFERENCE_AUTO_ORDER') if d.getVar('ALP_SDK_INFERENCE_AUTO_ORDER') else ''}"
 
+# Active SoC capability profile (Kconfig-style symbol, e.g.
+# ALP_SOC_RENESAS_RZV2N_N44).  Generated from the SoM preset's silicon into
+# local.conf by `--emit yocto-conf`; CMake turns it into
+# CONFIG_<symbol>=1 so <alp/soc_caps.h> / ALP_SOC_REF_STR match the real
+# silicon.  Empty keeps the permissive "unknown SoC" profile.
+ALP_SDK_SOC ?= ""
+EXTRA_OECMAKE:append = "${@' -DALP_SOC=' + d.getVar('ALP_SDK_SOC') if d.getVar('ALP_SDK_SOC') else ''}"
+
 # Regenerate the CMake toolchain file as a do_configure prefunc.
 #
 # cmake.bbclass sequences its generator as `addtask generate_toolchain_file

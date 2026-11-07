@@ -9,9 +9,9 @@
  * to it.  Confirmed against the shared AEN-family SoM pinout (common with
  * AEN801 -- same E1M connector mapping).
  *
- * BRD_I2C (the on-module RV-3028 / TMP112 bus) and the RV-3028 alarm pad are
- * copied from the generated AEN803 pin control: the AEN SKUs share one SoM
- * PCB.  Other pin groups are added alongside their drivers.
+ * BRD_I2C (the on-module RV-3028 / TMP112 bus), the RV-3028 alarm pad and
+ * the E1M I2C0 bus (SoC I2C2) are copied from the generated AEN803 pin
+ * control: the AEN SKUs share one SoM PCB.  Other pin groups are added alongside their drivers.
  */
 
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
@@ -73,6 +73,22 @@
 		group1 {
 			pinmux = <PIN_P15_0__LPGPIO>;
 			input-enable;
+		};
+	};
+
+	/*
+	 * e1m_i2c0 = SoC I2C2 function C: P5_7 SDA / P5_6 SCL, portable alp-i2c0
+	 * (E1M edge bus 0 -- ALP_E1M_I2C0).  Carries the SoM's 24C128 manifest
+	 * EEPROM.  Same SoM PCB and same group as the generated AEN801/AEN803
+	 * pin control (input-enable + bias-pull-down, bench-validated on the E8
+	 * 2026-06-15; the EEPROM read was bench-run on an E1M-AEN401 M55-HP
+	 * 2026-10-12 with this same group, see examples/aen/aen-sdcard-file).
+	 */
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
+			input-enable;
+			bias-pull-down;
 		};
 	};
 };
