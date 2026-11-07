@@ -848,7 +848,7 @@ def test_emmc_boot1_write_accepts_an_image_ending_exactly_at_the_uboot_env(tmp_p
     good = md5(img.read_bytes())
     t, fake = target([("boot0/size", "16384\n"), ("md5sum", f"{good}  -\n"),
                       ("force_ro|rm -f|^dd |drop_caches", "")])
-    sector =gates.BOOT_ENV_OFFSET // 512 - 2           # 2 sectors * 512 B = the image, ends AT the env
+    sector = gates.BOOT_ENV_OFFSET // 512 - 2           # 2 sectors * 512 B = the image, ends AT the env
     assert lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, sector) == good
     assert any(c.startswith("dd if=") and " of=" in c for c in fake.commands)
 

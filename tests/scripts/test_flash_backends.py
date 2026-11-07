@@ -346,30 +346,84 @@ def test_require_block_device_rejects_missing_target(tmp_path) -> None:
     assert "cannot stat" in err
 
 
-def _fake_proc_mounts(tmp_path, text):
-    mounts = tmp_path / "mounts"
-    mounts.write_text(text, encoding="utf-8")
-    return patch.object(yocto_wic, "_PROC_MOUNTS", mounts)
+def _fake_host(tmp_path, mountinfo, swaps="Filename Type Size Used Priority\n"):
+    """A fake /proc + /sys: sda (sda2 = root), sdb (sdb1), dm-0 on sda3,
+    with /sys/dev/block maj:min links like the kernel's."""
+    sysroot = tmp_path / "sys"
+    devices = sysroot / "devices"
+    cls = sysroot / "class" / "block"
+    devblk = sysroot / "dev" / "block"
+    for d in (cls, devblk):
+        d.mkdir(parents=True)
+    nodes = {
+        "sda": (devices / "sda", "8:0", False),
+        "sda2": (devices / "sda" / "sda2", "8:2", True),
+        "sda3": (devices / "sda" / "sda3", "8:3", True),
+        "sdb": (devices / "sdb", "8:16", False),
+        "sdb1": (devices / "sdb" / "sdb1", "8:17", True),
+        "dm-0": (devices / "virtual" / "dm-0", "253:0", False),
+    }
+    for name, (path, majmin, is_part) in nodes.items():
+        path.mkdir(parents=True, exist_ok=True)
+        if is_part:
+            (path / "partition").write_text("1\n")
+        (cls / name).symlink_to(path)
+        (devblk / majmin).symlink_to(path)
+    (nodes["dm-0"][0] / "slaves").mkdir()
+    (nodes["dm-0"][0] / "slaves" / "sda3").symlink_to(nodes["sda3"][0])
+    mi = tmp_path / "mountinfo"
+    mi.write_text(mountinfo, encoding="utf-8")
+    sw = tmp_path / "swaps"
+    sw.write_text(swaps, encoding="utf-8")
+    return patch.multiple(yocto_wic, _PROC_MOUNTINFO=mi, _PROC_SWAPS=sw,
+                          _SYS_BLOCK=cls, _SYS_DEV_BLOCK=devblk)
 
 
-def test_require_unused_device_rejects_mounted_partition_of_target(tmp_path) -> None:
-    with _fake_proc_mounts(tmp_path, "/dev/sdb1 /mnt ext4 rw 0 0\n"), \
-         patch.object(yocto_wic, "_block_family",
-                      side_effect=lambda n, seen=None: {n, "sdb"}):
+_ROOT_AS_DEV_ROOT = "22 1 8:2 / / rw,relatime - ext4 /dev/root rw\n"
+_PROC = "23 22 0:21 / /proc rw - proc proc rw\n"
+
+
+def test_require_unused_device_rejects_disk_whose_partition_is_mounted(tmp_path) -> None:
+    with _fake_host(tmp_path, _PROC + "40 22 8:17 / /mnt rw - ext4 /dev/sdb1 rw\n"):
         err = _require_unused_device(Path("/dev/sdb"))
-    assert err is not None and "mounted" in err
+    assert err is not None and "sdb1" in err
 
 
-def test_require_unused_device_rejects_host_root_disk(tmp_path) -> None:
-    with _fake_proc_mounts(tmp_path, "/dev/sda2 / ext4 rw 0 0\n"):
-        err = _require_unused_device(Path("/dev/sda2"))
-    assert err is not None
+def test_require_unused_device_rejects_root_disk_shown_as_dev_root(tmp_path) -> None:
+    """The kernel lists a root= root as /dev/root; maj:min still maps it."""
+    with _fake_host(tmp_path, _ROOT_AS_DEV_ROOT + _PROC):
+        assert _require_unused_device(Path("/dev/sda")) is not None
+        assert _require_unused_device(Path("/dev/sda2")) is not None
+
+
+def test_require_unused_device_rejects_disk_under_mounted_dm(tmp_path) -> None:
+    with _fake_host(tmp_path, "41 22 253:0 / /home rw - ext4 /dev/mapper/vg-home rw\n"):
+        assert _require_unused_device(Path("/dev/sda")) is not None
+
+
+def test_require_unused_device_rejects_active_swap_partition(tmp_path) -> None:
+    swaps = "Filename Type Size Used Priority\n/dev/sdb1 partition 1024 0 -2\n"
+    with _fake_host(tmp_path, _PROC, swaps=swaps):
+        assert _require_unused_device(Path("/dev/sdb")) is not None
 
 
 def test_require_unused_device_allows_unrelated_disk(tmp_path) -> None:
-    with _fake_proc_mounts(
-            tmp_path, "proc /proc proc rw 0 0\n/dev/sda2 / ext4 rw 0 0\n"):
+    with _fake_host(tmp_path, _ROOT_AS_DEV_ROOT + _PROC):
         assert _require_unused_device(Path("/dev/sdb")) is None
+
+
+def test_require_unused_device_fails_closed_without_mount_table(tmp_path) -> None:
+    with _fake_host(tmp_path, _PROC), \
+         patch.object(yocto_wic, "_PROC_MOUNTINFO", tmp_path / "missing"):
+        err = _require_unused_device(Path("/dev/sdb"))
+    assert err is not None and "cannot verify" in err
+
+
+def test_require_unused_device_fails_closed_without_sysfs(tmp_path) -> None:
+    with _fake_host(tmp_path, _PROC), \
+         patch.object(yocto_wic, "_SYS_DEV_BLOCK", tmp_path / "nosys"):
+        err = _require_unused_device(Path("/dev/sdb"))
+    assert err is not None and "cannot verify" in err
 
 
 def test_yocto_wic_execution_refuses_mounted_device_before_running() -> None:

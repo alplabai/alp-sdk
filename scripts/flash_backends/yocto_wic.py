@@ -202,14 +202,15 @@ def _require_block_device(resolved: Path) -> "str | None":
     return None
 
 
-_PROC_MOUNTS = Path("/proc/mounts")
+_PROC_MOUNTINFO = Path("/proc/self/mountinfo")
+_PROC_SWAPS = Path("/proc/swaps")
 _SYS_BLOCK = Path("/sys/class/block")
+_SYS_DEV_BLOCK = Path("/sys/dev/block")
 
 
 def _block_family(name: str, seen: "set[str] | None" = None) -> "set[str]":
     """Return ``name`` plus every whole disk beneath it (partition parent,
-    device-mapper / md slaves), using sysfs.  Without sysfs the set is just
-    ``{name}``, so only an exact match is caught.
+    device-mapper / md slaves), using sysfs.
     """
     seen = seen if seen is not None else set()
     if name in seen:
@@ -227,31 +228,67 @@ def _block_family(name: str, seen: "set[str] | None" = None) -> "set[str]":
     return seen
 
 
+def _busy_block_devices() -> "list[tuple[str, str]]":
+    """``(what, kernel block name)`` for every mounted filesystem and active
+    swap area.  Mounts are identified by the ``maj:min`` in
+    /proc/self/mountinfo, resolved through /sys/dev/block, so a root shown
+    as ``/dev/root`` still maps to its real disk.  Raises ``OSError`` when
+    the mount table or sysfs cannot be read.
+    """
+    if not _SYS_DEV_BLOCK.is_dir():
+        raise OSError(f"{_SYS_DEV_BLOCK} not available")
+    busy: "list[tuple[str, str]]" = []
+    for ln in _PROC_MOUNTINFO.read_text(encoding="utf-8").splitlines():
+        fields = ln.split()
+        if len(fields) < 5:
+            continue
+        majmin, mountpoint = fields[2], fields[4]
+        dev = _SYS_DEV_BLOCK / majmin
+        if dev.exists():
+            busy.append((f"mounted at {mountpoint}", os.path.basename(os.path.realpath(dev))))
+            continue
+        # Anonymous device numbers (btrfs, overlay, tmpfs): fall back to the
+        # mount source after the " - " separator when it is a /dev node.
+        if " - " in ln:
+            tail = ln.split(" - ", 1)[1].split()
+            if len(tail) >= 2 and tail[1].startswith("/dev/"):
+                busy.append((f"mounted at {mountpoint}", os.path.basename(os.path.realpath(tail[1]))))
+    try:
+        for ln in _PROC_SWAPS.read_text(encoding="utf-8").splitlines()[1:]:
+            src = ln.split()[0] if ln.strip() else ""
+            if src.startswith("/dev/"):
+                busy.append(("active swap", os.path.basename(os.path.realpath(src))))
+    except OSError:
+        pass
+    return busy
+
+
 def _require_unused_device(resolved: Path) -> "str | None":
-    """Refuse a target that is mounted, or is (part of) the disk backing a
-    mounted filesystem -- notably the host's root disk.
+    """Refuse a target that is mounted, used as swap, or is (part of) the
+    disk backing a mounted filesystem -- notably the host's root disk.
 
     ``confirm`` alone is not a barrier: provision_som.py sets it under
     --execute, so a mistyped ``--emmc-device /dev/sda`` would otherwise
-    overwrite the workstation's system disk.  Reads ``/proc/mounts`` (Linux);
-    on a host without it the check is skipped, as the on-board writer
-    (provision/bmap_writer.py) does.  Returns ``None`` when safe.
+    overwrite the workstation's system disk.  Fails closed: when the mount
+    table or sysfs cannot be read the target cannot be proven unused, so it
+    is refused.  Multi-device btrfs members other than the one the kernel
+    reports, and ZFS pool members, are not detected.  Returns ``None`` when
+    safe.
     """
     try:
-        lines = _PROC_MOUNTS.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return None
+        busy = _busy_block_devices()
+    except OSError as exc:
+        return (
+            f"yocto_wic: refusing target '{resolved}' -- cannot verify it is "
+            f"not mounted ({exc}); write from a Linux host with /proc and /sys."
+        )
     target = os.path.basename(os.path.realpath(resolved))
-    for ln in lines:
-        src = ln.split(" ", 1)[0] if ln.strip() else ""
-        if not src.startswith("/dev/"):
-            continue
-        name = os.path.basename(os.path.realpath(src))
+    for what, name in busy:
         if target in _block_family(name):
             return (
-                f"yocto_wic: refusing target '{resolved}' -- it is mounted "
-                f"or backs a mounted filesystem ('{src}' in /proc/mounts); "
-                f"unmount it (and never target the host's root disk)."
+                f"yocto_wic: refusing target '{resolved}' -- it is or backs a "
+                f"device in use ('{name}', {what}); unmount it (and never "
+                f"target the host's root disk)."
             )
     return None
 
