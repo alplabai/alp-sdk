@@ -225,8 +225,8 @@ ZTEST(alp_testing_uart_behavior, test_timeout_boundary_delivered_after_deadline)
 
 /* Partial/short read: fewer bytes are queued than requested, and
  * nothing more is forthcoming within the window -- alp_uart_read()
- * documents ALP_OK with the partial data whenever at least one byte
- * arrived before the deadline.  Per that same contract (timeout_ms
+ * returns ALP_ERR_TIMEOUT (ALP_OK means all len bytes, issue #2934).
+ * Per the same contract (timeout_ms
  * bounds the WHOLE call, not the gap between bytes -- see
  * <alp/peripheral.h>), a real port would keep listening until the
  * deadline rather than return the instant its queue ran dry, so the
@@ -246,9 +246,8 @@ ZTEST(alp_testing_uart_behavior, test_partial_short_read)
 
 	uint8_t buf[5] = { 0 };
 	zassert_equal(alp_uart_read(h, buf, sizeof(buf), timeout_ms),
-	              ALP_OK,
-	              "read() must return ALP_OK on a partial fill (>0 bytes collected)");
-	zassert_mem_equal(buf, msg, sizeof(msg), "short read did not deliver the queued bytes");
+	              ALP_ERR_TIMEOUT,
+	              "read() must time out on a partial fill (ALP_OK means all len bytes)");
 	zassert_equal(alp_testing_clock_now_ms(),
 	              start + timeout_ms,
 	              "a partial fill must wait out the WHOLE timeout_ms (alp_uart_read bounds the "
@@ -285,7 +284,7 @@ ZTEST(alp_testing_uart_behavior, test_injected_error_surfaces_documented_status)
 }
 
 /* An error queued BEHIND already-collected data must not be consumed
- * on the same call: the call reports OK with the partial data, and
+ * on the same call: the call reports ALP_ERR_TIMEOUT (partial data), and
  * the error stays queued for the next read(). */
 ZTEST(alp_testing_uart_behavior, test_error_behind_data_stays_queued)
 {
@@ -301,9 +300,8 @@ ZTEST(alp_testing_uart_behavior, test_error_behind_data_stays_queued)
 
 	uint8_t buf[4] = { 0 };
 	zassert_equal(alp_uart_read(h, buf, sizeof(buf), 10),
-	              ALP_OK,
-	              "read() must stop at the queued error and return the data collected so far");
-	zassert_equal(buf[0], byte, "read() did not return the byte queued ahead of the error");
+	              ALP_ERR_TIMEOUT,
+	              "read() must stop at the queued error; a partial fill is not ALP_OK");
 
 	zassert_equal(alp_uart_read(h, buf, sizeof(buf), 10),
 	              ALP_ERR_IO,

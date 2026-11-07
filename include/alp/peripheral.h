@@ -1059,24 +1059,29 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
 /**
  * @brief Blocking UART read with millisecond timeout.
  *
+ * Returns @ref ALP_OK ONLY when all @p len bytes were received.
  * @p timeout_ms bounds the ENTIRE call, not just the gap between two
- * already-arrived bytes.  If the deadline is reached with zero bytes
- * collected, the call returns @ref ALP_ERR_TIMEOUT.  If at least one
- * byte arrived before the deadline but fewer than @p len, the call
- * returns @ref ALP_OK with the partial bytes in @p data -- the
- * caller has no count of how many, so read in smaller chunks (or
- * pair with @ref alp_uart_rx_ringbuf_attach) when a partial-fill
- * count matters.  @c timeout_ms == 0 is a single non-blocking poll:
- * return immediately with @ref ALP_ERR_TIMEOUT if no byte is already
- * available.
+ * already-arrived bytes: if the deadline is reached before @p len bytes
+ * arrived -- with zero bytes or with only some -- the call returns
+ * @ref ALP_ERR_TIMEOUT.  On ANY non-OK return the contents of @p data
+ * are unspecified and the bytes received so far are consumed (they are
+ * not redelivered); for partial or streaming reads that need a count,
+ * attach an RX ring with @ref alp_uart_rx_ringbuf_attach and use
+ * @ref alp_uart_rx_ringbuf_pop.  @c timeout_ms == 0 is a single
+ * non-blocking poll: it returns @ref ALP_OK only if @p len bytes are
+ * already available, otherwise @ref ALP_ERR_TIMEOUT.
  *
  * Data loss is never silent.  Without a ring buffer attached the read
  * polls the controller FIFO, so a burst longer than the FIFO that
  * arrives faster than the caller polls (high baud, a long
  * timeout-free gap between calls) overruns it; the call then returns
  * @ref ALP_ERR_IO instead of @ref ALP_OK with a corrupted frame (UART
- * overrun, framing or parity error reported by the driver).  For
- * bursts longer than the hardware FIFO attach an RX ring buffer with
+ * overrun, framing or parity error reported by the driver).  Polled
+ * mode cannot detect an overrun caused while the same thread is
+ * transmitting on ns16550-class UARTs (the Alif UARTs): their TX
+ * polling reads the line-status register, which clears the overrun
+ * flag, so a full-duplex exchange can lose bytes unreported.  For
+ * full-duplex use, or bursts longer than the hardware FIFO, attach an RX ring buffer with
  * @ref alp_uart_rx_ringbuf_attach (Zephyr:
  * CONFIG_ALP_SDK_UART_RX_RINGBUF=y): while one is attached this call
  * takes bytes from the ring, woken by the RX interrupt rather than
@@ -1085,15 +1090,14 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  * the last read/pop.  Loss already recorded when the call starts is
  * reported before any byte is consumed.
  *
- * On @ref ALP_ERR_IO the contents of @p data are unspecified and bytes
- * may already have been consumed from the ring or FIFO -- treat the
- * stream as having a gap and resynchronise.
+ * On @ref ALP_ERR_IO bytes may already have been consumed from the ring
+ * or FIFO -- treat the stream as having a gap and resynchronise.
  *
  * Concurrency: with a ring attached, this call and
  * @ref alp_uart_rx_ringbuf_pop are the SAME single consumer of the ring;
  * call them from one thread, or serialise them in the caller.  If the
- * ring is detached while this call waits, it returns promptly
- * (@ref ALP_ERR_NOT_READY when no byte had arrived).
+ * ring is detached while this call waits, it returns promptly with
+ * @ref ALP_ERR_NOT_READY (any bytes already received are consumed).
  *
  * @param[in]  port        Handle from @ref alp_uart_open.
  * @param[out] data        Destination buffer.
@@ -1103,8 +1107,8 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  *
  * @return ALP_OK / ALP_ERR_INVAL (@p data NULL with @p len > 0) /
  *         ALP_ERR_NOT_READY (NULL or closed @p port, or the ring buffer
- *         was detached during the wait before any byte arrived) /
- *         ALP_ERR_TIMEOUT / ALP_ERR_IO (line error or RX overrun: bytes
+ *         was detached during the wait) /
+ *         ALP_ERR_TIMEOUT (fewer than @p len bytes by the deadline) / ALP_ERR_IO (line error or RX overrun: bytes
  *         were lost) / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms);

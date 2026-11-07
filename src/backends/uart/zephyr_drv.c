@@ -253,13 +253,14 @@ z_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout
 			return _errno_to_alp(err);
 		}
 
-		/* err == -1: no byte ready yet.  Deadline expiry with at
-         * least one byte already collected is a partial read, per
-         * the documented contract -- only an empty read times out. */
+		/* err == -1: no byte ready yet.  Deadline expiry before len
+         * bytes is ALP_ERR_TIMEOUT whether got is 0 or not: ALP_OK
+         * means "all len bytes", the caller has no count to tell a
+         * short read apart (issue #2934). */
 		if (k_uptime_get() >= deadline) {
 			lrc = _line_error(dev);
 			if (lrc != ALP_OK) return lrc;
-			return (got > 0) ? ALP_OK : ALP_ERR_TIMEOUT;
+			return ALP_ERR_TIMEOUT;
 		}
 		/* k_msleep(1) instead of k_yield() so the system
          * tick actually advances on native_sim (k_yield
@@ -468,12 +469,12 @@ static alp_status_t _read_from_ring(alp_uart_backend_state_t *st,
 	alp_status_t rc;
 	if (atomic_set(&rb->dropped, 0) != 0) {
 		rc = ALP_ERR_IO; /* loss since the last report; @p data is unspecified */
-	} else if (got > 0) {
+	} else if (got >= len) {
 		rc = ALP_OK;
 	} else if (alp_lifecycle_get(&rb->lifecycle) != ALP_HANDLE_LC_OPEN) {
-		rc = ALP_ERR_NOT_READY; /* detached while we waited */
+		rc = ALP_ERR_NOT_READY; /* detached while we waited; partial bytes are consumed */
 	} else {
-		rc = ALP_ERR_TIMEOUT;
+		rc = ALP_ERR_TIMEOUT; /* fewer than len bytes by the deadline */
 	}
 	alp_handle_op_leave(&rb->active_ops);
 	return rc;

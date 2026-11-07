@@ -5,8 +5,8 @@
  * uart-rx-ringbuf — exercise the opt-in LwRB-backed RX path on
  * the console UART (EVK_UART_PORT_DEBUG).
  *
- * The classic alp_uart_read() blocks the calling thread until at
- * least one byte arrives.  That's fine for command-line prompts but
+ * The classic alp_uart_read() blocks the calling thread until all len
+ * bytes arrive (or the timeout expires with ALP_ERR_TIMEOUT).  That's fine for command-line prompts but
  * wrong for any task that needs to do other work while bytes trickle
  * in -- a chatty sensor talking at 9600 baud, a debug shell
  * multiplexed with a CAN bus drain, a GPS NMEA stream parsed once

@@ -103,8 +103,8 @@ ZTEST(alp_peripheral, test_uart_open_rejects_rts_cts_when_controller_cannot_conf
 /* #626: alp_uart_read() timeout_ms contract.                          */
 /*                                                                     */
 /* timeout_ms == 0 is a single non-blocking poll; a positive value     */
-/* bounds the ENTIRE call; a deadline reached with at least one byte   */
-/* already collected is a partial read (ALP_OK), not a timeout -- see  */
+/* bounds the ENTIRE call; a deadline reached before len bytes is     */
+/* ALP_ERR_TIMEOUT even if some arrived (ALP_OK = all len, #2934) -- see*/
 /* alp_uart_read() in <alp/peripheral.h> and its Yocto twin in         */
 /* src/yocto/peripheral_uart.c (#595/#621).                            */
 /*                                                                     */
@@ -211,21 +211,20 @@ ZTEST(alp_peripheral, test_uart_read_data_available_returns_promptly)
 	alp_uart_close(u);
 }
 
-ZTEST(alp_peripheral, test_uart_read_partial_arrival_then_deadline_returns_ok)
+ZTEST(alp_peripheral, test_uart_read_partial_arrival_then_deadline_returns_timeout)
 {
 	alp_uart_t *u = _open_uart1();
 	zassert_not_null(u);
 
 	/* Only the first of the two requested bytes ever arrives -- the
-     * deadline expires with a partial read in flight, which the
-     * documented contract folds to ALP_OK (not ALP_ERR_TIMEOUT). */
+     * deadline expires with a partial read in flight.  ALP_OK means all
+     * len bytes (issue #2934), so this is ALP_ERR_TIMEOUT. */
 	uint8_t sent = 0x01u;
 	zassert_equal(uart_emul_put_rx_data(_uart1_emul_dev, &sent, 1), 1u);
 
 	uint8_t      buf[2] = { 0, 0 };
 	alp_status_t s      = alp_uart_read(u, buf, sizeof(buf), 60);
-	zassert_equal(s, ALP_OK, "partial read at deadline must be ALP_OK, got %d", (int)s);
-	zassert_equal(buf[0], sent);
+	zassert_equal(s, ALP_ERR_TIMEOUT, "partial read at deadline must time out, got %d", (int)s);
 
 	alp_uart_close(u);
 }
@@ -597,6 +596,22 @@ ZTEST(alp_peripheral, test_uart_read_reports_loss_before_consuming_ring_bytes)
 	zassert_equal(alp_uart_rx_ringbuf_count(rb), 5u, "IO must not have consumed the ring");
 	zassert_equal(alp_uart_read(u, dst, sizeof(dst), 50), ALP_OK);
 	zassert_mem_equal(dst, five, sizeof(five));
+	alp_uart_close(u);
+}
+
+/* #2934: ring path -- only part of len arrives: ALP_ERR_TIMEOUT, not ALP_OK. */
+ZTEST(alp_peripheral, test_uart_read_ring_partial_at_deadline_returns_timeout)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+	static uint8_t backing[64];
+	zassert_not_null(alp_uart_rx_ringbuf_attach(u, backing, sizeof(backing)));
+
+	static const uint8_t two[2] = { 0xA1, 0xA2 };
+	(void)uart_emul_put_rx_data(_uart1_emul_dev, two, sizeof(two));
+
+	uint8_t dst[4];
+	zassert_equal(alp_uart_read(u, dst, sizeof(dst), 60), ALP_ERR_TIMEOUT);
 	alp_uart_close(u);
 }
 
