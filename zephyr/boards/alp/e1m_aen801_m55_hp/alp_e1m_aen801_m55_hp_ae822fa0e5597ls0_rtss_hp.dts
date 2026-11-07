@@ -195,7 +195,7 @@
 	current-speed = <115200>;
 };
 
-/* lptimer0 belongs to the M55-HE: its IRQ is an HE vector-map line. */
+/* lptimer0 is per-app: an app that needs it enables it in its board overlay. */
 &lptimer0 {
 	status = "disabled";
 };

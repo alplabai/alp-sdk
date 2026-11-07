@@ -35,14 +35,21 @@ class TestAenDtsCoreOwnership(unittest.TestCase):
         for b in E8_HE:
             self.assertNotIn("status", _storage_block(_dts(b)), b)
 
-    def test_hp_e8_lptimer0_disabled(self) -> None:
-        for b in E8_HP:
+    def test_e8_lptimer0_disabled_by_default_on_both_cores(self) -> None:
+        for b in E8_HP + E8_HE:
             self.assertRegex(_dts(b), r'&lptimer0 \{\s*status = "disabled";', b)
+
+    def test_power_stop_overlays_enable_lptimer0(self) -> None:
+        d = REPO / "examples" / "aen" / "aen-power-stop" / "boards"
+        for b in ("alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he",
+                  "alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp",
+                  "alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp"):
+            self.assertRegex((d / f"{b}.overlay").read_text(encoding="utf-8"),
+                             r'&lptimer0 \{\s*status = "okay";', b)
 
     def test_he_e8_keeps_lptimer0_and_lp_peripherals(self) -> None:
         for b in E8_HE:
             t = _dts(b)
-            self.assertNotIn("&lptimer0", t, b)
             self.assertIn("ensemble_e8_he_peripherals.dtsi", t, b)
         for b in E8_HP:
             self.assertNotIn("ensemble_e8_he_peripherals.dtsi", _dts(b), b)

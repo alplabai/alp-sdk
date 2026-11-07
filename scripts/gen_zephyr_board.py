@@ -2183,11 +2183,13 @@ def _aen_dts(
         "};",
         "",
     ]
-    if part == "E8" and role == "hp":
-        # lptimer0 is the LPTIMER the HE owns (IRQ 60 is an M55HE_IRQS[] line);
-        # the shared E8 dtsi leaves it okay, so the HP image must opt out (#2984).
+    if part == "E8":
+        # lptimer0 is a single-owner timer (its channel registers and its IRQ,
+        # an M55HE_IRQS[] line, are shared): off on both cores by default, each
+        # app that needs it (STOP wake timer, counter) enables it in its own
+        # board overlay (#2984).
         lines += [
-            "/* lptimer0 belongs to the M55-HE: its IRQ is an HE vector-map line. */",
+            "/* lptimer0 is per-app: an app that needs it enables it in its board overlay. */",
             "&lptimer0 {",
             '\tstatus = "disabled";',
             "};",

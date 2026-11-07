@@ -743,11 +743,11 @@
 		clock-source = <0>;       /* 0 = 32 kHz VBAT LF source */
 		clock-frequency = <32768>;
 		/*
-		 * Explicit, like channels 1..3 below.  This node has been "okay" by
-		 * DT default since it landed (COUNTER_ALIF_LPTIMER is default y and
-		 * the hp_vision_check.sh peripheral audit allow-lists 0x42001000),
-		 * so "okay" keeps every build as it was; the power layer also
-		 * claims it as the alp,power-wake-timer chosen node.
+		 * Single-owner timer: the generated AEN board trees set this
+		 * "disabled" on both cores, and the app that needs it (the STOP
+		 * wake timer, a counter) enables it in its own board overlay.
+		 * Left "okay" here only so a tree that does not override it keeps
+		 * the pre-#2984 behaviour.
 		 */
 		status = "okay";
 	};
@@ -1728,6 +1728,7 @@
 		/*
 		 * The always-on LPTIMER channel the SoM power layer arms as a STOP
 		 * wake source (#2784).  Plumbing only: nothing consumes it yet.
+		 * Off on every generated board until an app's overlay enables it.
 		 * SHORT intervals only: it runs on the VBAT LF source, which on the
 		 * bench SES is the LFRC (about 5 % error; "[SES] No LF XTAL").  Long
 		 * intervals use the on-module RV-3028 countdown timer on RTC_ALARM

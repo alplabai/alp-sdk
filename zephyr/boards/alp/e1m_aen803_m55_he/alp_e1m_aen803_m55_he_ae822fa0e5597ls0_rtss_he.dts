@@ -200,6 +200,11 @@
 	current-speed = <115200>;
 };
 
+/* lptimer0 is per-app: an app that needs it enables it in its board overlay. */
+&lptimer0 {
+	status = "disabled";
+};
+
 /*
  * BRD_I2C -- the on-module housekeeping bus: SoC I2C0 in its function-C
  * muxing (P7_0 SDA / P7_1 SCL), NOT the slave-only LPI2C0 it was
