@@ -28,7 +28,7 @@ exercises one parser surface with corpora-driven input.
 | `iot_mqtt_fuzz.c`          | MQTT v3.1.1 fixed + variable-length header decoder, as consumed by `<alp/iot.h>`'s MQTT path. |
 | `eeprom_manifest_fuzz.c`   | 24C128 EEPROM manifest decoder consumed by `<alp/hw_info.h>` (magic + schema_version + CRC32). |
 | `gd32_bridge_frame_fuzz.c` | Drives `protocol_dispatch` from `gd32-bridge-firmware:src/protocol.c` against arbitrary opcode + payload bytes, then cross-checks the firmware-side `crc16_ccitt_false` symbol against an in-harness reference impl on every iteration -- silent CRC drift between the two becomes a libFuzzer crash. |
-| `swd_packet_fuzz.c`        | Arm SWD packet header + 32-bit data parity decoder used by `chips/gd32_swd/`.  Still an inline reference parser pending the host driver factoring its parity helpers out as non-static functions; TODO tracked in the file header. |
+| `swd_packet_fuzz.c`        | Links the production `chips/gd32_swd/gd32_swd.c` and drives gd32_swd_init / connect / halt / flash_write / verify / reset_and_run against a fuzz-fed SWDIO bit stream (ACK, data word, parity), faking only the pad seam and `alp_gpio_*`. |
 
 The `cc3501e_fuzz.c`, `iot_mqtt_fuzz.c`, `eeprom_manifest_fuzz.c`
 harnesses still carry an *inline* reference parser -- the SDK

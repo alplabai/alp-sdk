@@ -45,6 +45,11 @@ _alp_add_fuzz_target(iot_mqtt)
 _alp_add_fuzz_target(eeprom_manifest)
 _alp_add_fuzz_target(gd32_bridge_frame)
 _alp_add_fuzz_target(swd_packet)
+# Link the production SWD driver; the harness fakes only the pad seam + alp_gpio_*.
+target_sources(alp_fuzz_swd_packet PRIVATE
+    ${CMAKE_SOURCE_DIR}/chips/gd32_swd/gd32_swd.c)
+target_include_directories(alp_fuzz_swd_packet PRIVATE
+    ${CMAKE_SOURCE_DIR}/chips/gd32_swd)
 _alp_add_fuzz_target(mproc_frame)
 # Link the production framing so the harness fuzzes the decoder the Zephyr
 # mproc driver actually calls, not an inline copy.
