@@ -149,7 +149,7 @@ hangs the queue (#1415):
 - `clang-format · diff-only` (`pr-static-analysis.yml`)
 - `distro install · all` (`pr-bootstrap-distro-install.yml`)
 - `twister · native_sim/native/64` (`pr-twister.yml`)
-- `python-smoke · all` (`cross-platform-zephyr.yml`)
+- `python-smoke · all` (`cross-platform-zephyr.yml`) -- runs its ubuntu-latest leg in the merge queue as well
 - `metadata-validate · all` (`pr-metadata-validate.yml`)
 - `doc-drift · all` (`pr-doc-drift.yml`; added by #2972)
 

@@ -233,3 +233,18 @@ def test_doc_drift_summary_is_requireable() -> None:
     assert "exit 1" in run
     assert re.search(r"\*\)\s+echo \"::error::doc-drift concluded", run)
 
+
+
+def test_python_smoke_runs_in_the_merge_queue() -> None:
+    """`python-smoke · all` is required on dev (#2972): the queue must run
+    the pytest leg on the rebased content, and the summary must not count a
+    merge_group skip as a pass."""
+    jobs = _load("cross-platform-zephyr.yml")["jobs"]
+    smoke_if = jobs["python-smoke"]["if"]
+    assert "!= 'merge_group'" not in smoke_if
+    assert "github.event_name == 'merge_group'" in smoke_if
+    summary_steps = " ".join(str(s.get("run", "")) for s in jobs["python-smoke-summary"]["steps"]) if "python-smoke-summary" in jobs else ""
+    if not summary_steps:
+        summary = next(j for j in jobs.values() if j.get("name") == "python-smoke · all")
+        summary_steps = " ".join(str(s.get("run", "")) for s in summary["steps"])
+    assert "intentionally skipped on merge_group" not in summary_steps

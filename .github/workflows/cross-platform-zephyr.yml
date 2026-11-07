@@ -15,17 +15,15 @@
 # ubuntu-latest).  This workflow ADDS Mac + Win coverage; it does
 # not replace any existing gate.
 #
-# `merge_group` (2026-09, merge-queue speed pass): `python-smoke` and
-# `loader-smoke` now SKIP unconditionally on this event instead of
-# force-running the ubuntu-only leg. Only the `python-smoke · all` summary
-# is a required context on `dev` (it passes on a merge_group skip), and
-# every commit reaching the merge queue
-# already ran this exact job on `pull_request` first -- re-running it here
-# re-validates nothing new and only takes a runner slot from the same
-# shared pool the REQUIRED `twister-shard`/`distro-install` jobs are
-# waiting on (merge-queue-ejection-alarm.yml exists because of a real
-# runner-starvation ejection, alp-sdk#1952/#1887). See each job's own `if:`
-# comment for the mechanics. The `merge_group:` trigger below stays --
+# `merge_group`: `python-smoke` RUNS its ubuntu-latest leg on this event
+# (alp-sdk#2972) because `python-smoke · all` is a required context on
+# `dev`, so the queue tests the rebased content, not only the PR head.
+# macOS/Windows legs stay pull_request/push-only to keep the shared runner
+# pool free for the REQUIRED `twister-shard`/`distro-install` jobs
+# (merge-queue-ejection-alarm.yml exists because of a real runner-starvation
+# ejection, alp-sdk#1952/#1887). `loader-smoke` still skips on merge_group;
+# it is not required. See each job's own `if:` comment for the mechanics.
+# The `merge_group:` trigger below stays --
 # removing it would reopen #1415 now that `python-smoke · all` is required.
 #
 # Operating mode:
@@ -271,18 +269,14 @@ jobs:
     # succeeded, AND genuinely found no watched path changed. Anything
     # else (workflow_dispatch, a `detect` non-success) runs the real job.
     #
-    # `merge_group` is now an EXPLICIT skip, not a forced run (2026-09,
-    # merge-queue speed pass): this job is not a required context on `dev`
-    # (see the header NOTE), and the content a queue entry carries already
-    # ran this exact job on `pull_request` before it was ever enqueued --
-    # re-running it here only burns a runner slot from the same shared pool
-    # the REQUIRED `twister-shard`/`distro-install` jobs are waiting on
-    # (`merge-queue-ejection-alarm.yml` exists because of a real runner-
-    # starvation ejection, alp-sdk#1952/#1887). The `merge_group` trigger
-    # stays on the workflow (removing it would reopen #1415 for whichever
-    # future PR promotes `python-smoke · all` to required); only this job's
-    # `if:` changes. Re-widen this the day that promotion happens.
-    if: always() && github.event_name != 'merge_group' && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
+    # `merge_group` RUNS this job (alp-sdk#2972): `python-smoke · all` is a
+    # required context on `dev`, so the queue must test the rebased content,
+    # not only the PR head. The matrix below caps the queue run to the
+    # ubuntu-latest leg (macOS/Windows stay pull_request/push-only) to keep
+    # the shared runner pool free for the required twister shards
+    # (alp-sdk#1952/#1887 ejection risk). `detect` is skipped on
+    # merge_group, so `needs.detect.result != 'success'` is what runs it.
+    if: always() && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     runs-on: ${{ matrix.os }}
     # #1477: worst observed successful run 1068s/17.8min (windows-latest,
     # across 9 sampled runs) -- driven by the `pytest tests/scripts/`
@@ -623,18 +617,8 @@ jobs:
               exit 0
               ;;
             skipped)
-              # merge_group: python-smoke's own `if:` now skips it
-              # unconditionally (merge-queue speed pass, 2026-09) -- the
-              # content already ran this exact job on `pull_request` before
-              # the entry was enqueued, and re-running it here only takes a
-              # runner slot from the required twister-shard/distro-install
-              # jobs' shared pool. Not conditioned on `detect` at all: unlike
-              # the pull_request/push case below, this skip does not depend
-              # on which paths changed.
-              if [ "${EVENT_NAME}" = "merge_group" ]; then
-                echo "PASS: python-smoke intentionally skipped on merge_group -- NOT re-run on the rebased queue content; only its pull_request run (against the PR head) graded this change"
-                exit 0
-              fi
+              # merge_group runs python-smoke (alp-sdk#2972), so a skip there
+              # is a broken gate and falls through to the error below.
               if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ]; } \
                  && [ "${DETECT_RESULT}" = "success" ] && [ "${DETECT_RELEVANT}" != "true" ]; then
                 echo "PASS: python-smoke legitimately skipped -- detect ran, succeeded, and found no watched path changed"
