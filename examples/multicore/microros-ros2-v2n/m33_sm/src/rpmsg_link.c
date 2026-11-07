@@ -33,7 +33,8 @@
  * Attach protocol (same as ../../rpmsg-v2n/m33_sm/src/main.c, #683/#2586)
  *   The A55 backend (src/backends/rpc/yocto_uio_drv.c, uio_attach_reset())
  *   runs on EVERY alp_rpc_open().  It reads the beacon at the top of the
- *   rsctbl page (<alp/protocol/amp_beacon.h>) and:
+ *   rsctbl page (<alp/protocol/amp_beacon.h>, published by the shared
+ *   zephyr/drivers/ipc/alp_v2n_beacon.c) and:
  *     - no magic            -> fails the open with ALP_ERR_NOT_READY;
  *     - epoch ODD (bound)   -> writes vdev.status = 0, kicks, and waits for
  *                              EVEN, then zeroes both vrings;
@@ -53,13 +54,11 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
-#include <zephyr/sys/barrier.h>
 
 #include <metal/device.h>
 #include <openamp/open_amp.h>
 
-#include <alp/protocol/amp_beacon.h>
-
+#include "alp_v2n_beacon.h"
 #include "resource_table.h"
 #include "rpmsg_link.h"
 
@@ -83,13 +82,6 @@ LOG_MODULE_REGISTER(rpmsg_link, LOG_LEVEL_INF);
 
 /* CM33 -> A55 doorbell: MHU-B SWINT unit 12 SET (see rpmsg-v2n main.c). */
 #define ALP_M33_MHU_SWINT12_SET (0x504808C4U)
-
-/* Beacon version 2 = attach reset supported (ALP_AMP_BEACON_VERSION_ATTACH_ACK);
- * the A55 backend refuses a re-attach below that.  The beacon is the top 16
- * bytes of the rsctbl page, out of the way of the resource table memcpy'd to
- * its low end by platform_init(). */
-#define RSCTBL_BEACON_VERSION ALP_AMP_BEACON_VERSION_ATTACH_ACK
-#define RSCTBL_BEACON         ALP_AMP_BEACON_AT(RSC_TABLE_ADDR, DT_REG_SIZE(DT_NODELABEL(rsctbl)))
 
 /* <alp/rpc.h> method that carries XRCE datagrams; the length includes the NUL. */
 #define XRCE_METHOD     "xrce"
@@ -153,41 +145,6 @@ static void mbox_rx_cb(const struct device *dev, mbox_channel_id_t ch, void *u, 
 	ARG_UNUSED(m);
 	k_sem_give(&doorbell_sem);
 }
-
-/* Writes the one-shot half of the beacon.  Magic goes last: the A55 trusts
- * epoch and version only once it reads the magic, and the page survives a
- * reset of this core, so every boot rewrites all of it. */
-static void beacon_publish(void)
-{
-	RSCTBL_BEACON->heartbeat    = 0U;
-	RSCTBL_BEACON->attach_epoch = 0U;
-	RSCTBL_BEACON->version      = RSCTBL_BEACON_VERSION;
-	barrier_dsync_fence_full();
-	RSCTBL_BEACON->magic = ALP_AMP_BEACON_MAGIC;
-	barrier_dsync_fence_full();
-}
-
-/* Flips the attach epoch's parity: even -> odd once the virtio device is
- * bound, odd -> even once it is gone (the A55 waits for that EVEN). */
-static void beacon_epoch_bump(void)
-{
-	barrier_dsync_fence_full();
-	RSCTBL_BEACON->attach_epoch = RSCTBL_BEACON->attach_epoch + 1U;
-	barrier_dsync_fence_full();
-}
-
-/* ~1 Hz heartbeat: growth between two A55 reads = this firmware is alive. */
-static uint32_t heartbeat_count;
-
-static void heartbeat_expiry(struct k_timer *timer)
-{
-	ARG_UNUSED(timer);
-	heartbeat_count++;
-	RSCTBL_BEACON->heartbeat = heartbeat_count;
-	barrier_dsync_fence_full();
-}
-
-K_TIMER_DEFINE(heartbeat_timer, heartbeat_expiry, NULL);
 
 /* Runs on the manager thread (inside rproc_virtio_notified). */
 static int ept_rx_cb(struct rpmsg_endpoint *e, void *data, size_t len, uint32_t src, void *priv)
@@ -313,7 +270,7 @@ static struct rpmsg_device *create_rpmsg_vdev(void)
 	if (rpmsg_init_vdev(&rvdev, vdev, NULL, shm_io, &shpool)) {
 		goto failed;
 	}
-	beacon_epoch_bump(); /* even -> odd: bound */
+	alp_v2n_beacon_epoch_bump(); /* even -> odd: bound */
 	return rpmsg_virtio_get_rpmsg_device(&rvdev);
 
 failed:
@@ -350,7 +307,7 @@ static void link_reset(void)
 	k_sem_reset(&peer_sem);
 	k_sem_reset(&doorbell_sem);
 	atomic_set(&link_resetting, 0);
-	beacon_epoch_bump(); /* odd -> even: waiting; the A55 may proceed */
+	alp_v2n_beacon_epoch_bump(); /* odd -> even: waiting; the A55 may proceed */
 }
 
 /* Manager thread: one pass per A55 attach.  Bring the vdev up, create the
@@ -400,8 +357,7 @@ int rpmsg_link_start(void)
 	/* First action, ahead of OpenAMP/libmetal init: the A55 backend refuses to
 	 * open without the magic, and a bench read that catches this firmware
 	 * mid-fault still sees "alive, once". */
-	beacon_publish();
-	k_timer_start(&heartbeat_timer, K_SECONDS(1), K_SECONDS(1));
+	alp_v2n_beacon_start();
 
 	if (platform_init() != 0) {
 		return -1;
