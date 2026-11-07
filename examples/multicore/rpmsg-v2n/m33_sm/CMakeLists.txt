@@ -74,4 +74,9 @@ target_include_directories(app PRIVATE ${LIBMETAL_INCLUDE_DIR} ${OPENAMP_INCLUDE
                             ${PLATFORM_DIR})
 target_include_directories(app PRIVATE src)
 
-target_sources(app PRIVATE src/main.c src/resource_table.c)
+# The vendor-shaped resource table, the liveness beacon and the reverse
+# doorbell are shared with the <alp/rpc.h> ipc_service backend (V2N/V2M CM33).
+set(_alp_v2n_ipc ${ALP_SDK_ROOT}/zephyr/drivers/ipc)
+target_include_directories(app PRIVATE ${_alp_v2n_ipc})
+target_sources(app PRIVATE src/main.c ${_alp_v2n_ipc}/resource_table.c
+                           ${_alp_v2n_ipc}/alp_v2n_beacon.c)

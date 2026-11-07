@@ -1176,11 +1176,11 @@ def _validate_cross_fields(
         att_root = psa.get("attestation_root")
         if att_root == "optiga_trust_m":
             if _is_i2c_chip_unassembled(som_preset, "optiga_trust_m"):
-                # #2316, same class as #2311's OSPI guard: E1M-AEN801/803
-                # carry `capabilities.optiga_trust_m: true` and name the
-                # part under `on_module:`, but the part itself is DNP
-                # (`assembled: false` on its i2c_devices entry).  The
-                # population fact wins -- an attestation root on a part
+                # #2316, same class as #2311's OSPI guard: every E1M-AEN
+                # SKU names the part under `on_module:` with
+                # `assembled: false` (IC1 is DNP on the shared AEN PCB,
+                # #2958), and capabilities.optiga_trust_m now follows
+                # population (#2990).  The population fact wins -- an attestation root on a part
                 # this SKU does not carry would build and then fail on
                 # silicon.
                 where = f"SoM {sku}" if sku else "this SoM"

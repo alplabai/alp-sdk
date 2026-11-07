@@ -124,7 +124,7 @@ on_module:
     brd_i2c:
       devices:
         - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
-        - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30" }
+        - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30", assembled: false }
         - { chip: tmp112,           role: temp_sensor,     address_7bit: "0x40",
             notes: "Address per TI SBOS473L. The BOM's exact orderable MPN TMP112DIDPWR is X2SON (DPW), 5 pins only (SBOS473L p.44) -- no SOT563-6 orderable carries that MPN (those are TMP112AIDRLR / TMP112BIDRLR / TMP112NAIDRLR). Per SBOS473L Table 7-4 the X2SON-5 'Address Variant Only' TMP112D row straps ADD0->GND to 0x40, so 0x40 is the design address for the part this board specifies. Bench agrees on 3 of 3 modules: 0x48 silent, 0x40 answering with the three-of-three TMP112 register fingerprint (CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000, the datasheet power-on defaults) and a plausible temperature. The earlier declared 0x48 was an error in this metadata, and it is why the stock CONFIG_TMP112 driver never bound -- the emitted devicetree node sat at an address nothing answers (alp-sdk#1978)." }
     # SoC I2C2, bridge/DNP-selected onto the E1M portable I2C0 pads -- the
@@ -169,7 +169,7 @@ inference:
   ethos_u_variant:      u55
 
 capabilities:
-  optiga_trust_m:       true
+  optiga_trust_m:       false      # DNP=1 (assembled: false in i2c_devices); capability tracks population.
 
 # Standard board the SoM mounts on for development.  Consumers
 # can pick any board or write their own in board.yaml.

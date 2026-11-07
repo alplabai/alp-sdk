@@ -77,15 +77,22 @@ When a new Zephyr LTS lands and we want to adopt it:
 
 1. **Open a tracking issue** at `alplabai/alp-sdk` titled
    `Zephyr <new-LTS>: bump alp-sdk minor`.
-2. **Verify vendor packs.**  Confirm `hal_alif`, Renesas RZ/V2N AI
-   SDK, and DEEPX DXNN ship a revision that
-   targets the new Zephyr LTS.  If any is lagging, defer.
+2. **Verify vendor packs.**  Confirm the `hal_alif` module builds and
+   bench-passes against the pinned Zephyr (a vendor merely "targeting"
+   the new release is not evidence), and that the Renesas RZ/V2N AI SDK
+   and DEEPX DXNN ship a revision that targets it.  If any is lagging,
+   defer.
 3. **Branch + bump all the pins together** in a single PR:
    - Edit `metadata/bootstrap.json` &mdash; `zephyr.version` (the pin's
-     single source, issue #917).
+     single source, issue #917).  `halAlif.version` is the matching
+     single source for the `hal_alif` pin; edit it too if step 2 selected
+     a new `hal_alif` tag.
+   - Check `prerequisites.cmakeMinVersion` against the new Zephyr's own
+     CMake floor (Zephyr 4.5 requires CMake >= 3.28).
    - Run `python3 scripts/check_bootstrap_manifest.py --fix` to propagate
      that one edit to every dependent machine-pin site:
-     - `west.yml` &mdash; `projects.zephyr.revision`
+     - `west.yml` &mdash; `projects.zephyr.revision` and the `hal_alif`
+       project's `revision` (from `halAlif.version`)
      - `.github/workflows/pr-twister.yml` &mdash; `--mr` arg + cache key
      - `.github/workflows/pr-tier-a-libraries.yml` &mdash; `--mr` arg + cache key
      - `.github/workflows/pr-getting-started-aen801.yml` &mdash; cache key

@@ -66,7 +66,7 @@ examples/multicore/microros-ros2-v2n/
 
 The RPMsg bring-up in `m33_sm/src/rpmsg_link.c` is the bench-proven
 sequence from [`../rpmsg-v2n`](../rpmsg-v2n/) (#683/#697/#2374); the
-resource table is compiled straight from `../rpmsg-v2n/m33_sm/src/`.
+resource table is compiled straight from the SDK's `zephyr/drivers/ipc/`.
 
 ## Prerequisites
 

@@ -115,26 +115,28 @@
  * like a subscriber callback already could.
  *
  * CONFIRMED against the pinned Zephyr v4.4.1 tree (see west.yml),
- * not merely BENCH-UNVERIFIED: the only backend CONFIG_ALP_SDK_RPC
- * permits (`depends on IPC_SERVICE_BACKEND_RPMSG && OPENAMP`,
- * zephyr/kconfigs/mproc-rpc-usb.kconfig) is
+ * not merely BENCH-UNVERIFIED: of the two backends CONFIG_ALP_SDK_RPC
+ * permits (`depends on IPC_SERVICE_BACKEND_RPMSG ||
+ * IPC_SERVICE_BACKEND_ALP_V2N_RPMSG`, zephyr/kconfigs/mproc-rpc-usb.kconfig),
+ * the upstream one is
  * subsys/ipc/ipc_service/backends/ipc_rpmsg_static_vrings.c, whose
  * `received`/`bound` invocations (`ept->cb->received`/`bound`) are the
  * ONLY `ept->cb->*` calls it makes -- it never calls `cb->unbound` or
  * `cb->error`.  Those two are invoked only by the ICMsg backend family
  * (subsys/ipc/ipc_service/lib/icmsg.c), which this Kconfig does not
- * select.  So in THIS revision, on Zephyr, ALP_RPC_LINK_UP is
- * reliably reported but ALP_RPC_LINK_LOST is NOT observable through
- * ipc_service at all: rpc_ept_unbound()/rpc_ept_error() are wired,
+ * select.  So on the AEN M55 cores ALP_RPC_LINK_UP is reliably
+ * reported but ALP_RPC_LINK_LOST is NOT observable through the
+ * upstream backend: rpc_ept_unbound()/rpc_ept_error() are wired,
  * tested (see tests/unit/rpc_zephyr_backend), and correct, but
- * structurally unreachable under the pinned RPMsg static-vrings
- * backend.  Kept rather than deleted -- this is forward-compatible
- * dead code, not legacy: it goes live the day either upstream
- * Zephyr's RPMsg backend starts propagating its ns-unbind, or a
- * future backend swap (e.g. ICMsg) lands.  Until then, the only
- * backend that can report a genuine ALP_RPC_LINK_LOST is
- * src/backends/rpc/yocto_drv.c's rx-thread read()-EOF/error path
- * (Linux/A-class cores) -- see include/alp/rpc.h's `@par Link
+ * unreachable there.
+ *
+ * The other backend, the SDK's own V2N/V2M CM33 one
+ * (zephyr/drivers/ipc/ipc_alp_v2n_rpmsg.c), DOES call `unbound` when the
+ * Linux A55 resets the link (a re-attach), so rpc_ept_unbound() is live on
+ * that core (build-verified only; BENCH-UNVERIFIED), and `bound` fires again
+ * once the A55 re-attaches and sends its first frame.  The other backend that
+ * can report ALP_RPC_LINK_LOST is src/backends/rpc/yocto_drv.c's
+ * rx-thread read()-EOF/error path (Linux/A-class cores) -- see include/alp/rpc.h's `@par Link
  * liveness` block for the customer-facing version of this same
  * caveat, and this issue's `needs-silicon` label for what genuinely
  * still needs a bench (which of `unbound` vs `error` a REAL far-core
@@ -160,9 +162,11 @@
 #if defined(CONFIG_ALP_SDK_RPC)
 
 #if !defined(CONFIG_OPENAMP) || !defined(CONFIG_IPC_SERVICE) || \
-    !defined(CONFIG_IPC_SERVICE_BACKEND_RPMSG)
+    (!defined(CONFIG_IPC_SERVICE_BACKEND_RPMSG) && \
+     !defined(CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG))
 #error "alp_rpc requires CONFIG_ALP_SDK_RPC=y + CONFIG_OPENAMP=y + " \
-       "CONFIG_IPC_SERVICE=y + CONFIG_IPC_SERVICE_BACKEND_RPMSG=y"
+       "CONFIG_IPC_SERVICE=y + CONFIG_IPC_SERVICE_BACKEND_RPMSG=y " \
+       "(or CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG=y on the V2N/V2M CM33)"
 #endif
 
 #include <zephyr/ipc/ipc_service.h>

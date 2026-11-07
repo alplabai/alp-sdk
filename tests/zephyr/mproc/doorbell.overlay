@@ -1,0 +1,34 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * alp_sdk.mproc.doorbell: mock mbox pairs (alp-shmem0 comes from
+ * native_sim_native_64.overlay; src/mbox_mock.c maps its 0x70000000).
+ *   channel 0: tx mtu 0 (doorbell-only) + separate rx device (alp-mbox-rx0)
+ *   channel 1: one device, mtu 4, no alp-mbox-rx1 (RX falls back to TX)
+ */
+/ {
+	mock_tx0: mbox_tx0 {
+		compatible = "alp,test-mbox";
+		#mbox-cells = <1>;
+		mtu = <0>;
+		status = "okay";
+	};
+	mock_rx0: mbox_rx0 {
+		compatible = "alp,test-mbox";
+		#mbox-cells = <1>;
+		mtu = <0>;
+		status = "okay";
+	};
+	mock_both1: mbox_both1 {
+		compatible = "alp,test-mbox";
+		#mbox-cells = <1>;
+		mtu = <4>;
+		status = "okay";
+	};
+
+	aliases {
+		alp-mbox0    = &mock_tx0;
+		alp-mbox-rx0 = &mock_rx0;
+		alp-mbox1    = &mock_both1;
+	};
+};

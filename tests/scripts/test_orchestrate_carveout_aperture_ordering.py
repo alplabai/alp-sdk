@@ -147,15 +147,15 @@ class TestMramMainOrderingGuard:
                 f"carve-out placed at 0x{entry.base:x}, inside the live "
                 f"ATOC band -- exactly the #1365 hazard")
 
-    def test_raw_shmem_entry_on_aen801_also_stays_blocked(self):
+    def test_raw_shmem_entry_on_aen801_resolves_into_sram_ipc(self):
         """`mproc-mailbox`'s raw_shmem entry (m55_hp/m55_he, not
-        a32_cluster) exercises the same SoM/aperture with a different
-        `ipc.kind` -- the exclusion must not be accidentally scoped to
-        `rpmsg` alone."""
+        a32_cluster) must land in the SRAM0 `sram_ipc` row, never in a
+        flash-class MRAM region."""
         project = _with_mram_main_resolved(load_board_yaml(MPROC_MAILBOX_BOARD))
         entry = _by_name(resolve_carve_outs(project))["alp_shmem0"]
-        assert entry.status == "blocked"
-        assert "flash-class" in entry.reason
+        assert entry.status == "ok", entry.reason
+        assert entry.region == "sram_ipc"
+        assert 0x023E0000 <= entry.base < 0x023F0000
 
 
 def _with_outside_aperture_row_added(project):

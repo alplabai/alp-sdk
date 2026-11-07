@@ -72,8 +72,8 @@ def test_slugs_from_on_module_v2n101() -> None:
 
 
 def test_slugs_from_on_module_aen701() -> None:
-    """AEN701 on_module: cc3501e, optiga_trust_m, rv3028c7, tmp112,
-    eeprom_24c128 present; ospi_memories / hyperram storage MPNs are
+    """AEN701 on_module: cc3501e, rv3028c7, tmp112, eeprom_24c128 present
+    (optiga_trust_m is DNP on the shared AEN PCB, #2958); ospi_memories / hyperram storage MPNs are
     excluded (they have no chips/<part>/ driver)."""
     import yaml
     with open(REPO / "metadata" / "e1m_modules" / "E1M-AEN701.yaml",
@@ -81,9 +81,9 @@ def test_slugs_from_on_module_aen701() -> None:
         preset = yaml.safe_load(f)
     slugs = _slugs_from_on_module(preset["on_module"])
 
-    for expected in ("cc3501e", "eeprom_24c128", "optiga_trust_m",
-                     "rv3028c7", "tmp112"):
+    for expected in ("cc3501e", "eeprom_24c128", "rv3028c7", "tmp112"):
         assert expected in slugs, f"missing expected slug: {expected}"
+    assert "optiga_trust_m" not in slugs, "DNP part must not auto-enable"
 
     assert "TBD" not in slugs, "TBD values must be excluded"
     assert "alif:ensemble:e7" not in slugs, "silicon field must be excluded"
@@ -621,8 +621,9 @@ features:
 
 
 def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
-    """End-to-end: loading real E1M-AEN701 preset emits cc3501e, optiga_trust_m,
-    rv3028c7, tmp112, eeprom_24c128; TBD ospi entries absent."""
+    """End-to-end: loading real E1M-AEN701 preset emits cc3501e, rv3028c7,
+    tmp112, eeprom_24c128 (not the DNP optiga_trust_m); TBD ospi entries
+    absent."""
     import alp_orchestrate
     meta = tmp_path / "metadata"
     e1m = meta / "e1m_modules"
@@ -667,10 +668,10 @@ def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
     m55_slice = project.cores["m55_hp"]
     conf = _slice_alp_conf(project, m55_slice)
 
-    for chip in ("cc3501e", "optiga_trust_m", "rv3028c7", "tmp112",
-                 "eeprom_24c128"):
+    for chip in ("cc3501e", "rv3028c7", "tmp112", "eeprom_24c128"):
         assert f"CONFIG_ALP_SDK_CHIP_{chip.upper()}=y" in conf, (
             f"missing CONFIG_ALP_SDK_CHIP_{chip.upper()}=y for AEN701")
+    assert "CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M" not in conf
 
     assert "CONFIG_ALP_SDK_CHIP_TBD" not in conf
     assert "SoM-intrinsic chip drivers" in conf
