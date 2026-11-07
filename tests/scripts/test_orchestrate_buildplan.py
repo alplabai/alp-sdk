@@ -1449,3 +1449,16 @@ def test_zephyr_app_dir_windows_symlink_loop_clean_error(
     msg = str(excinfo.value)
     assert "winloop-app" in msg
     assert "could not be resolved" in msg
+
+
+def test_emit_build_plan_rejects_unrooted_absolute_build_root(tmp_path: Path) -> None:
+    """#2953: an absolute build root outside project and SDK used to null
+    every slice command and still exit 0; it must now be an error."""
+    from alp_orchestrate import OrchestratorError
+    from alp_orchestrate.buildplan import emit_build_plan
+
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+    with pytest.raises(OrchestratorError, match="outside both"):
+        emit_build_plan(project, board_yaml=path,
+                        build_root=Path("/nonexistent-root/build"))
