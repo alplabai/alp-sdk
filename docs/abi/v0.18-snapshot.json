@@ -14908,6 +14908,17 @@
       "typedefs": {},
       "variables": {}
     },
+    "alp/static_assert.h": {
+      "functions": {},
+      "macros": {
+        "ALP_STATIC_ASSERT": {
+          "hash": "7533ad949187218e",
+          "value": "(cond, msg) extern int alp_static_assert_unused_"
+        }
+      },
+      "typedefs": {},
+      "variables": {}
+    },
     "alp/storage.h": {
       "functions": {
         "alp_storage_capabilities": {
