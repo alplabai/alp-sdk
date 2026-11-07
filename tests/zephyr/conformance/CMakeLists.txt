@@ -49,4 +49,9 @@ else()
     target_sources(app PRIVATE
         src/main.c
     )
+    # native_sim only: needs the zephyr,adc-emul controller (adc0) and
+    # its 16-bit channel@1 from boards/native_sim*.overlay.
+    if(CONFIG_ADC_EMUL)
+        target_sources(app PRIVATE src/behavior_adc_emul.c)
+    endif()
 endif()

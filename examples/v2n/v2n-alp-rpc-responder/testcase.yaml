@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-alp-rpc-responder
+  description: |
+    <alp/rpc.h> responder on the V2N / V2M Cortex-M33 system manager: opens
+    the channel, subscribes to "echo" and sends every request straight back.
+    The Linux A55 attaches through src/backends/rpc/yocto_uio_drv.c; the
+    transport is the ipc_service backend in zephyr/drivers/ipc.  Build-only:
+    the attach/echo round trip is a V2M/V2N bench check.
+
+tests:
+  alp_sdk.examples.v2n.alp_rpc_responder:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
+    platform_allow:
+      - alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33
+      - alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - rpc
+      - rpmsg
+    build_only: true

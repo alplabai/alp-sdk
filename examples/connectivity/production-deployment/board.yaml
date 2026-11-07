@@ -180,8 +180,8 @@ ota:
 # OPTIGA Trust M under `on_module:` but the part is DNP (`assembled:
 # false` on its i2c_devices entry), and the loader refuses an
 # `optiga_trust_m` root on a SKU that does not carry the part (#2316).
-# On a SKU with OPTIGA fitted (E1M-AEN501/601/701) switch this to
-# `optiga_trust_m` for a hardware trust root.
+# Every E1M-AEN SKU shares this SoM PCB with OPTIGA DNP (#2958), so
+# `tfm_internal` is the root on all of them.
 security:
   psa:
     persistent_slots: 32

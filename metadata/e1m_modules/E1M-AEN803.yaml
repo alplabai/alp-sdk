@@ -165,7 +165,7 @@ inference:
   ethos_u_variant:      u85                    # primary.
 
 capabilities:
-  optiga_trust_m:       true
+  optiga_trust_m:       false      # DNP=1 (assembled: false in i2c_devices); capability tracks population.
 
 topology:
   a32_cluster:
@@ -234,6 +234,20 @@ memory_map:
   - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: customer_runtime }
   - { name: atoc,      base: 0x80578000, size_kib: 32,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: secure_enclave }
   - { name: mram_main, base: 0x80000000, size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true, write_authority: composite }
+  # Cross-core IPC carve-out candidate: 64 KiB of global SRAM0 (DFP
+  # AE822FA0E5597 soc_features.h SOC_FEAT_BULK_SRAM0_BASE 0x02000000 /
+  # SIZE 0x00400000), the same address from both M55 cores.  The band
+  # 0x023E0000-0x023EFFFF was picked because no in-tree user claims it:
+  # the other SRAM0 users sit lower (bench beacons 0x0200_xxxx; aen-cc3501e-*
+  # HE overlays' sram0_sys 0x02010000 + 512 KiB; display shields growing
+  # the SRAM0 linker region to 2 MiB from 0x02000000; ETH/JPEG/video DMA
+  # buffers, which the linker fills from the bottom) or above it (the
+  # aen-dma-regcheck PL330 microcode at 0x023FE000).  The vring windows of
+  # aen-rpc-pingpong / aen-alp-rpc (0x02010000) are NOT used here for that
+  # reason.  An overlay that shrinks/relocates SRAM0 past 0x023E0000 must
+  # not be combined with an m55 `ipc:` entry.  Non-cacheable: raw_shmem has
+  # no cache-maintenance layer.
+  - { name: sram_ipc,  base: 0x023e0000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: false, write_authority: customer_runtime }
 
   # Neither external OSPI0 memory gets a `memory_map:` row (#2053, #2069),
   # for two independent reasons -- one about the pair of them together,
