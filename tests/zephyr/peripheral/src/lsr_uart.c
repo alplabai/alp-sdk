@@ -15,6 +15,10 @@
 
 #include "lsr_uart.h"
 
+/* Only the native_sim overlays instantiate alp,test-lsr-uart; other boards
+ * (e.g. the AEN801 overlay) build this file to nothing. */
+#if DT_HAS_COMPAT_STATUS_OKAY(alp_test_lsr_uart)
+
 static struct {
 	uint8_t  rx[32];
 	unsigned rx_head, rx_tail;
@@ -86,3 +90,5 @@ DEVICE_DT_INST_DEFINE(0,
                       POST_KERNEL,
                       CONFIG_SERIAL_INIT_PRIORITY,
                       &lsr_api);
+
+#endif /* DT_HAS_COMPAT_STATUS_OKAY(alp_test_lsr_uart) */

@@ -236,8 +236,9 @@ z_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout
 		 * mid-loop would be wiped by the next poll and a check after the
 		 * loop would never see it.  Residual window: an error raised
 		 * between this check and the LSR read inside uart_poll_in() is
-		 * still consumed unseen; closing it needs the ring-buffer path,
-		 * where the ISR sees every error.  Also catches an error latched
+		 * still consumed unseen.  The ring-buffer path narrows that to the
+		 * ISR's per-byte drain (uart_fifo_read() clears the latch too) but
+		 * does not remove it.  Also catches an error latched
 		 * between calls -- the stream already has a hole, so say so
 		 * before handing out data that looks contiguous. */
 		lrc = _line_error(dev);

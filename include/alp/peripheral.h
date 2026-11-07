@@ -1102,7 +1102,8 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  *                         don't block.
  *
  * @return ALP_OK / ALP_ERR_INVAL (@p data NULL with @p len > 0) /
- *         ALP_ERR_NOT_READY (NULL or closed @p port) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p port, or the ring buffer
+ *         was detached during the wait before any byte arrived) /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO (line error or RX overrun: bytes
  *         were lost) / ALP_ERR_NOSUPPORT.
  */

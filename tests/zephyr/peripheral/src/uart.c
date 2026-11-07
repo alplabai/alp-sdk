@@ -255,6 +255,7 @@ ZTEST(alp_peripheral, test_uart_read_polled_overrun_reports_io_not_ok)
  * the same OE/PE/FE latch uart_err_check() reports.  An overrun raised after
  * poll N is wiped by poll N+1, so a check only before/after the loop never sees
  * it.  port 2 is src/lsr_uart.c, whose poll_in() clears the latch the same way. */
+#if DT_NODE_HAS_STATUS(DT_ALIAS(alp_uart2), okay)
 ZTEST(alp_peripheral, test_uart_read_overrun_mid_loop_survives_lsr_clearing_poll)
 {
 	lsr_uart_reset();
@@ -278,6 +279,7 @@ ZTEST(alp_peripheral, test_uart_read_overrun_mid_loop_survives_lsr_clearing_poll
 	alp_uart_close(u);
 	lsr_uart_reset();
 }
+#endif /* alp-uart2 */
 
 /* #1639 (review follow-up): uart_emul's .configure stores whatever it
  * is given and always returns 0 (drivers/serial/uart_emul.c) -- exactly
