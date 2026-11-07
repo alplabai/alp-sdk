@@ -216,7 +216,7 @@ static void test_no_wakealarm_rtc_is_an_error(void)
 	reset_fixture();
 	char saved[sizeof(g_rtc_root)];
 	(void)snprintf(saved, sizeof(saved), "%s", g_rtc_root);
-	(void)snprintf(g_rtc_root, sizeof(g_rtc_root), "%s/rtc0", saved); /* has no rtcN/ */
+	(void)snprintf(g_rtc_root, sizeof(g_rtc_root), "%.80s/rtc0", saved); /* has no rtcN/ */
 
 	alp_power_backend_state_t st = { 0 };
 	alp_status_t              rc = y_request_sleep(&st, ALP_POWER_MODE_SLEEP, 5000u, NULL);
