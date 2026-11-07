@@ -869,7 +869,7 @@ def test_adc_range_is_rejected_on_a_part_other_than_ina228(gen_module):
 
 def _evk_doc() -> dict[str, Any]:
     import yaml
-    return yaml.safe_load((REPO / "metadata/boards/e1m-evk.yaml").read_text())
+    return yaml.safe_load((REPO / "metadata/boards/e1m-evk.yaml").read_text(encoding="utf-8"))
 
 
 def _rev_macros(gbh, rev: str | None) -> dict[str, str]:

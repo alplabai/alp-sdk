@@ -390,7 +390,9 @@ def apply_rev_routes(routes: dict[str, Any], rev: dict[str, Any]) -> dict[str, A
     over = rev.get("route_overrides") or {}
     gone = set(rev.get("route_removals") or [])
     out: dict[str, Any] = {}
-    for sec in set(routes) | set(over):
+    # YAML order, not set order: a set walk varies with string hash
+    # randomisation, which reorders the generated header between runs.
+    for sec in list(routes) + [s for s in over if s not in routes]:
         merged = [e for e in routes.get(sec) or [] if e["macro"] not in gone]
         for new in over.get(sec) or []:
             for i, e in enumerate(merged):

@@ -125,18 +125,18 @@ extern "C" {
 
 #ifdef ALP_E1M_EVK_HW_REV_R3
 #undef EVK_PIN_ENCODER_SW
-#undef EVK_PWM_LED_RED
-#define EVK_PWM_LED_RED ALP_E1M_PWM3  /**< RGB LED red channel (pad B5). */
-#undef EVK_PWM_LED_BLUE
-#define EVK_PWM_LED_BLUE ALP_E1M_PWM1  /**< RGB LED blue channel (pad B6). */
-#undef EVK_PWM_LED_GREEN
-#define EVK_PWM_LED_GREEN ALP_E1M_PWM0  /**< RGB LED green channel (pad A6). */
 #undef EVK_PIN_LED_GREEN
 #define EVK_PIN_LED_GREEN ALP_E1M_GPIO_PWM0  /**< RGB LED green (D19, pad A6) -- the PWM0 pad driven as a digital GPIO. */
 #undef EVK_PIN_LED_RED
 #define EVK_PIN_LED_RED ALP_E1M_GPIO_PWM3  /**< RGB LED red (D19, pad B5) -- the PWM3 pad driven as a digital GPIO. */
 #undef EVK_PIN_LED_BLUE
 #define EVK_PIN_LED_BLUE ALP_E1M_GPIO_PWM1  /**< RGB LED blue (D19, pad B6) -- the PWM1 pad driven as a digital GPIO. */
+#undef EVK_PWM_LED_RED
+#define EVK_PWM_LED_RED ALP_E1M_PWM3  /**< RGB LED red channel (pad B5). */
+#undef EVK_PWM_LED_BLUE
+#define EVK_PWM_LED_BLUE ALP_E1M_PWM1  /**< RGB LED blue channel (pad B6). */
+#undef EVK_PWM_LED_GREEN
+#define EVK_PWM_LED_GREEN ALP_E1M_PWM0  /**< RGB LED green channel (pad A6). */
 #endif
 
 /* ------------------------------------------------------------------ */
