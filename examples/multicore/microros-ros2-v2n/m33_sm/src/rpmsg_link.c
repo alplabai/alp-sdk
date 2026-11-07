@@ -80,9 +80,6 @@ LOG_MODULE_REGISTER(rpmsg_link, LOG_LEVEL_INF);
 #define SHM_SIZE       DT_REG_SIZE(SHM_NODE)
 #define RSC_TABLE_ADDR DT_REG_ADDR(DT_NODELABEL(rsctbl))
 
-/* CM33 -> A55 doorbell: MHU-B SWINT unit 12 SET (see rpmsg-v2n main.c). */
-#define ALP_M33_MHU_SWINT12_SET (0x504808C4U)
-
 /* <alp/rpc.h> method that carries XRCE datagrams; the length includes the NUL. */
 #define XRCE_METHOD     "xrce"
 #define XRCE_METHOD_LEN (sizeof(XRCE_METHOD))
@@ -178,7 +175,9 @@ int mailbox_notify(void *priv, uint32_t id)
 {
 	ARG_UNUSED(priv);
 	ARG_UNUSED(id);
-	*(volatile uint32_t *)ALP_M33_MHU_SWINT12_SET = 1U;
+	/* CM33 -> A55 doorbell: the line <alp/protocol/v2n_mhu_doorbell.h> selects (SWINT unit 12 by
+	 * default, rsp_ch8_ns with CONFIG_ALP_V2N_DOORBELL_RSP_CH8), the one the A55 backend listens on. */
+	alp_v2n_doorbell_ring();
 	return 0;
 }
 
