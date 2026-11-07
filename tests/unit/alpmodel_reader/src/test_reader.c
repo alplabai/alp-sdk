@@ -112,3 +112,20 @@ ZTEST(alpmodel_reader, test_wrapped_blob_offset_rejected)
 	alp_model_t m;
 	zassert_equal(ALP_ERR_INVAL, alp_model_parse(buf, alp_model_fixture_len, &m));
 }
+
+ZTEST(alpmodel_reader, test_target_without_blob_key_rejected)
+{
+	/* Manifest {"targets": [ {"backend": "cpu"} ]} -- no "blob" key.  The
+	 * blob table has one valid entry, so a defaulted index 0 would parse. */
+	static const uint8_t mft[] = { 0xa1, 0x67, 't', 'a', 'r', 'g', 'e', 't',  's', 0x81, 0xa1, 0x67,
+		                           'b',  'a',  'c', 'k', 'e', 'n', 'd', 0x63, 'c', 'p',  'u' };
+	uint8_t              buf[24 + sizeof(mft) + 8] = { 'A', 'L', 'P', 'M', 1, 0 };
+	set_u32(buf + 8, 24u);
+	set_u32(buf + 12, (uint32_t)sizeof(mft));
+	set_u32(buf + 16, 24u + (uint32_t)sizeof(mft));
+	set_u32(buf + 20, 1u);
+	memcpy(buf + 24, mft, sizeof(mft));
+	/* blob table entry 0 = {off 0, len 0}: left zero */
+	alp_model_t m;
+	zassert_equal(ALP_ERR_INVAL, alp_model_parse(buf, sizeof(buf), &m));
+}

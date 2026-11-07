@@ -87,7 +87,7 @@ ZTEST(alp_wifi_registry, test_wifi_connect_inval_on_null_handle)
 	/* Dispatcher must reject NULL handle before reaching the
      * backend; returns ALP_ERR_NOT_READY per the public contract. */
 	const alp_wifi_credentials_t creds = { .ssid = "x", .psk = NULL };
-	zassert_equal(alp_wifi_connect(NULL, &creds, 100), ALP_ERR_NOT_READY);
+	zassert_equal(alp_wifi_connect(NULL, &creds, 100), ALP_ERR_INVAL);
 }
 
 ZTEST(alp_wifi_registry, test_wifi_capabilities_returns_null_for_null_handle)

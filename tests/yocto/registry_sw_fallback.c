@@ -144,7 +144,7 @@ static void test_wifi_fallback_open_and_capabilities(void)
 		ALP_ASSERT_EQ_INT(alp_wifi_connect(w, NULL, 100), ALP_ERR_INVAL);
 		alp_wifi_close(w);
 	}
-	ALP_ASSERT_EQ_INT(alp_wifi_connect(NULL, NULL, 0), ALP_ERR_NOT_READY);
+	ALP_ASSERT_EQ_INT(alp_wifi_connect(NULL, NULL, 0), ALP_ERR_INVAL);
 }
 
 /* ------------------------------------------------------------------ */

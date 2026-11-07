@@ -75,6 +75,14 @@ alp_inference_t *alp_inference_open_alpmodel(const alp_model_open_opts_t *opts)
 		SET_ERR(ALP_ERR_INVAL);
 		return NULL;
 	}
+	/* A caller-owned arena must carry its real size.  0 means "size from
+	 * the manifest" only for the backend-default arena (arena == NULL); the
+	 * manifest is untrusted package data and must never size a buffer the
+	 * caller owns (it can be an NPU DMA target). */
+	if (opts->arena != NULL && opts->arena_bytes == 0u) {
+		SET_ERR(ALP_ERR_INVAL);
+		return NULL;
+	}
 	alp_inference_backend_t order[ALP_AUTO_ORDER_MAX];
 	size_t       n_order = alp_auto_order_parse(ALP_AUTO_ORDER_CSV, order, ALP_AUTO_ORDER_MAX);
 	alp_model_t  mdl;

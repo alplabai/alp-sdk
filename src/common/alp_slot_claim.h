@@ -288,9 +288,9 @@ void alp_handle_drain_blocking(uint32_t *active_ops);
  *
  *   op wrapper (the one that may invoke a callback synchronously):
  *     alp_handle_op_enter(...);
- *     alp_handle_cb_enter(&h->cb_thread, &h->cb_active);
+ *     bool cb_owner = alp_handle_cb_enter(&h->cb_thread, &h->cb_active);
  *     rc = ops->the_op(...);            // may synchronously self-close
- *     alp_handle_cb_leave(&h->cb_active);
+ *     alp_handle_cb_leave(&h->cb_thread, &h->cb_active, cb_owner);
  *     // Consume close_pending BEFORE op_leave (dev-review follow-up):
  *     // this thread still holds its own counted op here, so `h` cannot
  *     // yet be freed by anyone -- a concurrent EXTERNAL closer's own
@@ -321,14 +321,15 @@ void alp_handle_drain_blocking(uint32_t *active_ops);
  *     // mode == ALP_HANDLE_CLOSE_NOW: active_ops already drained to 0.
  *     ops->close(...); lifecycle_set(UNOPENED); free the slot.
  *
- * Known limitation (documented, not defended): this assumes at most
- * ONE thread is ever inside the callback-invoking op for a given
- * handle at a time -- concurrent overlapping calls to
- * alp_mqtt_loop()/alp_ble_scan_start() on the SAME handle from two
- * different threads is already discouraged/undefined usage for these
- * single-broker/single-radio classes (matches alp_rpc_call()'s own
- * single-sync-slot design), so the second writer simply overwrites
- * `cb_thread`/`cb_active` rather than being tracked as a set.
+ * Known limitation (documented, not defended): the marker tracks at
+ * most ONE thread per handle -- the first one to claim it with
+ * alp_handle_cb_enter().  A second thread that overlaps a
+ * callback-invoking op on the SAME handle (alp_mqtt_loop()/
+ * alp_ble_scan_start() from two threads is discouraged usage for these
+ * single-broker/single-radio classes, matching alp_rpc_call()'s own
+ * single-sync-slot design) does NOT overwrite the owner's marker or
+ * clear it on its way out, so the owner's self-close stays detectable;
+ * a self-close from the non-owner's callback is not recognised.
  */
 
 /** @brief Whether a self-close was detected by
@@ -350,13 +351,30 @@ typedef enum {
  *        invoking op" (issue #756).  Call before invoking the backend
  *        op that may synchronously run an application callback.
  *
- * @param[out] cb_thread  Set to this thread's token.
- * @param[out] cb_active  Set true (release store).
+ * Only ONE thread at a time owns the marker: the CAS false -> true
+ * elects the owner, and a second concurrent caller on the same handle
+ * (whose backend call is typically rejected with BUSY) neither
+ * overwrites cb_thread nor, via alp_handle_cb_leave(), clears the
+ * owner's cb_active.  Pass the returned flag to alp_handle_cb_leave().
+ *
+ * @param[out] cb_thread  Set to this thread's token (owner only).
+ * @param[out] cb_active  Claimed false -> true (acq_rel CAS).
+ * @return true if this call claimed the marker (the caller must pass
+ *         true to alp_handle_cb_leave()); false if another thread
+ *         already owns it.
  */
-static inline void alp_handle_cb_enter(uintptr_t *cb_thread, bool *cb_active)
+static inline bool alp_handle_cb_enter(uintptr_t *cb_thread, bool *cb_active)
 {
-	*cb_thread = alp_thread_token_self();
-	__atomic_store_n(cb_active, true, __ATOMIC_RELEASE);
+	bool expected = false;
+	if (!__atomic_compare_exchange_n(
+	        cb_active, &expected, true, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+		return false;
+	}
+	/* Published after the CAS: a closer that sees cb_active==true while
+	 * this store is still pending reads cb_thread == 0 (cb_leave zeroes
+	 * it first) which never matches a live thread token. */
+	__atomic_store_n(cb_thread, alp_thread_token_self(), __ATOMIC_RELEASE);
+	return true;
 }
 
 /**
@@ -364,10 +382,18 @@ static inline void alp_handle_cb_enter(uintptr_t *cb_thread, bool *cb_active)
  *        Call right after the backend op returns, BEFORE
  *        alp_handle_op_leave().
  *
- * @param[out] cb_active  Set false (release store).
+ * @param[out] cb_thread  Zeroed (owner only).
+ * @param[out] cb_active  Set false (release store; owner only).
+ * @param[in]  owned      Return value of the matching
+ *                        alp_handle_cb_enter(); a non-owner leaves the
+ *                        marker untouched.
  */
-static inline void alp_handle_cb_leave(bool *cb_active)
+static inline void alp_handle_cb_leave(uintptr_t *cb_thread, bool *cb_active, bool owned)
 {
+	if (!owned) {
+		return;
+	}
+	__atomic_store_n(cb_thread, 0u, __ATOMIC_RELEASE);
 	__atomic_store_n(cb_active, false, __ATOMIC_RELEASE);
 }
 

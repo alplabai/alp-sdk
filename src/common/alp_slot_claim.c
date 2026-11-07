@@ -92,10 +92,15 @@ bool alp_handle_begin_close_selfaware(uint8_t                 *lifecycle,
 		return false;
 	}
 
-	/* Acquire pairs with alp_handle_cb_enter()'s release store: seeing
-	 * cb_active==true here guarantees *cb_thread is the value that
-	 * same store published, not a torn/stale read. */
-	if (__atomic_load_n(cb_active, __ATOMIC_ACQUIRE) && *cb_thread == alp_thread_token_self()) {
+	/* alp_handle_cb_enter() claims cb_active with a CAS and publishes
+	 * cb_thread afterwards; alp_handle_cb_leave() zeroes cb_thread before
+	 * clearing cb_active.  A closer that sees cb_active==true may
+	 * therefore read cb_thread==0 (publish pending, or leave under way),
+	 * which never matches a live thread token and so takes the NOW path
+	 * -- correct, because only the owning thread can be re-entering.  The
+	 * cb_thread read is atomic because it races those stores. */
+	if (__atomic_load_n(cb_active, __ATOMIC_ACQUIRE) &&
+	    __atomic_load_n(cb_thread, __ATOMIC_ACQUIRE) == alp_thread_token_self()) {
 		/* Self-close: this thread is currently inside the callback-
 		 * invoking op that led here.  Draining active_ops now would
 		 * deadlock -- this thread's own count cannot reach zero until

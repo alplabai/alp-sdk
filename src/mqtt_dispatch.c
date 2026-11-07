@@ -229,11 +229,11 @@ alp_status_t alp_mqtt_loop(alp_mqtt_t *h, uint32_t timeout_ms)
 	 * this thread as "inside the callback-invoking op" first so that
 	 * close() can detect the reentrant self-close and defer instead of
 	 * deadlocking (see this file's header comment). */
-	alp_handle_cb_enter(&h->cb_thread, &h->cb_active);
-	alp_status_t rc = (h->state.ops == NULL || h->state.ops->loop == NULL)
-	                      ? ALP_ERR_NOT_IMPLEMENTED
-	                      : h->state.ops->loop(&h->state, timeout_ms);
-	alp_handle_cb_leave(&h->cb_active);
+	bool         cb_owner = alp_handle_cb_enter(&h->cb_thread, &h->cb_active);
+	alp_status_t rc       = (h->state.ops == NULL || h->state.ops->loop == NULL)
+	                            ? ALP_ERR_NOT_IMPLEMENTED
+	                            : h->state.ops->loop(&h->state, timeout_ms);
+	alp_handle_cb_leave(&h->cb_thread, &h->cb_active, cb_owner);
 	/* Dev-review follow-up on issue #756: consume close_pending BEFORE
 	 * op_leave, while this thread still holds its own counted op -- `h`
 	 * cannot be freed by a concurrent EXTERNAL closer until active_ops
