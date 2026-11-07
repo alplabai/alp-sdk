@@ -1068,9 +1068,9 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  * not redelivered).  For partial or streaming reads that need a count,
  * on Zephyr attach an RX ring with @ref alp_uart_rx_ringbuf_attach and
  * use @ref alp_uart_rx_ringbuf_pop; on backends without the ring (Yocto,
- * baremetal) call this with @p len == 1 in a loop.  @c timeout_ms == 0 is a single
- * non-blocking poll: it returns @ref ALP_OK only if @p len bytes are
- * already available, otherwise @ref ALP_ERR_TIMEOUT.
+ * baremetal) call this with @p len == 1 in a loop.  @c timeout_ms == 0
+ * is a single non-blocking poll: it returns @ref ALP_OK only if @p len
+ * bytes are already available, otherwise @ref ALP_ERR_TIMEOUT.
  *
  * Data loss is never silent.  Without a ring buffer attached the read
  * polls the controller FIFO, so a burst longer than the FIFO that

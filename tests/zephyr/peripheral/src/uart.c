@@ -641,6 +641,10 @@ ZTEST(alp_peripheral, test_uart_rx_ringbuf_pop_reports_overrun_latched_by_write)
 	uart_emul_set_errors(_uart1_emul_dev, UART_ERROR_OVERRUN);
 	static const uint8_t tx = 0x55;
 	zassert_equal(alp_uart_write(u, &tx, 1), ALP_OK);
+	/* No RX byte ever arrived, so the ISR never ran: the report below can
+	 * only come from z_write()'s sticky latch. */
+	k_msleep(50);
+	zassert_equal(alp_uart_rx_ringbuf_count(rb), 0u);
 
 	uint8_t dst[8];
 	size_t  got = 0;
@@ -673,13 +677,87 @@ static K_SEM_DEFINE(_blocked_started, 0, 1);
 static K_THREAD_STACK_DEFINE(_blocked_stack, 2048);
 static struct k_thread _blocked_thread;
 
+static uint32_t _blocked_timeout_ms = 5000;
+
 static void _blocked_reader(void *a, void *b, void *c)
 {
 	uint8_t dst[4];
 	int64_t t0 = k_uptime_get();
 	k_sem_give(&_blocked_started);
-	_blocked_rc = alp_uart_read(_blocked_port, dst, sizeof(dst), 5000);
+	_blocked_rc = alp_uart_read(_blocked_port, dst, sizeof(dst), _blocked_timeout_ms);
 	_blocked_ms = k_uptime_get() - t0;
+}
+
+static void _start_blocked_reader(alp_uart_t *u, uint32_t timeout_ms)
+{
+	_blocked_port       = u;
+	_blocked_timeout_ms = timeout_ms;
+	_blocked_rc         = 1;
+	k_thread_create(&_blocked_thread,
+	                _blocked_stack,
+	                K_THREAD_STACK_SIZEOF(_blocked_stack),
+	                _blocked_reader,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(5),
+	                0,
+	                K_NO_WAIT);
+	zassert_equal(k_sem_take(&_blocked_started, K_MSEC(1000)), 0);
+	k_msleep(50); /* reader is now waiting */
+}
+
+/* #2934: thread B's write() consumes the line error into the sticky latch while
+ * thread A is already blocked in a read; A must return ALP_ERR_IO, not wait out
+ * the deadline or return OK over a gap.  Polled path, lsr fixture (port 2). */
+#if DT_NODE_HAS_STATUS(DT_ALIAS(alp_uart2), okay)
+ZTEST(alp_peripheral, test_uart_polled_read_blocked_sees_overrun_latched_by_other_threads_write)
+{
+	lsr_uart_reset();
+	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
+	    .port_id   = 2,
+	    .baudrate  = 115200,
+	    .data_bits = 8,
+	    .stop_bits = 1,
+	    .parity    = ALP_UART_PARITY_NONE,
+	});
+	zassert_not_null(u);
+
+	_start_blocked_reader(u, 400);
+
+	/* main is higher priority than the reader and uart ops do not yield, so
+	 * this write's err_check (not the reader's) takes the latch. */
+	static const uint8_t tx[2] = { 0x31, 0x32 };
+	lsr_uart_overrun_after_tx(1);
+	zassert_equal(alp_uart_write(u, tx, sizeof(tx)), ALP_OK);
+
+	zassert_equal(k_thread_join(&_blocked_thread, K_MSEC(1000)), 0);
+	zassert_equal(_blocked_rc, ALP_ERR_IO);
+	zassert_true(_blocked_ms < 300, "read took %lld ms", (long long)_blocked_ms);
+	alp_uart_close(u);
+	lsr_uart_reset();
+}
+#endif
+
+/* Same, ring path: the writer's latch does not signal rx_sem, so the sliced
+ * wait must notice it. */
+ZTEST(alp_peripheral, test_uart_ring_read_blocked_sees_overrun_latched_by_other_threads_write)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+	static uint8_t backing[64];
+	zassert_not_null(alp_uart_rx_ringbuf_attach(u, backing, sizeof(backing)));
+
+	_start_blocked_reader(u, 400);
+
+	uart_emul_set_errors(_uart1_emul_dev, UART_ERROR_OVERRUN);
+	static const uint8_t tx = 0x55;
+	zassert_equal(alp_uart_write(u, &tx, 1), ALP_OK);
+
+	zassert_equal(k_thread_join(&_blocked_thread, K_MSEC(1000)), 0);
+	zassert_equal(_blocked_rc, ALP_ERR_IO);
+	zassert_true(_blocked_ms < 300, "read took %lld ms", (long long)_blocked_ms);
+	alp_uart_close(u);
 }
 
 ZTEST(alp_peripheral, test_uart_rx_ringbuf_detach_wakes_blocked_read)
@@ -690,8 +768,9 @@ ZTEST(alp_peripheral, test_uart_rx_ringbuf_detach_wakes_blocked_read)
 	alp_uart_rx_ringbuf_t *rb = alp_uart_rx_ringbuf_attach(u, backing, sizeof(backing));
 	zassert_not_null(rb);
 
-	_blocked_port = u;
-	_blocked_rc   = 1;
+	_blocked_port       = u;
+	_blocked_rc         = 1;
+	_blocked_timeout_ms = 5000;
 	k_thread_create(&_blocked_thread,
 	                _blocked_stack,
 	                K_THREAD_STACK_SIZEOF(_blocked_stack),

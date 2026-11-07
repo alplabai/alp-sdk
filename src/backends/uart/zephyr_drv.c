@@ -269,6 +269,9 @@ z_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout
 		 * before handing out data that looks contiguous. */
 		lrc = _line_error(dev);
 		if (lrc != ALP_OK) return lrc;
+		/* Another thread's alp_uart_write() may have consumed the error
+		 * into the sticky flag while this read was waiting. */
+		if (_take_tx_latched_error(st)) return ALP_ERR_IO;
 		int err = uart_poll_in(dev, &data[got]);
 		if (err == 0) {
 			got++;
@@ -486,14 +489,18 @@ static alp_status_t _read_from_ring(alp_uart_backend_state_t *st,
 	for (;;) {
 		got += lwrb_read(&rb->rb, &data[got], len - got);
 		if (got >= len || atomic_get(&rb->dropped) != 0) break;
+		/* z_write() on another thread latched a line error: stop waiting. */
+		if (__atomic_load_n(&st->line_err, __ATOMIC_ACQUIRE) != 0u) break;
 		if (alp_lifecycle_get(&rb->lifecycle) != ALP_HANDLE_LC_OPEN) break;
 		int64_t left = deadline - k_uptime_get();
 		if (left <= 0) break;
-		(void)k_sem_take(&rb->rx_sem, K_MSEC(left));
+		/* Sliced wait: the ISR (and detach) wake us through rx_sem, but a
+		 * writer thread's latch does not, so re-check it every 10 ms. */
+		(void)k_sem_take(&rb->rx_sem, K_MSEC(MIN(left, 10)));
 	}
 
 	alp_status_t rc;
-	if (atomic_set(&rb->dropped, 0) != 0) {
+	if (atomic_set(&rb->dropped, 0) != 0 || _take_tx_latched_error(st)) {
 		rc = ALP_ERR_IO; /* loss since the last report; @p data is unspecified */
 	} else if (got >= len) {
 		rc = ALP_OK;
