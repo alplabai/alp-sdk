@@ -245,7 +245,7 @@ _OTA_PROVIDER_WEST_PROJECTS: dict[str, dict[str, str]] = {
     "mender": {
         "name": "mender-mcu-client",
         "url": "https://github.com/mendersoftware/mender-mcu.git",
-        "revision": "0.1.0",
+        "revision": "v1.1.0",
         "path": "modules/lib/mender-mcu-client",
     },
     # hawkbit -- in Zephyr upstream

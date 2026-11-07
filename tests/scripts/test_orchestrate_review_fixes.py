@@ -120,7 +120,7 @@ def test_west_libraries_emits_ota_provider_module():
     projects = {p["name"]: p for p in doc["manifest"]["projects"]}
     mender = projects["mender-mcu-client"]
     assert mender["url"].startswith("https://github.com/mendersoftware/")
-    assert mender["revision"] and mender["path"]
+    assert mender["revision"] == "v1.1.0" and mender["path"]
     allow = projects["zephyr"]["import"]["name-allowlist"]
     assert "mender-mcu-client" not in (allow or [])
     assert "libraries: 'ota" not in frag
