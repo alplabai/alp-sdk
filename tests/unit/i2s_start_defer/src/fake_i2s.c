@@ -570,7 +570,7 @@ static int fake_i2s_write(const struct device *dev, void *mem_block, size_t size
 	return 0;
 }
 
-static const struct i2s_driver_api fake_i2s_driver_api = {
+static DEVICE_API(i2s, fake_i2s_driver_api) = {
 	.configure  = fake_i2s_configure,
 	.config_get = fake_i2s_config_get,
 	.trigger    = fake_i2s_trigger,

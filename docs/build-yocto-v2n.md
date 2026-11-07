@@ -60,6 +60,12 @@ MACHINE=e1m-v2n101-a55 bitbake alp-image-edge
 #  V2N-M1: e1m-v2m101-a55 / e1m-v2m102-a55 / e1m-v2m103-a55)
 ```
 
+Each `e1m-*` machine conf defaults `ALP_SDK_SOC ?= "ALP_SOC_..."` (V2N and
+V2N-M1: `ALP_SOC_RENESAS_RZV2N_N44`), so the plain-`bitbake` flow above still
+builds libalp_sdk with the right SoC capability profile
+(`ALP_SOC_REF_STR`, `ALP_HAS()`, the UIO/MHU rpc backend). A build plan's
+generated `local.conf` sets the same variable with `?=` and wins.
+
 Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
 - `alp-image-edge-*.wic[.gz]` — full SD/eMMC image (bootloader excluded;
   it's already on xSPI).

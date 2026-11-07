@@ -489,7 +489,7 @@ static int mhuv2_max_data_size_get(const struct device *dev)
 	return (int)sizeof(uint32_t);
 }
 
-static struct ipm_driver_api mhuv2_driver_api = {
+static DEVICE_API(ipm, mhuv2_driver_api) = {
 	.send			= mhuv2_send,
 	.register_callback	= mhuv2_register_cb,
 	.max_data_size_get	= mhuv2_max_data_size_get,

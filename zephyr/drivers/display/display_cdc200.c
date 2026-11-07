@@ -819,6 +819,16 @@ void restore_fb(const struct device *dev)
 	data->next_fb[CDC_LAYER_2] = (layer + CDC_LAYER_2)->fb_addr;
 }
 
+/* Program a layer's CFB address the way cdc200_layer_fb_setup() does. */
+static inline void cdc200_write_cfb_addr(uintptr_t reg, uint8_t *fb)
+{
+#ifdef CONFIG_FB_USES_DTCM_REGION
+	sys_write32(local_to_global(fb), reg);
+#else
+	sys_write32((uint32_t)(uintptr_t)fb, reg);
+#endif
+}
+
 /* ISR function */
 static void cdc200_isr(const struct device *dev)
 {
@@ -830,12 +840,12 @@ static void cdc200_isr(const struct device *dev)
 		cdc200_set_irq_clear(regs, CDC_IRQ_LINE);
 
 		if (data->curr_fb[CDC_LAYER_1] != data->next_fb[CDC_LAYER_1]) {
-			sys_write32((uint32_t)data->next_fb[CDC_LAYER_1], regs + CDC_L1_CFB_ADDR);
+			cdc200_write_cfb_addr(regs + CDC_L1_CFB_ADDR, data->next_fb[CDC_LAYER_1]);
 			data->curr_fb[CDC_LAYER_1] = data->next_fb[CDC_LAYER_1];
 		}
 
 		if (data->curr_fb[CDC_LAYER_2] != data->next_fb[CDC_LAYER_2]) {
-			sys_write32((uint32_t)data->next_fb[CDC_LAYER_2], regs + CDC_L2_CFB_ADDR);
+			cdc200_write_cfb_addr(regs + CDC_L2_CFB_ADDR, data->next_fb[CDC_LAYER_2]);
 			data->curr_fb[CDC_LAYER_2] = data->next_fb[CDC_LAYER_2];
 		}
 		cdc200_shadow_reload_control(regs);

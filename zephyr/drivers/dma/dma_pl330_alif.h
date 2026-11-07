@@ -200,6 +200,16 @@ struct dma_pl330_ch_config {
 	size_t loop_counter0;
 
 	/*
+	 * Remainder of the current block when it exceeds one DMAGO's maximum
+	 * (callback mode only): the completion ISR starts the next chunk from
+	 * here, so a channel never gets new microcode while still running.
+	 * rem_size == 0 means nothing is pending.
+	 */
+	uint64_t rem_dst;
+	uint64_t rem_src;
+	uint32_t rem_size;
+
+	/*
 	 * Scatter-gather support fields
 	 *
 	 * head_block: Pointer to the first block in the scatter-gather chain

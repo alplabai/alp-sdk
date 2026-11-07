@@ -833,8 +833,15 @@ void adc_context_update_buffer_pointer(struct adc_context *ctx, bool repeat_samp
 {
 	struct adc_alif_data *data = CONTAINER_OF(ctx, struct adc_alif_data, ctx);
 
+	/* adc_context_on_sampling_done() calls this between rounds: a repeat
+	 * re-samples into the same slot, otherwise the next round of
+	 * extra_samplings must land after this one.  The ISRs write
+	 * data->buffer + curr_cnt and reset curr_cnt per round, so without the
+	 * advance every round overwrote the first channels_count words (#2941). */
 	if (repeat_sampling) {
 		data->buffer = data->repeat_buffer;
+	} else {
+		data->buffer += data->channels_count;
 	}
 }
 
@@ -1253,7 +1260,7 @@ static int adc_init(const struct device *dev)
 	return 0;
 }
 
-struct adc_driver_api alif_adc_api = {
+DEVICE_API(adc, alif_adc_api) = {
 	.channel_setup = &adc_channel_select,
 	.read = &adc_alif_read,
 };

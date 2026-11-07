@@ -79,6 +79,29 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _component_problems(bundle_dir: Path, doc: dict) -> list[str]:
+    """Every component file lies inside the bundle dir and matches the
+    declared size_bytes and sha256 (the same checks the V2N flow's
+    gates.artefacts makes)."""
+    problems: list[str] = []
+    root = bundle_dir.resolve()
+    for c in doc.get("components", []):
+        role, rel = c.get("role"), c.get("file", "")
+        path = (bundle_dir / rel).resolve()
+        if not path.is_relative_to(root):
+            problems.append(f"{role}: {rel} escapes the bundle directory")
+        elif not path.is_file():
+            problems.append(f"{role}: {rel} missing")
+        else:
+            size = path.stat().st_size
+            if size != c.get("size_bytes"):
+                problems.append(f"{role}: size {size} != bundle.json {c.get('size_bytes')}")
+            digest = _sha256(path)
+            if digest != c.get("sha256"):
+                problems.append(f"{role}: sha256 {digest} != bundle.json {c.get('sha256')}")
+    return problems
+
+
 def _validate_bundle(cfg: Cfg):
     bj = cfg.bundle_dir / "bundle.json"
     if not bj.is_file():
@@ -91,6 +114,13 @@ def _validate_bundle(cfg: Cfg):
         return None, Step("validate", False,
                           f"bundle failed schema validation:\n{proc.stdout.strip()}")
     doc = json.loads(bj.read_text(encoding="utf-8"))
+    # check_som_bundle.py validates the schema only; it never hashes the
+    # component files. Verify each one before anything is flashed, so a
+    # truncated, swapped or ../-escaping image cannot reach a flash backend.
+    problems = _component_problems(cfg.bundle_dir, doc)
+    if problems:
+        return None, Step("validate", False,
+                          "bundle components failed verification:\n" + "\n".join(problems))
     return doc, Step("validate", True,
                      f"bundle {doc['release_version']} ({doc['status']}) valid")
 
@@ -200,19 +230,25 @@ def _power_on_test(cfg: Cfg) -> tuple[bool, Step]:
 
 
 def _record(cfg: Cfg, bundle: dict, manifest: Path, test_ran: bool, test_ok: bool) -> Step:
-    """Three-valued, one value per outcome (#1305):
+    """Record the unit in the ledger. This flow emits only `fail` and
+    `pending-hw` (#1305); `som_ledger.py` accepts three values:
 
-      * `pass`        -- --execute, a test was configured, it ran, it passed.
+      * `pass`        -- never from this flow (the EEPROM write is HW-gated).
       * `fail`        -- --execute, a test was configured, it ran, it FAILED.
-      * `pending-hw`  -- everything else: dry-run, no test configured, or a
-                         test skipped under --execute.
+      * `pending-hw`  -- everything else: dry-run, no test configured, a
+                         test skipped under --execute, or a test that
+                         passed (the EEPROM write is HW-gated).
 
     `test_ran` must mean the power-on test was actually configured and
     invoked -- a skipped test is not a passed test (#1276) -- so `test_ok`
-    only earns a `pass` when `test_ran` is also True.
+    is only consulted for `fail` when `test_ran` is also True.
 
-    `cfg.execute` gates BOTH `pass` and `fail`, and that is load-bearing, not
-    symmetry for its own sake: `_power_on_test` returns `test_ran=True` in a
+    This flow never programs the EEPROM (`_eeprom` only builds and plans the
+    manifest), so a unit it provisions is never verified end to end: even a
+    passing power-on test records `pending-hw`, not `pass`. Only `fail` is
+    recorded as such -- a failed test is bad regardless of the EEPROM.
+
+    `cfg.execute` gates `fail`, and that is load-bearing: `_power_on_test` returns `test_ran=True` in a
     dry run too, because it still invokes the runner with `--validate` to
     check the spec. A spec that fails validation on a workstation with no
     board attached is not a unit that failed its power-on test, and must not
@@ -227,8 +263,8 @@ def _record(cfg: Cfg, bundle: dict, manifest: Path, test_ran: bool, test_ok: boo
     met."""
     if not (cfg.ledger_root and cfg.som_ledger):
         return Step("record", True, "no --ledger-root/--som-ledger; ledger record skipped")
-    if cfg.execute and test_ran:
-        result = "pass" if test_ok else "fail"
+    if cfg.execute and test_ran and not test_ok:
+        result = "fail"
     else:
         result = "pending-hw"
     cmd = [sys.executable, str(cfg.som_ledger), "--ledger-root", str(cfg.ledger_root),

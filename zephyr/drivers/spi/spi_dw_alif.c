@@ -376,15 +376,32 @@ static void spi_dw_dma_cache_shape(struct spi_dw_dma_shape       *shape,
 	shape->dst_adj = blk->dest_addr_adj;
 }
 
+/*
+ * ONE shared dummy object per direction, file scope.
+ *
+ * transceive() hands these addresses to the setup_{rx,tx}_channel() helpers
+ * when a transfer has no buffer for that direction (RX-only / TX-only, or a
+ * NULL spi_buf.buf skip entry).  The helpers recognise them by ADDRESS, so
+ * both sides must compare against the very same object.  Function-local
+ * statics of the same name are distinct objects, so the comparison never
+ * matched: the dummy was treated as a real buffer, the DMA incremented
+ * through the neighbouring .bss at burst > 1, and the RX path flushed and
+ * invalidated cache lines over that unrelated memory.
+ *
+ * A dummy hit means: fixed-address (non-incrementing) DMA, burst 1, and no
+ * cache maintenance.
+ */
+static uint32_t spi_dw_dma_dummy_tx = 0xFF;
+static uint32_t spi_dw_dma_dummy_rx;
+
 static int spi_dw_dma_setup_rx_channel(const struct device *dev,
 				       struct dma_config *dma_cfg,
 				       struct dma_block_config *dma_block_cfg,
 				       void *rx_ptr, size_t chunk)
 {
 	const struct spi_dw_config *info = dev->config;
-	static uint32_t dummy_rx;
 	uint32_t dw_spi_rxftlr_dflt = (info->fifo_depth * 1) / 2;
-	uint32_t burstlen = spi_dw_dma_burst_for_chunk(dw_spi_rxftlr_dflt, chunk, rx_ptr == &dummy_rx);
+	uint32_t burstlen = spi_dw_dma_burst_for_chunk(dw_spi_rxftlr_dflt, chunk, rx_ptr == &spi_dw_dma_dummy_rx);
 	int ret;
 
 	write_dmardlr(dev, burstlen - 1);
@@ -394,7 +411,7 @@ static int spi_dw_dma_setup_rx_channel(const struct device *dev,
 	dma_cfg->dma_slot = info->dma_rx.periph;
 	dma_block_cfg->source_address = (mm_reg_t)DEVICE_MMIO_GET(dev) + DW_SPI_REG_DR;
 	dma_block_cfg->dest_address = (uintptr_t)rx_ptr;
-	dma_block_cfg->dest_addr_adj = (rx_ptr == &dummy_rx) ?
+	dma_block_cfg->dest_addr_adj = (rx_ptr == &spi_dw_dma_dummy_rx) ?
 		DMA_ADDR_ADJ_NO_CHANGE : DMA_ADDR_ADJ_INCREMENT;
 	dma_block_cfg->source_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
 
@@ -427,7 +444,7 @@ static int spi_dw_dma_setup_rx_channel(const struct device *dev,
 	 * pulled in during the transfer window -- see the post-completion
 	 * invalidate after spi_dw_dma_wait_completion().
 	 */
-	if (rx_ptr != &dummy_rx) {
+	if (rx_ptr != &spi_dw_dma_dummy_rx) {
 		sys_cache_data_flush_and_invd_range(rx_ptr, chunk * spi_d->dfs);
 	}
 
@@ -449,7 +466,6 @@ static int spi_dw_dma_setup_tx_channel(const struct device *dev,
 				       const void *tx_ptr, size_t chunk)
 {
 	const struct spi_dw_config *info = dev->config;
-	static uint32_t dummy_tx = 0xFF;
 	uint32_t dw_spi_txftlr_dflt = (info->fifo_depth * 1) / 2;
 	uint32_t burst_length;
 	int ret;
@@ -470,7 +486,7 @@ static int spi_dw_dma_setup_tx_channel(const struct device *dev,
 	 */
 	write_dmatdlr(dev, dw_spi_txftlr_dflt);
 
-	burst_length = spi_dw_dma_burst_for_chunk(dw_spi_txftlr_dflt, chunk, tx_ptr == &dummy_tx);
+	burst_length = spi_dw_dma_burst_for_chunk(dw_spi_txftlr_dflt, chunk, tx_ptr == &spi_dw_dma_dummy_tx);
 	dma_cfg->source_burst_length = burst_length;
 	dma_cfg->dest_burst_length = burst_length;
 
@@ -480,7 +496,7 @@ static int spi_dw_dma_setup_tx_channel(const struct device *dev,
 	dma_block_cfg->source_address = (uintptr_t)tx_ptr;
 	dma_block_cfg->dest_address = (mm_reg_t)DEVICE_MMIO_GET(dev) + DW_SPI_REG_DR;
 	dma_block_cfg->dest_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
-	dma_block_cfg->source_addr_adj = (tx_ptr == &dummy_tx) ?
+	dma_block_cfg->source_addr_adj = (tx_ptr == &spi_dw_dma_dummy_tx) ?
 		DMA_ADDR_ADJ_NO_CHANGE : DMA_ADDR_ADJ_INCREMENT;
 
 	struct spi_dw_data *spi_d = dev->data;
@@ -499,7 +515,7 @@ static int spi_dw_dma_setup_tx_channel(const struct device *dev,
 	/* TX: clean the source so the non-snooping DMAC reads what the CPU wrote,
 	 * rather than whatever was in SRAM before the dirty lines were evicted
 	 * (#1830).  See the RX path above for the AxCACHE citation. */
-	if (tx_ptr != &dummy_tx) {
+	if (tx_ptr != &spi_dw_dma_dummy_tx) {
 		sys_cache_data_flush_range((void *)tx_ptr, chunk * spi_d->dfs);
 	}
 
@@ -597,7 +613,6 @@ static int spi_dw_dma_transceive(const struct device *dev,
 	struct spi_dw_data *spi = dev->data;
 	struct spi_dw_dma_state *state = &spi->dma_state;
 	int ret = 0;
-	static uint32_t dummy_tx = 0xFF, dummy_rx;
 
 	/* Initialize transfer state in device data */
 	state->tx_idx = 0;
@@ -679,9 +694,9 @@ static int spi_dw_dma_transceive(const struct device *dev,
 		}
 
 		const void *tx_ptr = (txb && txb->buf) ?
-					(uint8_t *)txb->buf + state->tx_off : (uint8_t *)&dummy_tx;
+					(uint8_t *)txb->buf + state->tx_off : (uint8_t *)&spi_dw_dma_dummy_tx;
 		void *rx_ptr = (rxb && rxb->buf) ?
-					(uint8_t *)rxb->buf + state->rx_off : (uint8_t *)&dummy_rx;
+					(uint8_t *)rxb->buf + state->rx_off : (uint8_t *)&spi_dw_dma_dummy_rx;
 
 		/* Setup DMA for this chunk */
 		struct dma_config dma_cfg = { 0 };
@@ -725,7 +740,7 @@ static int spi_dw_dma_transceive(const struct device *dev,
 		 * back from a completed transfer, which is a silent wrong-data bug
 		 * rather than a visible failure (#1830).
 		 */
-		if (state->is_rx_req && rx_ptr != (void *)&dummy_rx) {
+		if (state->is_rx_req && rx_ptr != (void *)&spi_dw_dma_dummy_rx) {
 			sys_cache_data_invd_range(rx_ptr, chunk * spi->dfs);
 		}
 

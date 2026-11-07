@@ -67,7 +67,7 @@ security:
     its_storage: psa_its
     ps_storage: psa_ps
     tfm: true
-    attestation_root: optiga_trust_m
+    attestation_root: tfm_internal
 """
 
 
@@ -87,10 +87,10 @@ def test_emit_tfm_sysbuild_conf_happy_path(tmp_path: Path) -> None:
     assert 'CONFIG_PSA_CRYPTO_ITS_BACKING_STORE="psa_its"' in out
     assert 'CONFIG_PSA_CRYPTO_PS_BACKING_STORE="psa_ps"' in out
 
-    # OPTIGA attestation root surfaced.
-    assert "CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y" in out
-    # And the bridge-driver comment is present.
-    assert "optiga_trust_m_bridge" in out
+    # TF-M internal attestation root surfaced (no AEN SKU fits OPTIGA).
+    assert "CONFIG_ALP_SDK_PSA_ATTESTATION_TFM_INTERNAL=y" in out
+    # And the OPTIGA bridge is NOT selected.
+    assert "optiga_trust_m_bridge" not in out
 
 
 def test_emit_tfm_sysbuild_conf_absent_emits_nothing(tmp_path: Path) -> None:
@@ -135,7 +135,7 @@ def test_security_psa_schema_round_trip(tmp_path: Path) -> None:
     assert psa["its_storage"] == "psa_its"
     assert psa["ps_storage"] == "psa_ps"
     assert psa["tfm"] is True
-    assert psa["attestation_root"] == "optiga_trust_m"
+    assert psa["attestation_root"] == "tfm_internal"
 
 
 def test_security_psa_its_storage_resolves_to_memory_map(
@@ -413,15 +413,15 @@ def test_security_psa_build_type_inherits_from_boot(tmp_path: Path) -> None:
 
 
 
-@pytest.mark.parametrize("sku, fitted", [("E1M-AEN801", False), ("E1M-AEN401", True)])
+@pytest.mark.parametrize("sku", ["E1M-AEN301", "E1M-AEN401", "E1M-AEN801"])
 def test_security_psa_attestation_optiga_follows_population(
-    tmp_path: Path, sku: str, fitted: bool
+    tmp_path: Path, sku: str
 ) -> None:
-    """#2316: E1M-AEN801 names OPTIGA under `on_module:` and sets
-    `capabilities.optiga_trust_m: true`, but its i2c_devices entry is
-    `assembled: false` -- the loader must refuse an optiga_trust_m
-    attestation root there (same class as #2311's OSPI guard), while a
-    SKU with the part fitted (E1M-AEN401) still accepts it."""
+    """#2316 / #2958: every E1M-AEN SKU shares one SoM PCB on which the
+    OPTIGA (IC1) is DNP, so each names it under `on_module:` but marks its
+    i2c_devices entry `assembled: false` -- the loader must refuse an
+    optiga_trust_m attestation root on all of them (same class as #2311's
+    OSPI guard)."""
     import alp_orchestrate
 
     board_path = tmp_path / "board.yaml"
@@ -439,11 +439,33 @@ def test_security_psa_attestation_optiga_follows_population(
             tfm: true
     """).lstrip("\n"), encoding="utf-8")
 
-    if fitted:
-        alp_orchestrate.load_board_yaml(board_path, metadata_root=REPO / "metadata")
-        return
     with pytest.raises(OrchestratorError) as excinfo:
         alp_orchestrate.load_board_yaml(board_path, metadata_root=REPO / "metadata")
     msg = str(excinfo.value)
     assert "not assembled" in msg
     assert f"assembled: false in metadata/e1m_modules/{sku}.yaml" in msg
+
+
+def test_security_psa_attestation_optiga_accepted_when_fitted(
+    tmp_path: Path,
+) -> None:
+    """Accept path: E1M-V2N101 ships OPTIGA fitted (no `assembled: false`,
+    `capabilities.optiga_trust_m: true`), so an `optiga_trust_m` attestation
+    root loads and the TF-M overlay selects the OPTIGA bridge."""
+    path = _write_board(tmp_path, """
+        name: test-v2n101-optiga
+        som:
+          sku: E1M-V2N101
+        cores:
+          m33_sm:
+            os: zephyr
+            app: ./m33_sm
+        security:
+          psa:
+            attestation_root: optiga_trust_m
+            tfm: true
+    """)
+    project = load_board_yaml(path)
+    out = emit_tfm_sysbuild_conf(project)
+    assert "CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y" in out
+    assert "optiga_trust_m_bridge" in out

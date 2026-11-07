@@ -10,6 +10,16 @@ if BOARD_ALP_E1M_AEN401_M55_HP
 config ROM_START_OFFSET
 	default 0x800 if BOOTLOADER_MCUBOOT
 
+# alp-sdk's own chips/tmp112/tmp112.c defines tmp112_init(), and upstream
+# Zephyr's drivers/sensor/ti/tmp112/tmp112.c defines the SAME symbol for the
+# SAME part.  The ti,tmp112 node in alp_e1m_aen401_m55_hp-on-module.dtsi would
+# auto-select the upstream driver for any CONFIG_SENSOR=y app and collide at
+# link time (#2043).  Default the upstream driver OFF here, exactly as the
+# AEN801/AEN803 boards do; an app that wants it sets CONFIG_TMP112=y in its
+# prj.conf (a user assignment beats this `default`).
+config TMP112
+	default n
+
 # Logging: default to LOG_MODE_MINIMAL, not Zephyr's inherited
 # LOG_MODE_DEFERRED.  Deferred mode needs CONFIG_LOG_PROCESS_THREAD to run,
 # and the AEN bench procedure runs apps whose main() never yields (a

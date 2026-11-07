@@ -478,6 +478,43 @@ static int can_cast_start(const struct device *dev)
 }
 
 /**
+ * @fn      static void can_cast_flush_tx_queue(const struct device *dev, int status)
+ * @brief   Empty the TX callback queue and complete every pending frame with an error
+ * @param[in] dev    : pointer to Runtime device structure
+ * @param[in] status : negative errno handed to each callback (-ENETDOWN on stop,
+ *                     -ENETUNREACH on bus-off, per the Zephyr CAN API)
+ *
+ * Dropping the queue silently is a hang: can_send() with a NULL callback blocks on a
+ * semaphore that only its own queued callback releases, so every queued entry must be
+ * completed. The queue is detached under irq_lock (the TSIF ISR walks head/tail) and the
+ * callbacks run after the lock is released, since they may take locks or send again.
+ */
+static void can_cast_flush_tx_queue(const struct device *dev, int status)
+{
+	struct can_cast_data *data = DEV_DATA(dev);
+	can_tx_callback_t cbs[CAN_MAX_STB_SLOTS];
+	void *args[CAN_MAX_STB_SLOTS];
+	uint32_t n = 0U;
+	unsigned int key = irq_lock();
+
+	while (data->tx_queue.tail != data->tx_queue.head) {
+		cbs[n] = data->tx_queue.cb_list[data->tx_queue.tail].cb;
+		args[n] = data->tx_queue.cb_list[data->tx_queue.tail].cb_arg;
+		QUEUE_TAIL_NEXT(data->tx_queue.tail);
+		n++;
+	}
+	data->tx_queue.head = 0U;
+	data->tx_queue.tail = 0U;
+	irq_unlock(key);
+
+	for (uint32_t i = 0U; i < n; i++) {
+		if (cbs[i]) {
+			cbs[i](dev, status, args[i]);
+		}
+	}
+}
+
+/**
  * @fn      static int can_cast_stop(const struct device *dev)
  * @brief   Stop CAN communication
  * @param[in] dev : pointer to Runtime device structure
@@ -492,6 +529,7 @@ static int can_cast_stop(const struct device *dev)
 	struct can_cast_data *data = DEV_DATA(dev);
 	uint32_t can_base;
 	uint32_t can_cnt_base;
+	unsigned int key;
 
 	can_base = DEVICE_MMIO_NAMED_GET(dev, can_reg);
 	can_cnt_base = DEVICE_MMIO_NAMED_GET(dev, can_cnt_reg);
@@ -523,17 +561,19 @@ static int can_cast_stop(const struct device *dev)
 
 	can_cast_clear_interrupts(can_base);
 
-	/* Reset Tx queue (the TSIF ISR walks head/tail) */
-	{
-		unsigned int key = irq_lock();
-
-		data->tx_queue.head = 0U;
-		data->tx_queue.tail = 0U;
-		irq_unlock(key);
-	}
-
-	/* Stop CAN communication */
+	/* Stop CAN communication first: a sender or a completion callback that re-enters
+	 * can_send() from here on sees the core in reset and started == false and fails
+	 * instead of queueing a frame nothing will ever complete.
+	 */
 	can_cast_reset_enable(can_base);
+
+	key = irq_lock();
+	data->common.started = false;
+	data->err_state = CAN_STATE_STOPPED;
+	irq_unlock(key);
+
+	/* Complete every queued frame with -ENETDOWN so blocked senders wake up */
+	can_cast_flush_tx_queue(dev, -ENETDOWN);
 
 #if CONFIG_CAN_FD_MODE
 	if (data->common.mode & CAN_MODE_FD) {
@@ -546,8 +586,6 @@ static int can_cast_stop(const struct device *dev)
 	}
 #endif
 	/* common.mode is kept: start() re-applies it (only set_mode changes it) */
-	data->common.started = false;
-	data->err_state = CAN_STATE_STOPPED;
 
 	k_mutex_unlock(&data->inst_mutex);
 
@@ -981,6 +1019,29 @@ static int can_cast_send(const struct device *dev, const struct can_frame *frame
 	 * (head == tail means empty), so a full queue is refused rather than read as empty.
 	 */
 	key = irq_lock();
+
+	/* Re-check under the same lock as the enqueue: can_stop() or a bus-off flush can run
+	 * between the unlocked checks above and here, and a frame queued after the flush
+	 * would never complete.
+	 */
+	if (!data->common.started) {
+		irq_unlock(key);
+		k_mutex_unlock(&data->inst_mutex);
+		return -ENETDOWN;
+	}
+
+	if (data->err_state == CAN_STATE_BUS_OFF) {
+		irq_unlock(key);
+		k_mutex_unlock(&data->inst_mutex);
+		return -ENETUNREACH;
+	}
+
+	if (sys_read8(can_base + CAN_CFG_STAT) & BIT(CAN_CFG_STAT_RESET)) {
+		irq_unlock(key);
+		k_mutex_unlock(&data->inst_mutex);
+		return -ENETDOWN;
+	}
+
 	if (callback && (((data->tx_queue.head + 1U) % CAN_MAX_STB_SLOTS) == data->tx_queue.tail)) {
 		irq_unlock(key);
 		k_mutex_unlock(&data->inst_mutex);
@@ -1183,7 +1244,7 @@ static int can_cast_recover(const struct device *dev, k_timeout_t timeout)
 			return 0;
 		}
 		k_usleep(100);
-		usec_timeout -= 100;
+		usec_timeout = can_cast_countdown_us(usec_timeout, 100U);
 	}
 
 	LOG_ERR("Recover Timed out");
@@ -1476,8 +1537,10 @@ static void can_cast_handle_error(const struct device *dev, uint32_t event)
 {
 	struct can_cast_data *data = DEV_DATA(dev);
 	uint32_t can_base;
-	enum can_state state = data->err_state;
+	const enum can_state prev_state = data->err_state;
+	enum can_state state = prev_state;
 	struct can_bus_err_cnt err_cnt;
+	unsigned int key;
 
 	can_base = DEVICE_MMIO_NAMED_GET(dev, can_reg);
 
@@ -1487,7 +1550,8 @@ static void can_cast_handle_error(const struct device *dev, uint32_t event)
 	if (event & CAN_ARBTR_LOST_EVENT) {
 		/* Normally the hardware retries after losing arbitration and complete_tx() fires
 		 * the callback once on success. Only in single-shot mode is the frame dropped:
-		 * report it once and pop it, exactly as complete_tx() pops a finished frame.
+		 * report it once (-EBUSY, a negative errno so blocking can_send() sees the failure)
+		 * and pop it, exactly as complete_tx() pops a finished frame.
 		 */
 		if (can_cast_stb_single_shot_mode(can_base) && data->tx_queue.tail != data->tx_queue.head) {
 			can_tx_callback_t cb     = data->tx_queue.cb_list[data->tx_queue.tail].cb;
@@ -1495,7 +1559,7 @@ static void can_cast_handle_error(const struct device *dev, uint32_t event)
 
 			QUEUE_TAIL_NEXT(data->tx_queue.tail);
 			if (cb) {
-				cb(dev, 1, cb_arg);
+				cb(dev, -EBUSY, cb_arg);
 			}
 		}
 		CAN_STATS_BIT1_ERROR_INC(dev);
@@ -1512,9 +1576,13 @@ static void can_cast_handle_error(const struct device *dev, uint32_t event)
 			/* Abort all pending transmissions */
 			can_cast_abort_tx(can_base);
 
-			/* Reset Tx queue */
-			data->tx_queue.head = 0U;
-			data->tx_queue.tail = 0U;
+			/* Publish bus-off before the flush so a sender cannot queue behind it */
+			key = irq_lock();
+			data->err_state = CAN_STATE_BUS_OFF;
+			irq_unlock(key);
+
+			/* Complete every queued frame with -ENETUNREACH (bus-off) */
+			can_cast_flush_tx_queue(dev, -ENETUNREACH);
 
 			/* Sets the state to Bus off */
 			state = CAN_STATE_BUS_OFF;
@@ -1528,7 +1596,7 @@ static void can_cast_handle_error(const struct device *dev, uint32_t event)
 		can_cast_chk_last_err_code(dev, can_base);
 	}
 
-	if (data->err_state != state) {
+	if (prev_state != state) {
 		data->err_state = state;
 		if (data->common.state_change_cb) {
 			data->common.state_change_cb(dev, data->err_state, err_cnt,
@@ -1676,7 +1744,7 @@ void can_cast_irq_handler(const struct device *dev)
 }
 
 /* CAN Driver API structure */
-struct can_driver_api can_cast_driver_api = {
+DEVICE_API(can, can_cast_driver_api) = {
 	.get_capabilities = can_cast_get_capabilities,
 	.start = can_cast_start,
 	.stop = can_cast_stop,

@@ -10,7 +10,7 @@
  * silicon build -- zephyr_flash + zephyr_littlefs win on priority.
  *
  * Priority 0, silicon_ref="*": always loses to zephyr_flash
- * (priority 100) and zephyr_littlefs (priority 90) on real silicon;
+ * (priority 100) and zephyr_littlefs (priority 110) on real silicon;
  * picked only when the test build forces it via
  * CONFIG_ALP_SDK_STORAGE_SW_FALLBACK=y with no Zephyr backends
  * present.

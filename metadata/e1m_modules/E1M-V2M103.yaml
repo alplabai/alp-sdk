@@ -258,6 +258,14 @@ pad_routes:
   - { e1m: E1M_X_DAC0, dispatch: gd32_bridge, dispatch_pin: PA4 }
   - { e1m: E1M_X_DAC1, dispatch: gd32_bridge, dispatch_pin: PA6 }
 
+  # GD32-owned pads that terminate on the IO MCU, not the RZ/V2N
+  # (v2n/gd32-io-mcu-map.tsv; metadata/pinmux/v2n.yaml `owner: "gd32"`).
+  # An absent pad means `direct`, so these MUST be listed or the pin
+  # allocator hands them to a Renesas function.  E1M-X I2C3 is the GD32
+  # bridge I2C proxy (SCL = PC8, SDA = PC9); CAN_STBY is GD32 PB13.
+  - { e1m: E1M_X_I2C3,   dispatch: gd32_bridge, dispatch_pin: "PC8/PC9" }
+  - { e1m: E1M_CAN_STBY, dispatch: gd32_bridge, dispatch_pin: PB13 }
+
   # Selected E1M-X GPIO pads via GD32 (the IOs not driven from the
   # Renesas side -- see the TSV for the full set).
   - { e1m: E1M_X_GPIO_IO8,  dispatch: gd32_bridge, dispatch_pin: PB10 }

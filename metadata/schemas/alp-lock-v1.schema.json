@@ -88,6 +88,15 @@
         }
       }
     },
+    "platform": {
+      "type": "object", "additionalProperties": false,
+      "description": "Optional: present only when the workspace is pinned to an Alp Platform release (<west topdir>/.alp/platform.yaml, written by `tan platform use`). Absent, not null, otherwise.",
+      "required": ["version", "manifestSha256"],
+      "properties": {
+        "version": { "type": "string", "pattern": "^[0-9]{2}\\.([1-9]|1[0-2])\\.(0|[1-9][0-9]*)(-rc[1-9][0-9]*)?$" },
+        "manifestSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
     "toolchain": {
       "type": "object",
       "description": "Reserved for a follow-up (Zephyr SDK / container / Yocto layer identities). Unpopulated in v1."
