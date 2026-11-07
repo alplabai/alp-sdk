@@ -2836,6 +2836,36 @@
     "v2n": [
       {
         "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": true,
+          "models": false,
+          "peripherals": false
+        },
+        "name": "v2n-alp-rpc-responder",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
+        "path": "examples/v2n/v2n-alp-rpc-responder",
+        "som": "E1M-V2N101",
+        "summary": "The E1M-V2N101 / V2M101 Cortex-M33 as an `<alp/rpc.h>` responder for the Linux A55: it opens channel `alp_v2n_echo`, subscribes to `echo` and sends every payload straight back."
+      },
+      {
+        "board": "e1m-x-evk",
         "coreCount": 1,
         "cores": [
           {

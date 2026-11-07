@@ -1548,6 +1548,44 @@ def _emit_cross_core_shmem_cache(
     ]
 
 
+def _emit_rpmsg_link(
+    project: "BoardProject",
+    slice_: Slice,
+) -> list[str]:
+    """CONFIG_ALP_SDK_RPC_LINK=y for a Zephyr slice that is an endpoint of a `kind: rpmsg` `ipc:` entry (#3066).
+
+    `zephyr/kconfigs/mproc-rpc-usb.kconfig` says heterogeneous projects get
+    `<alp/rpc.h>`'s transport switched on by this per-core alp.conf, but only
+    the D-cache line was ever emitted, so every such example hand-wrote the
+    MBOX / IPC_SERVICE / OPENAMP / ALP_SDK_RPC block.  ALP_SDK_RPC_LINK
+    `imply`s that stack, so which pieces land is the board tree's call: the
+    Alif MHUv2 + static-vrings backend on the AEN M55 cores, the V2N/V2M CM33
+    backend (zephyr/drivers/ipc) on the E1M-V2N101 / V2M101 M33, and nothing on
+    a build whose tree has no matching ipc node (on native_sim / ARCH_POSIX the
+    symbol implies nothing, so the same alp.conf still feeds those twister
+    runs).  `raw_shmem` / `mailbox_only` entries are
+    untouched: `<alp/mproc.h>` needs no ipc_service.
+
+    No heap is emitted: alp.conf loads after prj.conf, so an emitted value would
+    override the app's own sizing (microros-ros2-v2n needs 32 KiB).  OpenAMP /
+    libmetal need one, so the app sets CONFIG_HEAP_MEM_POOL_SIZE itself.
+    """
+    if not any(
+        entry.kind == "rpmsg" and slice_.core_id in entry.endpoints
+        for entry in project.ipc
+    ):
+        return []
+    return [
+        "# board.yaml ipc[].kind: rpmsg names this core as an endpoint: switch",
+        "# on <alp/rpc.h>'s transport.  ALP_SDK_RPC_LINK implies the MBOX +",
+        "# ipc_service + OpenAMP stack this core's board tree supports (AEN M55:",
+        "# MHUv2 + static vrings; V2N/V2M M33: the alp,ipc-v2n-rpmsg backend).",
+        "# OpenAMP needs a heap: set CONFIG_HEAP_MEM_POOL_SIZE in prj.conf.",
+        "CONFIG_ALP_SDK_RPC_LINK=y",
+        "",
+    ]
+
+
 def _emit_memory(slice_: Slice) -> list[str]:
     """Per-slice memory tuning (board.yaml `cores.<id>.memory:`)."""
     lines: list[str] = []
@@ -2143,6 +2181,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     lines.extend(_emit_inference(project, slice_, silicon))
     lines.extend(_emit_cross_core_shmem_cache(project, slice_, lines))
     lines.extend(_emit_memory(slice_))
+    lines.extend(_emit_rpmsg_link(project, slice_))
     lines.extend(_emit_power(slice_))
     lines.extend(_emit_storage(project))
     lines.extend(_emit_ota(project))
