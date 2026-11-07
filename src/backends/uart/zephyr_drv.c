@@ -178,6 +178,10 @@ static bool _line_error_seen(const struct device *dev)
 	return err > 0 && (err & (UART_ERROR_OVERRUN | UART_ERROR_PARITY | UART_ERROR_FRAMING)) != 0;
 }
 
+/* Wakes a ring-backed alp_uart_read() parked on the ring's rx_sem; defined with
+ * the ring bodies below (a no-op without CONFIG_ALP_SDK_UART_RX_RINGBUF). */
+static void _wake_ring_reader(alp_uart_backend_state_t *st);
+
 static alp_status_t z_write(alp_uart_backend_state_t *st, const uint8_t *data, size_t len)
 {
 	const struct device *dev = (const struct device *)st->dev;
@@ -191,6 +195,9 @@ static alp_status_t z_write(alp_uart_backend_state_t *st, const uint8_t *data, s
 		 * inside uart_poll_out(). */
 		if (_line_error_seen(dev)) {
 			__atomic_store_n(&st->line_err, 1u, __ATOMIC_RELEASE);
+			/* A reader blocked on the ring waits on the ISR's semaphore,
+			 * which this latch does not signal by itself. */
+			_wake_ring_reader(st);
 		}
 		uart_poll_out(dev, data[i]);
 	}
@@ -454,6 +461,16 @@ alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_si
 	return s;
 }
 
+static void _wake_ring_reader(alp_uart_backend_state_t *st)
+{
+	struct alp_uart_rx_ringbuf *rb = st->rx_ringbuf;
+	/* Same lifecycle guard pop() uses: a detaching ring, or a slot already
+	 * recycled to another port, is left alone. */
+	if (rb == NULL || !alp_handle_op_enter(&rb->lifecycle, &rb->active_ops)) return;
+	if (rb->port != NULL && &rb->port->state == st) k_sem_give(&rb->rx_sem);
+	alp_handle_op_leave(&rb->active_ops);
+}
+
 /* alp_uart_read() body while a ring is attached.  Counted as an op on the ring
  * (same guard as pop) so a racing alp_uart_rx_ringbuf_detach() waits for us,
  * and blocks on the ISR's semaphore instead of sleep-polling.  *entered stays
@@ -494,9 +511,10 @@ static alp_status_t _read_from_ring(alp_uart_backend_state_t *st,
 		if (alp_lifecycle_get(&rb->lifecycle) != ALP_HANDLE_LC_OPEN) break;
 		int64_t left = deadline - k_uptime_get();
 		if (left <= 0) break;
-		/* Sliced wait: the ISR (and detach) wake us through rx_sem, but a
-		 * writer thread's latch does not, so re-check it every 10 ms. */
-		(void)k_sem_take(&rb->rx_sem, K_MSEC(MIN(left, 10)));
+		/* Woken through rx_sem by the RX ISR, by detach, and by z_write()
+		 * when it latches a line error -- no timed polling, so the CPU can
+		 * sleep for the whole wait. */
+		(void)k_sem_take(&rb->rx_sem, K_MSEC(left));
 	}
 
 	alp_status_t rc;
@@ -594,6 +612,11 @@ void alp_uart_rx_ringbuf_detach(alp_uart_rx_ringbuf_t *rb)
 }
 
 #else /* !CONFIG_ALP_SDK_UART_RX_RINGBUF */
+
+static void _wake_ring_reader(alp_uart_backend_state_t *st)
+{
+	(void)st;
+}
 
 alp_uart_rx_ringbuf_t *
 alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_size)

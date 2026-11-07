@@ -641,8 +641,9 @@ ZTEST(alp_peripheral, test_uart_rx_ringbuf_pop_reports_overrun_latched_by_write)
 	uart_emul_set_errors(_uart1_emul_dev, UART_ERROR_OVERRUN);
 	static const uint8_t tx = 0x55;
 	zassert_equal(alp_uart_write(u, &tx, 1), ALP_OK);
-	/* No RX byte ever arrived, so the ISR never ran: the report below can
-	 * only come from z_write()'s sticky latch. */
+	/* count == 0 after the settle time: no byte reached the ring, so the
+	 * ISR had nothing to drain and recorded no overflow -- the report below
+	 * can only come from z_write()'s sticky latch. */
 	k_msleep(50);
 	zassert_equal(alp_uart_rx_ringbuf_count(rb), 0u);
 
