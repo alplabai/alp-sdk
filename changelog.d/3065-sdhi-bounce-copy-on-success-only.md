@@ -1,0 +1,3 @@
+### Fixed — `renesas_sdhi` bounce patch copies into the caller's pages only after a clean DMA read (#3065)
+
+**A failed or force-PIO read no longer hands the caller stale bounce-buffer data.** `meta-alp-sdk/recipes-kernel/linux/linux-renesas/0010-mmc-renesas_sdhi-bounce-multi-segment-requests-in-internal-dmac.patch` copied the bounce buffer back on every unmap of the owning read, so a request with `data->error` set, or one that fell back to PIO, received whatever an earlier request left in the buffer. The copy-back now runs only from the DMA-complete path (`COOKIE_MAPPED`) with `data->error` clear; the other paths drop ownership without copying. The patch applies cleanly to the matching `rz-6.1-cip43` kernel tree (not yet run on a V2M/V2N EVK).
