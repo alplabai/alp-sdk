@@ -19,6 +19,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 
 #include <alp/backend.h>
@@ -179,6 +180,25 @@ static alp_status_t z_write(alp_uart_backend_state_t *st, const uint8_t *data, s
 	return ALP_OK;
 }
 
+/* Reports a latched UART line error as ALP_ERR_IO.  uart_err_check() returns a
+ * bitmask of enum uart_rx_stop_reason (clearing it), or a negative errno when the
+ * driver has no error reporting -- the latter is "nothing to report", not a fault.
+ * BREAK is ignored: it carries no lost data.  Issue #2934: without this, an RX
+ * FIFO overrun at high baud returned ALP_OK with a corrupted frame. */
+static alp_status_t _line_error(const struct device *dev)
+{
+	int err = uart_err_check(dev);
+	if (err > 0 && (err & (UART_ERROR_OVERRUN | UART_ERROR_PARITY | UART_ERROR_FRAMING)) != 0) {
+		return ALP_ERR_IO;
+	}
+	return ALP_OK;
+}
+
+#if defined(CONFIG_ALP_SDK_UART_RX_RINGBUF)
+static alp_status_t
+_read_from_ring(alp_uart_backend_state_t *st, uint8_t *data, size_t len, int64_t deadline);
+#endif
+
 static alp_status_t
 z_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout_ms)
 {
@@ -192,6 +212,22 @@ z_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout
      * (#595/#621).  The old (timeout_ms == 0) ? INT64_MAX : ... form
      * made a zero timeout mean "wait forever" instead. */
 	const int64_t deadline = k_uptime_get() + (int64_t)timeout_ms;
+
+#if defined(CONFIG_ALP_SDK_UART_RX_RINGBUF)
+	/* An attached ring owns RX: its ISR drains the controller, so polling
+	 * the hardware here would race the ISR for every byte. */
+	if (st->rx_ringbuf != NULL) {
+		alp_status_t rrc = _read_from_ring(st, data, len, deadline);
+		if (rrc != ALP_ERR_NOT_READY) return rrc;
+		/* NOT_READY: the ring was detached under us -- poll instead. */
+	}
+#endif
+
+	/* An overrun/framing/parity error latched since the last call: the bytes
+	 * still in the FIFO are fine, but the stream already has a hole -- say so
+	 * before handing out data that looks contiguous. */
+	alp_status_t lrc = _line_error(dev);
+	if (lrc != ALP_OK) return lrc;
 
 	size_t got = 0;
 	while (got < len) {
@@ -209,6 +245,8 @@ z_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout
          * least one byte already collected is a partial read, per
          * the documented contract -- only an empty read times out. */
 		if (k_uptime_get() >= deadline) {
+			lrc = _line_error(dev);
+			if (lrc != ALP_OK) return lrc;
 			return (got > 0) ? ALP_OK : ALP_ERR_TIMEOUT;
 		}
 		/* k_msleep(1) instead of k_yield() so the system
@@ -217,7 +255,7 @@ z_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout
          * making the timeout deadline unreachable). */
 		k_msleep(1);
 	}
-	return ALP_OK;
+	return _line_error(dev);
 }
 
 /* Detach any RX ring buffer still attached when the parent UART handle
@@ -285,10 +323,10 @@ void (*alp_uart_rx_ringbuf_pop_test_sync_hook)(void) = NULL;
  * caller's LwRB.  Single-producer / single-consumer holds because
  * Zephyr serialises the UART IRQ callback against itself and the
  * consumer thread is the only reader (alp_uart_rx_ringbuf_pop).
- * Bytes that overflow the ring are dropped on the floor -- the ring
- * acts as a back-pressure indicator, not a guarantee of zero loss.
- * Callers that need lossless capture should size the backing store
- * to cover the worst-case drain latency. */
+ * Bytes that overflow the ring cannot be stored, but they are COUNTED
+ * in s->dropped and the next pop()/read() reports ALP_ERR_IO, so loss is
+ * never silent (issue #2934).  Callers that need lossless capture should
+ * size the backing store to cover the worst-case drain latency. */
 static void alp_uart_rx_isr(const struct device *dev, void *user_data)
 {
 	struct alp_uart_rx_ringbuf *s = user_data;
@@ -301,8 +339,14 @@ static void alp_uart_rx_isr(const struct device *dev, void *user_data)
 		uint8_t scratch[32];
 		int     n = uart_fifo_read(dev, scratch, sizeof(scratch));
 		if (n <= 0) break;
-		(void)lwrb_write(&s->rb, scratch, (size_t)n);
+		size_t w = lwrb_write(&s->rb, scratch, (size_t)n);
+		if (w < (size_t)n) {
+			(void)atomic_add(&s->dropped, (atomic_val_t)((size_t)n - w));
+		}
 	}
+	/* Wake a read() blocked on the ring; the sem is binary, a stale give
+	 * only costs one extra loop pass. */
+	k_sem_give(&s->rx_sem);
 }
 
 alp_uart_rx_ringbuf_t *
@@ -340,6 +384,8 @@ alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_si
 	}
 	s->dev  = dev;
 	s->port = port;
+	atomic_set(&s->dropped, 0);
+	k_sem_init(&s->rx_sem, 0, 1);
 
 	int err = uart_irq_callback_user_data_set(dev, alp_uart_rx_isr, s);
 	if (err != 0) {
@@ -354,6 +400,43 @@ alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_si
 	 * initialised handle the instant it observes LC_OPEN. Issue #1634. */
 	alp_lifecycle_set(&s->lifecycle, ALP_HANDLE_LC_OPEN);
 	return s;
+}
+
+/* alp_uart_read() body while a ring is attached.  Counted as an op on the ring
+ * (same guard as pop) so a racing alp_uart_rx_ringbuf_detach() waits for us,
+ * and blocks on the ISR's semaphore instead of sleep-polling.  Returns
+ * ALP_ERR_NOT_READY only when the ring is already gone (caller then polls). */
+static alp_status_t
+_read_from_ring(alp_uart_backend_state_t *st, uint8_t *data, size_t len, int64_t deadline)
+{
+	struct alp_uart_rx_ringbuf *rb = st->rx_ringbuf;
+	if (rb == NULL || !alp_handle_op_enter(&rb->lifecycle, &rb->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	/* A pool slot freed by detach can be re-handed to another port's attach
+	 * between our load and op_enter; only drive a ring that is still ours. */
+	if (rb->port == NULL || &rb->port->state != st) {
+		alp_handle_op_leave(&rb->active_ops);
+		return ALP_ERR_NOT_READY;
+	}
+
+	size_t got = 0;
+	for (;;) {
+		got += lwrb_read(&rb->rb, &data[got], len - got);
+		if (got >= len || atomic_get(&rb->dropped) != 0) break;
+		int64_t left = deadline - k_uptime_get();
+		if (left <= 0) break;
+		(void)k_sem_take(&rb->rx_sem, K_MSEC(left));
+	}
+
+	alp_status_t rc;
+	if (atomic_set(&rb->dropped, 0) != 0) {
+		rc = ALP_ERR_IO; /* ISR overflowed the ring since the last report */
+	} else {
+		rc = (got > 0) ? ALP_OK : ALP_ERR_TIMEOUT;
+	}
+	alp_handle_op_leave(&rb->active_ops);
+	return rc;
 }
 
 alp_status_t
@@ -379,6 +462,9 @@ alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len,
 		size_t n = lwrb_read(&rb->rb, out, max_len);
 		if (got != NULL) *got = n;
 	}
+	/* Bytes the ISR had to drop since the last report: surface it (the
+	 * bytes still in @p out are valid) instead of continuing silently. */
+	if (rc == ALP_OK && atomic_set(&rb->dropped, 0) != 0) rc = ALP_ERR_IO;
 	alp_handle_op_leave(&rb->active_ops);
 	return rc;
 }

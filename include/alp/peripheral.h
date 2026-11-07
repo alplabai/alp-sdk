@@ -1070,6 +1070,19 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  * return immediately with @ref ALP_ERR_TIMEOUT if no byte is already
  * available.
  *
+ * Data loss is never silent.  Without a ring buffer attached the read
+ * polls the controller FIFO, so a burst longer than the FIFO that
+ * arrives faster than the caller polls (high baud, a long
+ * timeout-free gap between calls) overruns it; the call then returns
+ * @ref ALP_ERR_IO instead of @ref ALP_OK with a corrupted frame (UART
+ * overrun, framing or parity error reported by the driver).  For
+ * bursts longer than the hardware FIFO attach an RX ring buffer with
+ * @ref alp_uart_rx_ringbuf_attach (Zephyr:
+ * CONFIG_ALP_SDK_UART_RX_RINGBUF=y): while one is attached this call
+ * takes bytes from the ring, woken by the RX interrupt rather than
+ * polling, and returns @ref ALP_ERR_IO if the ring itself overflowed
+ * since the last read/pop.
+ *
  * @param[in]  port        Handle from @ref alp_uart_open.
  * @param[out] data        Destination buffer.
  * @param[in]  len         Byte count to read.
@@ -1078,7 +1091,8 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  *
  * @return ALP_OK / ALP_ERR_INVAL (@p data NULL with @p len > 0) /
  *         ALP_ERR_NOT_READY (NULL or closed @p port) /
- *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ *         ALP_ERR_TIMEOUT / ALP_ERR_IO (line error or RX overrun: bytes
+ *         were lost) / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms);
 
@@ -1159,7 +1173,10 @@ alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_si
  * @brief Pop up to @p max_len bytes out of the ring.
  *
  * Non-blocking.  Writes the number of bytes actually copied into
- * @p got (may be zero if the ring is empty).
+ * @p got (may be zero if the ring is empty).  If the RX interrupt had to
+ * drop bytes because the ring was full since the last report, the
+ * buffered bytes are still copied but the call returns
+ * @ref ALP_ERR_IO once, so the loss is never silent.
  *
  * @param rb         Handle from alp_uart_rx_ringbuf_attach.
  * @param out        Caller-supplied destination buffer.
@@ -1168,6 +1185,8 @@ alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_si
  *
  * @return ALP_OK on success.  ALP_ERR_NOT_READY if @p rb is NULL or
  *         detached.  ALP_ERR_INVAL if @p out is NULL with @p max_len > 0.
+ *         ALP_ERR_IO if the ring overflowed (bytes lost) since the last
+ *         pop/read.
  */
 alp_status_t
 alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len, size_t *got);

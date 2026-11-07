@@ -7,6 +7,8 @@
  * (alp_uart_rx_ringbuf_*) since it sits behind the same backend.
  */
 
+#include <string.h>
+
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -121,6 +123,7 @@ static alp_uart_t *_open_uart1(void)
      * one opens the port -- otherwise a leftover byte would turn a
      * "no data" case into a "data available" case. */
 	uart_emul_flush_rx_data(_uart1_emul_dev);
+	(void)uart_err_check(_uart1_emul_dev); /* drop a latched error from a prior test */
 	return alp_uart_open(&(alp_uart_config_t){
 	    .port_id   = 1,
 	    .baudrate  = 115200,
@@ -223,6 +226,27 @@ ZTEST(alp_peripheral, test_uart_read_partial_arrival_then_deadline_returns_ok)
 	zassert_equal(s, ALP_OK, "partial read at deadline must be ALP_OK, got %d", (int)s);
 	zassert_equal(buf[0], sent);
 
+	alp_uart_close(u);
+}
+
+/* #2934: an RX overrun must be reported, not returned as ALP_OK.  uart_emul
+ * latches UART_ERROR_OVERRUN when put_rx_data() overflows its 256-byte FIFO --
+ * the same condition a DW UART raises when a burst outruns the poll loop. */
+ZTEST(alp_peripheral, test_uart_read_polled_overrun_reports_io_not_ok)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+
+	static uint8_t burst[300];
+	memset(burst, 0x5a, sizeof(burst));
+	zassert_equal(uart_emul_put_rx_data(_uart1_emul_dev, burst, sizeof(burst)), 256u);
+
+	uint8_t dst[16];
+	zassert_equal(alp_uart_read(u, dst, sizeof(dst), 10),
+	              ALP_ERR_IO,
+	              "overrun must not be reported as ALP_OK");
+	/* The error is consumed by the report; the bytes that did fit are readable. */
+	zassert_equal(alp_uart_read(u, dst, sizeof(dst), 10), ALP_OK);
 	alp_uart_close(u);
 }
 
@@ -433,5 +457,72 @@ ZTEST(alp_peripheral, test_uart_reopen_after_close_allows_fresh_attach_pool_reus
 	alp_uart_rx_ringbuf_detach(rb2);
 	alp_uart_close(u2);
 }
+
+#if HAVE_UART1_NODE
+
+/* #2934: ring overflow is counted by the ISR and reported by the next pop/read. */
+ZTEST(alp_peripheral, test_uart_rx_ringbuf_overflow_reported_by_pop)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+	static uint8_t         backing[16]; /* 15 usable */
+	alp_uart_rx_ringbuf_t *rb = alp_uart_rx_ringbuf_attach(u, backing, sizeof(backing));
+	zassert_not_null(rb);
+
+	static uint8_t burst[64];
+	memset(burst, 0x11, sizeof(burst));
+	zassert_equal(uart_emul_put_rx_data(_uart1_emul_dev, burst, sizeof(burst)), 64u);
+	k_msleep(100); /* let the emul IRQ work item run the ISR */
+
+	uint8_t dst[64];
+	size_t  got = 0;
+	zassert_equal(alp_uart_rx_ringbuf_pop(rb, dst, sizeof(dst), &got), ALP_ERR_IO);
+	zassert_equal(got, 15u, "buffered bytes are still delivered");
+	/* Reported once; the next pop is clean. */
+	zassert_equal(alp_uart_rx_ringbuf_pop(rb, dst, sizeof(dst), &got), ALP_OK);
+	alp_uart_close(u);
+}
+
+ZTEST(alp_peripheral, test_uart_read_overflowed_ring_reports_io)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+	static uint8_t backing[16];
+	zassert_not_null(alp_uart_rx_ringbuf_attach(u, backing, sizeof(backing)));
+
+	static uint8_t burst[64];
+	memset(burst, 0x22, sizeof(burst));
+	(void)uart_emul_put_rx_data(_uart1_emul_dev, burst, sizeof(burst));
+	k_msleep(100);
+
+	uint8_t dst[8];
+	zassert_equal(alp_uart_read(u, dst, sizeof(dst), 50), ALP_ERR_IO);
+	alp_uart_close(u);
+}
+
+/* #2934: with a ring attached read() drains the ring, blocking on the ISR
+ * wake-up when the ring is not yet full. */
+ZTEST(alp_peripheral, test_uart_read_drains_attached_ring)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+	static uint8_t backing[64];
+	zassert_not_null(alp_uart_rx_ringbuf_attach(u, backing, sizeof(backing)));
+
+	static const uint8_t first[4]  = { 1, 2, 3, 4 };
+	static const uint8_t second[4] = { 5, 6, 7, 8 };
+	(void)uart_emul_put_rx_data(_uart1_emul_dev, first, sizeof(first));
+	k_msleep(50);
+	uint8_t dst[8] = { 0 };
+	(void)uart_emul_put_rx_data(_uart1_emul_dev, second, sizeof(second));
+	zassert_equal(alp_uart_read(u, dst, sizeof(dst), 200), ALP_OK);
+	zassert_mem_equal(dst, "\x01\x02\x03\x04\x05\x06\x07\x08", 8);
+	/* The bytes went through the ring, not the device FIFO. */
+	uint8_t spare;
+	zassert_equal(uart_poll_in(_uart1_emul_dev, &spare), -1);
+	alp_uart_close(u);
+}
+
+#endif /* HAVE_UART1_NODE */
 
 #endif /* CONFIG_ALP_SDK_UART_RX_RINGBUF */
