@@ -19,6 +19,13 @@ on:
       - 'examples/**/testcase.yaml'
       - 'include/alp/boards/**'
       - 'include/alp/chips/**'
+      # This job hosts check_vendor_ext_tags.py (include/alp/ext/**) and
+      # check_public_header_purity.py (root include/alp/*.h), so a
+      # header-only PR must fire it.
+      - 'include/alp/ext/**'
+      - 'include/alp/*.h'
+      - 'scripts/check_vendor_ext_tags.py'
+      - 'scripts/check_public_header_purity.py'
       - 'zephyr/boards/alp/**'
       - 'zephyr/kconfigs/**'
       - 'scripts/alp_project_emit/**'
@@ -129,6 +136,10 @@ on:
       - 'examples/**/testcase.yaml'
       - 'include/alp/boards/**'
       - 'include/alp/chips/**'
+      - 'include/alp/ext/**'
+      - 'include/alp/*.h'
+      - 'scripts/check_vendor_ext_tags.py'
+      - 'scripts/check_public_header_purity.py'
       - 'zephyr/boards/alp/**'
       - 'zephyr/kconfigs/**'
       - 'scripts/alp_project_emit/**'
@@ -773,9 +784,11 @@ jobs:
 
       # Public-API test-coverage audit -- per the VERSIONS.md
       # "Quality bar" entry, every public function should have at
-      # least one ztest mention.  Runs informational today (no
-      # --fail-on-gaps) so backfilling can happen incrementally; the
-      # gate flips on for the v1.0 release branch.
-      - name: Public-API test-coverage audit (informational)
+      # least one ztest mention.  --fail-on-gaps is a ratchet, not an
+      # all-or-nothing bar: the portable core must stay at 0 gaps and the
+      # chip-helper backlog may only shrink (budget in the script), so
+      # backfilling stays incremental while a new untested public function
+      # fails the job.
+      - name: Public-API test-coverage audit
         run: |
-          python3 scripts/check_test_coverage.py
+          python3 scripts/check_test_coverage.py --fail-on-gaps
