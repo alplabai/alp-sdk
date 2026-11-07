@@ -381,6 +381,58 @@ def _emit_section(title: str, entries: list[dict[str, Any]]) -> list[str]:
     return out
 
 
+def apply_rev_routes(routes: dict[str, Any], rev: dict[str, Any]) -> dict[str, Any]:
+    """Routes as one hardware revision sees them: the base `e1m_routes:`
+    with that revision's `route_overrides:` (same section shape; an entry
+    replaces the base entry carrying the same `macro`, else is appended)
+    and `route_removals:` (macros the revision does not have) applied.
+    A revision with neither resolves to the base routes unchanged."""
+    over = rev.get("route_overrides") or {}
+    gone = set(rev.get("route_removals") or [])
+    out: dict[str, Any] = {}
+    for sec in set(routes) | set(over):
+        merged = [e for e in routes.get(sec) or [] if e["macro"] not in gone]
+        for new in over.get(sec) or []:
+            for i, e in enumerate(merged):
+                if e["macro"] == new["macro"]:
+                    merged[i] = new
+                    break
+            else:
+                merged.append(new)
+        out[sec] = merged
+    return out
+
+
+def _emit_rev_overrides(slug: str, routes: dict[str, Any],
+                        revisions: dict[str, Any]) -> list[str]:
+    """One `#ifdef ALP_<BOARD>_HW_REV_<REV>` block per revision that
+    overrides routes: `#undef` + redefine what differs from the base.
+    Builds that do not define the selector see the base routes only."""
+    out: list[str] = []
+    for rev_id, rev in sorted(revisions.items()):
+        if not (rev.get("route_overrides") or rev.get("route_removals")):
+            continue
+        base = {e["macro"]: e for es in routes.values() for e in es}
+        eff = {e["macro"]: e for es in apply_rev_routes(routes, rev).values()
+               for e in es}
+        out += ["/* ------------------------------------------------------------------ */",
+                f"/* Hardware revision {rev_id}: routes that differ from the default */",
+                "/* ------------------------------------------------------------------ */",
+                "",
+                f"#ifdef ALP_{slug.upper()}_HW_REV_{rev_id.upper()}"]
+        for macro in base:
+            if macro not in eff:
+                out.append(f"#undef {macro}")
+        for macro, entry in eff.items():
+            if base.get(macro) != entry:
+                doc = _build_doc(entry)
+                out += [f"#undef {macro}",
+                        f"#define {macro} {_c_token(entry['e1m'])}"
+                        + (f"  /**< {doc} */" if doc else "")]
+        out += ["#endif", ""]
+    return out
+
+
 def emit_board(name: str, doc: dict[str, Any]) -> str | None:
     """Return the full text of the generated routes header for one board,
     or `None` if the shared board YAML has none of an `e1m_routes:`,
@@ -436,6 +488,8 @@ def emit_board(name: str, doc: dict[str, Any]) -> str | None:
         entries = routes.get(section_key) or []
         if entries:
             lines.extend(_emit_section(section_title, entries))
+
+    lines.extend(_emit_rev_overrides(slug, routes, doc.get("hw_revisions") or {}))
 
     lines.extend(_emit_i2c_devices(doc.get("i2c_devices") or []))
 
