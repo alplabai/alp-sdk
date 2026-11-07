@@ -592,9 +592,9 @@ ZTEST(alp_peripheral, test_v2n_supervisor_adc_stream_open_zero_rate_inval)
 /* ------------------------------------------------------------------ */
 /* §2A.3 -- GD32 TRNG as a PSA Crypto entropy source.                  */
 /*                                                                     */
-/* On V2N, src/backends/security/zephyr_drv.c registers an            */
-/* mbedtls_hardware_poll() that drains the supervisor's GD32G553 TRNG  */
-/* into mbedtls's platform entropy callback (gated on                  */
+/* On V2N, zephyr/drivers/entropy/entropy_alp_gd32_trng.c is the      */
+/* chosen zephyr,entropy device that drains the supervisor's GD32G553  */
+/* TRNG for Zephyr's mbedTLS (gated on                                 */
 /* CONFIG_ALP_SDK_SECURITY_V2N_TRNG_ENTROPY).  The full PSA round-trip */
 /* requires a running mbedtls stack which the peripheral scenario      */
 /* doesn't pull in; what we *can* check here is that the portable      */
