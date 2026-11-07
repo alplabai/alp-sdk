@@ -35,7 +35,7 @@ def test_tally_accumulates_across_boots_and_saturates(tmp_path):
     (tmp_path / "t.c").write_text(PROG, encoding="utf-8")
     subprocess.run(["cc", "-Wall", "-Werror", "-I", str(SRC), str(tmp_path / "t.c"),
                     "-o", str(tmp_path / "t")], check=True)
-    out = subprocess.run([str(tmp_path / "t")], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run([str(tmp_path / "t")], capture_output=True, text=True, encoding="utf-8", check=True).stdout
     # 14 passes / 1 fail over the run (the old line would have said pass=5 fail=0);
     # 255 = both fields saturated; 0 = an empty tally.
     assert out.split() == ["14", "1", "255", "0"]
