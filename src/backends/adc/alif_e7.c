@@ -87,8 +87,7 @@ typedef struct alif_e7_adc_state {
 	uint8_t                   channel_id;
 	uint8_t                   resolution_bits;
 	uint16_t                  oversample_ratio; /* sourced from cfg->oversampling_ratio at open */
-	alp_alif_adc_trigger_t    trigger_source;
-	int32_t                   sample_buf; /* 4B: adc_alif needs a 4-byte buffer */
+	int32_t                   sample_buf;       /* 4B: adc_alif needs a 4-byte buffer */
 	bool                      in_use;
 } alif_e7_adc_state_t;
 
@@ -166,6 +165,15 @@ alif_e7_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capab
 		return ALP_ERR_IO;
 	}
 
+	/* Reference rule shared with alif_e8 / zephyr_drv: the channel's vref-mv.
+	 * adc_alif exposes no internal reference (adc_ref_internal() is 0), and an
+	 * unknown reference would make read_uv() scale every sample to 0 uV with
+	 * ALP_OK, so refuse the open instead. */
+	if (spec->vref_mv == 0) {
+		_free_state(s);
+		return ALP_ERR_NOSUPPORT;
+	}
+
 	st->be_data         = s;
 	st->reference_uv    = (uint32_t)spec->vref_mv * 1000u;
 	st->resolution_bits = s->resolution_bits;
@@ -224,13 +232,14 @@ static const alp_adc_ops_t alif_e7_ops = {
 	.close    = alif_e7_close,
 };
 
+/* No ALP_ADC_CAP_HW_TRIGGER: reads are software-started single-shot. */
 ALP_BACKEND_REGISTER(adc,
                      alif_e7,
                      {
                          .silicon_ref      = "alif:ensemble:e7",
                          .vendor           = "alif",
                          .base_caps        = (uint32_t)ALP_INSTANCE_CAP_REPORTED,
-                         .base_class_flags = (uint32_t)ALP_ADC_CAP_HW_TRIGGER,
+                         .base_class_flags = 0u,
                          .priority         = 100,
                          .ops              = &alif_e7_ops,
                          .probe            = NULL,
@@ -250,7 +259,14 @@ alp_status_t alp_alif_adc_set_trigger_source(alp_adc_t *h, alp_alif_adc_trigger_
 	if ((unsigned)src > (unsigned)ALP_ALIF_ADC_TRIGGER_EXT_PIN) {
 		return ALP_ERR_INVAL;
 	}
-	alif_e7_adc_state_t *s = (alif_e7_adc_state_t *)h->state.be_data;
-	s->trigger_source      = src;
-	return ALP_OK;
+	/* adc_alif only offers software-started conversions (alif_e7_read_raw is a
+	 * single-shot adc_read()); accept the software source and refuse the rest
+	 * instead of recording a value nothing applies.  op_enter rejects a closed
+	 * handle (be_data == NULL) rather than dereferencing it. */
+	if (!alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc = (src == ALP_ALIF_ADC_TRIGGER_SOFTWARE) ? ALP_OK : ALP_ERR_NOSUPPORT;
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
