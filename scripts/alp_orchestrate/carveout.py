@@ -264,7 +264,7 @@ def _blocked_carve_out(entry: IpcEntry, reason: str) -> ResolvedCarveOut:
     mailbox controller) or the board.yaml entry can't be satisfied
     (no region, collision, etc.).  The manifest records the entry as
     `status: blocked` + `reason: ...` so reviewers see the gap; the
-    actual slice-build step is what trips on it.
+    build plan reports it as a `blocked-ipc-carveout` warning.
     """
     return ResolvedCarveOut(
         name=entry.name,
@@ -289,8 +289,7 @@ def resolve_carve_outs(
        default; explicit `cacheable: true` flips the preference).
     3. Emit a `status: blocked` entry when the matching region has a
        TBD base / size (the SoM isn't HW-mapped yet); the manifest
-       records the block reason and the actual slice-build step is
-       what fails.
+       records the block reason and the build plan warns.
     4. Allocate top-down within the region, page-aligned (4 KiB), and
        only inside the sub-extent every endpoint can actually address
        (`access_windows:`, #553).  An explicit `ipc[].address:` is
@@ -332,6 +331,8 @@ def resolve_carve_outs(
     aperture = resolve_aperture(
         project.som_preset, project.effective_metadata_root())
     is_preset_authored = bool(project.som_preset.get("memory_map"))
+    silicon = str(project.som_preset.get("silicon") or "")
+    alif_silicon = silicon if silicon.startswith("alif:") else ""
 
     # Phase 3 strict mailbox checks (spec §6.4).  Surfaces preset
     # bugs before the user spends time on a build that would silently
@@ -476,6 +477,22 @@ def resolve_carve_outs(
         prefers_cacheable = (bool(entry.cacheable)
                              if entry.cacheable is not None else False)
         endpoint_set = set(entry.endpoints)
+
+        # An Alif SoM must resolve an MRAM aperture: without one the
+        # legacy `carveout: false` filter below would treat `mram_main`
+        # (no `carveout` key, spans the SE-owned ATOC band) as a valid
+        # IPC target.  Refuse rather than fall back (ADR-0034 clause 4,
+        # never guess).
+        if aperture is None and alif_silicon:
+            return [], (
+                f"ipc entry '{entry.name}': SoM {project.sku} names Alif "
+                f"silicon {alif_silicon!r} but its on-die MRAM aperture "
+                f"could not be resolved (SoC JSON unreadable, "
+                f"`silicon_variant` matches no variants[].order_code, or "
+                f"`soc_flash_base` / `mram_mb` missing), so no region can "
+                f"be proven clear of the SE-owned ATOC band.  Fix the "
+                f"SoM preset's `silicon` / `silicon_variant` or the "
+                f"metadata/socs entry.")
 
         # Filter candidates: accessibility covers every endpoint, and the
         # region is eligible for IPC carve-out allocation.

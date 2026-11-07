@@ -7,10 +7,12 @@
  * The bring-up half of this file (metal device, resource table copy, MHU
  * doorbell, vdev creation) is the BENCH-PROVEN sequence from
  * ../../rpmsg-v2n/m33_sm/src/main.c (alp-sdk #683/#697/#2374), trimmed to
- * what a datagram pipe needs: no liveness beacon, no self-close test
- * harness, no echo.  It is duplicated on purpose rather than refactored
- * out of rpmsg-v2n so the proven example stays untouched; see README.md
- * ("Maintainer decisions") for the follow-up to share one platform file.
+ * what a datagram pipe needs: no self-close test harness, no echo.  The
+ * AMP liveness beacon and the attach-reset handshake are kept: the A55 side
+ * (yocto_uio_drv.c) requires both (see "Attach protocol" below).  It is
+ * duplicated on purpose rather than refactored out of rpmsg-v2n so the
+ * proven example stays untouched; see README.md ("Maintainer decisions")
+ * for the follow-up to share one platform file.
  * The M33 endpoint address (1024) and the doorbell asymmetry are explained
  * in that file's header and are not repeated here.
  *
@@ -27,6 +29,22 @@
  *                                             peer_sem fires
  *     "xrce\0<XRCE>"   <------------------>   queued -> rpmsg_link_recv()
  *                                             rpmsg_link_send() -> "xrce\0<XRCE>"
+ *
+ * Attach protocol (same as ../../rpmsg-v2n/m33_sm/src/main.c, #683/#2586)
+ *   The A55 backend (src/backends/rpc/yocto_uio_drv.c, uio_attach_reset())
+ *   runs on EVERY alp_rpc_open().  It reads the beacon at the top of the
+ *   rsctbl page (<alp/protocol/amp_beacon.h>, published by the shared
+ *   zephyr/drivers/ipc/alp_v2n_beacon.c) and:
+ *     - no magic            -> fails the open with ALP_ERR_NOT_READY;
+ *     - epoch ODD (bound)   -> writes vdev.status = 0, kicks, and waits for
+ *                              EVEN, then zeroes both vrings;
+ *     - epoch EVEN          -> proceeds straight to zeroing the vrings.
+ *   So this firmware must (1) publish the beacon first thing, (2) bump the
+ *   epoch to ODD once the virtio device is bound, and (3) on a doorbell that
+ *   finds DRIVER_OK clear, tear the vdev down, bump the epoch back to EVEN
+ *   and build a fresh vdev -- the A55 zeroes the vrings, and OpenAMP keeps
+ *   its ring indices in the virtqueue objects, so reusing the old vdev would
+ *   desync the second bridge run in one CM33 boot.
  */
 
 #include <string.h>
@@ -35,12 +53,12 @@
 #include <zephyr/drivers/mbox.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
 
 #include <metal/device.h>
 #include <openamp/open_amp.h>
 
-#include <alp/protocol/v2n_mhu_doorbell.h>
-
+#include "alp_v2n_beacon.h"
 #include "resource_table.h"
 #include "rpmsg_link.h"
 
@@ -61,11 +79,6 @@ LOG_MODULE_REGISTER(rpmsg_link, LOG_LEVEL_INF);
 #define SHM_START_ADDR DT_REG_ADDR(SHM_NODE)
 #define SHM_SIZE       DT_REG_SIZE(SHM_NODE)
 #define RSC_TABLE_ADDR DT_REG_ADDR(DT_NODELABEL(rsctbl))
-
-/* CM33 -> A55 doorbell: the line selected by <alp/protocol/v2n_mhu_doorbell.h> (SWINT unit 12 by
- * default, rsp_ch8_ns with CONFIG_ALP_V2N_DOORBELL_RSP_CH8), so this firmware rings the same line
- * the A55 backend listens on. */
-#define ALP_M33_DOORBELL_SET (ALP_V2N_MHU_B_CM33_BASE + ALP_V2N_DOORBELL_SET_OFF)
 
 /* <alp/rpc.h> method that carries XRCE datagrams; the length includes the NUL. */
 #define XRCE_METHOD     "xrce"
@@ -110,6 +123,17 @@ K_MSGQ_DEFINE(rx_q, sizeof(struct datagram), 8, 4);
 static K_SEM_DEFINE(doorbell_sem, 0, 1); /* A55 kicked the mailbox */
 static K_SEM_DEFINE(peer_sem, 0, 1);     /* first frame from the A55 seen */
 
+/* Set while link_reset() tears the link down: rpmsg_link_send() refuses to
+ * touch the endpoint of a vdev that is being removed. */
+static atomic_t link_resetting;
+
+/* Serialises the sender against teardown.  rpmsg_link_send() holds it across
+ * the (non-blocking) send; link_reset() takes it before rpmsg_deinit_vdev(),
+ * so a publish already in flight drains first and a later one sees
+ * link_resetting under the lock.  Priority inheritance lifts the preempted
+ * sender above link_task while link_task waits. */
+static K_MUTEX_DEFINE(send_lock);
+
 static void mbox_rx_cb(const struct device *dev, mbox_channel_id_t ch, void *u, struct mbox_msg *m)
 {
 	ARG_UNUSED(dev);
@@ -151,7 +175,9 @@ int mailbox_notify(void *priv, uint32_t id)
 {
 	ARG_UNUSED(priv);
 	ARG_UNUSED(id);
-	*(volatile uint32_t *)ALP_M33_DOORBELL_SET = 1U;
+	/* CM33 -> A55 doorbell: the line <alp/protocol/v2n_mhu_doorbell.h> selects (SWINT unit 12 by
+	 * default, rsp_ch8_ns with CONFIG_ALP_V2N_DOORBELL_RSP_CH8), the one the A55 backend listens on. */
+	alp_v2n_doorbell_ring();
 	return 0;
 }
 
@@ -243,6 +269,7 @@ static struct rpmsg_device *create_rpmsg_vdev(void)
 	if (rpmsg_init_vdev(&rvdev, vdev, NULL, shm_io, &shpool)) {
 		goto failed;
 	}
+	alp_v2n_beacon_epoch_bump(); /* even -> odd: bound */
 	return rpmsg_virtio_get_rpmsg_device(&rvdev);
 
 failed:
@@ -251,35 +278,86 @@ failed:
 	return NULL;
 }
 
-/* Manager thread: bring the vdev up, create the endpoint, then turn every
- * A55 doorbell into an rproc_virtio_notified() so ept_rx_cb() runs. */
+/* The A55 asked for a link reset (it wrote vdev.status = 0 and kicked, ahead
+ * of re-creating its virtio driver and zeroing both vrings): tear the virtio
+ * device down and acknowledge with an EVEN epoch so the next attach starts
+ * from fresh ring indices on both sides. */
+static void link_reset(void)
+{
+	/* rpmsg_deinit_vdev() NULLs rvdev.vdev, so take it first or
+	 * rproc_virtio_remove_vdev() frees nothing. */
+	struct virtio_device *vdev = rvdev.vdev;
+
+	k_mutex_lock(&send_lock, K_FOREVER);
+	atomic_set(&link_resetting, 1);
+	/* An empty name skips the name-service destroy announcement
+	 * rpmsg_destroy_ept() would queue onto the old A55 ring (the A55 is
+	 * about to zero it). */
+	ept.name[0] = '\0';
+	rpmsg_deinit_vdev(&rvdev);
+	rproc_virtio_remove_vdev(vdev);
+	k_mutex_unlock(&send_lock);
+	/* vdev.status is deliberately NOT written: the A55 already wrote 0, and a
+	 * store from this side could overwrite a DRIVER_OK it has since set. */
+
+	/* Datagrams and the peer token belong to the old session; the new bridge
+	 * says "hello" again.  A stale doorbell would be read against the new vdev. */
+	k_msgq_purge(&rx_q);
+	k_sem_reset(&peer_sem);
+	k_sem_reset(&doorbell_sem);
+	atomic_set(&link_resetting, 0);
+	alp_v2n_beacon_epoch_bump(); /* odd -> even: waiting; the A55 may proceed */
+}
+
+/* Manager thread: one pass per A55 attach.  Bring the vdev up, create the
+ * endpoint, then turn every A55 doorbell into an rproc_virtio_notified() so
+ * ept_rx_cb() runs, until the A55 resets the link. */
 static void link_task(void *a, void *b, void *c)
 {
 	ARG_UNUSED(a);
 	ARG_UNUSED(b);
 	ARG_UNUSED(c);
 
-	rpdev = create_rpmsg_vdev();
-	if (!rpdev) {
-		return;
-	}
-	/* Create the endpoint BEFORE the receive loop so the A55's first frame is
-	 * not dropped for want of a matching endpoint (rpmsg-v2n #697). */
-	if (rpmsg_create_ept(
-	        &ept, rpdev, "rpmsg-service-0", APP_EPT_ADDR, RPMSG_ADDR_ANY, ept_rx_cb, NULL)) {
-		LOG_ERR("failed to create endpoint");
-		return;
-	}
-	LOG_INF("rpmsg link up, waiting for the A55 bridge");
 	for (;;) {
-		if (k_sem_take(&doorbell_sem, K_FOREVER) == 0) {
+		rpdev = create_rpmsg_vdev();
+		if (!rpdev) {
+			return;
+		}
+		/* Create the endpoint BEFORE the receive loop so the A55's first frame
+		 * is not dropped for want of a matching endpoint (rpmsg-v2n #697). */
+		if (rpmsg_create_ept(
+		        &ept, rpdev, "rpmsg-service-0", APP_EPT_ADDR, RPMSG_ADDR_ANY, ept_rx_cb, NULL)) {
+			LOG_ERR("failed to create endpoint");
+			link_reset(); /* odd -> even: no longer bound */
+			return;
+		}
+		LOG_INF("rpmsg link up, waiting for the A55 bridge");
+		for (;;) {
+			if (k_sem_take(&doorbell_sem, K_FOREVER) != 0) {
+				continue;
+			}
+			/* No DRIVER_OK = the A55 is resetting the link ahead of zeroing the
+			 * vrings.  rproc_virtio_notified() never looks at the status, so check
+			 * here, before it walks a ring the A55 is about to reset. */
+			uint8_t status = 0;
+			(void)virtio_get_status(rvdev.vdev, &status);
+			if ((status & VIRTIO_CONFIG_STATUS_DRIVER_OK) == 0U) {
+				break;
+			}
 			rproc_virtio_notified(rvdev.vdev, VRING1_ID);
 		}
+		LOG_INF("A55 reset the link; waiting for the next attach");
+		link_reset();
 	}
 }
 
 int rpmsg_link_start(void)
 {
+	/* First action, ahead of OpenAMP/libmetal init: the A55 backend refuses to
+	 * open without the magic, and a bench read that catches this firmware
+	 * mid-fault still sees "alive, once". */
+	alp_v2n_beacon_start();
+
 	if (platform_init() != 0) {
 		return -1;
 	}
@@ -318,7 +396,29 @@ size_t rpmsg_link_send(const uint8_t *data, size_t len)
 	}
 	memcpy(frame, XRCE_METHOD, XRCE_METHOD_LEN);
 	memcpy(frame + XRCE_METHOD_LEN, data, len);
-	return rpmsg_send(&ept, frame, XRCE_METHOD_LEN + len) > 0 ? len : 0;
+
+	/* rpmsg_trysend() never sleeps for a TX buffer, so the lock is held only
+	 * briefly and link_reset() is never stalled past the A55 attach ack
+	 * timeout.  Back-pressure is waited out here, outside the lock. */
+	for (int tries = 0; tries < 1500; tries++) {
+		int rc;
+
+		k_mutex_lock(&send_lock, K_FOREVER);
+		if (atomic_get(&link_resetting) != 0) {
+			k_mutex_unlock(&send_lock);
+			return 0;
+		}
+		rc = rpmsg_trysend(&ept, frame, XRCE_METHOD_LEN + len);
+		k_mutex_unlock(&send_lock);
+		if (rc > 0) {
+			return len;
+		}
+		if (rc != RPMSG_ERR_NO_BUFF) {
+			return 0;
+		}
+		k_msleep(10);
+	}
+	return 0;
 }
 
 size_t rpmsg_link_recv(uint8_t *buf, size_t cap, int timeout_ms)

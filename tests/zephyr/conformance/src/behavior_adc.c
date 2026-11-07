@@ -398,3 +398,22 @@ ZTEST(alp_testing_adc_behavior, test_reset_all_frees_side_state)
 
 	alp_adc_close(h);
 }
+
+/* A handle left open across alp_testing_reset_all() must not alias the
+ * slot's next occupant: ops fail instead of touching another instance. */
+ZTEST(alp_testing_adc_behavior, test_stale_handle_after_reset_fails)
+{
+	alp_adc_t *stale = open_channel(3);
+	zassert_not_null(stale, "adc test double must open ANY instance");
+
+	alp_testing_reset_all();
+	/* Takes over the slot the stale handle used to occupy. */
+	alp_adc_t *h = open_channel(4);
+	zassert_not_null(h, "re-open after reset_all() failed");
+
+	int32_t raw = 0;
+	zassert_equal(alp_adc_read_raw(stale, &raw), ALP_ERR_NOT_READY, "stale handle op must fail");
+
+	alp_adc_close(stale);
+	alp_adc_close(h);
+}

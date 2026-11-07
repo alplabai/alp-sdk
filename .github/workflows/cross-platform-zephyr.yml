@@ -632,7 +632,7 @@ jobs:
               # the pull_request/push case below, this skip does not depend
               # on which paths changed.
               if [ "${EVENT_NAME}" = "merge_group" ]; then
-                echo "PASS: python-smoke intentionally skipped on merge_group -- already graded on this content via pull_request before the entry was enqueued"
+                echo "PASS: python-smoke intentionally skipped on merge_group -- NOT re-run on the rebased queue content; only its pull_request run (against the PR head) graded this change"
                 exit 0
               fi
               if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ]; } \

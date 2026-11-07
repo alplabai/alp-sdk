@@ -347,3 +347,23 @@ ZTEST(alp_testing_spi_behavior, test_write_read_lifecycle_gate_precedes_arg_chec
 	              "read() on an open bus with rx=NULL, len>0 must still answer INVAL");
 	alp_spi_close(h2);
 }
+
+/* A handle left open across alp_testing_reset_all() must not alias the
+ * slot's next occupant: ops fail instead of touching another instance. */
+ZTEST(alp_testing_spi_behavior, test_stale_handle_after_reset_fails)
+{
+	alp_spi_t *stale = open_bus(3);
+	zassert_not_null(stale, "spi test double must open ANY instance");
+
+	alp_testing_reset_all();
+	/* Takes over the slot the stale handle used to occupy. */
+	alp_spi_t *h = open_bus(4);
+	zassert_not_null(h, "re-open after reset_all() failed");
+
+	const uint8_t msg[] = { 0x01 };
+	zassert_equal(
+	    alp_spi_write(stale, msg, sizeof(msg)), ALP_ERR_NOT_READY, "stale handle op must fail");
+
+	alp_spi_close(stale);
+	alp_spi_close(h);
+}
