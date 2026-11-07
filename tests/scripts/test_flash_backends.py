@@ -47,6 +47,7 @@ from flash_backends import yocto_wic                # noqa: E402
 from flash_backends.yocto_wic import (             # noqa: E402
     YoctoWicFlash,
     _require_block_device,
+    _require_unused_device,
     _resolve_dev_root,
 )
 from flash_backends.zephyr_west_flash import (     # noqa: E402
@@ -70,6 +71,7 @@ def _patch_valid_dev_target():
         "flash_backends.yocto_wic",
         _resolve_dev_root=lambda target: (Path(target), None),
         _require_block_device=lambda resolved: None,
+        _require_unused_device=lambda resolved: None,
     )
 
 
@@ -342,6 +344,48 @@ def test_require_block_device_rejects_missing_target(tmp_path) -> None:
     err = _require_block_device(tmp_path / "does-not-exist")
     assert err is not None
     assert "cannot stat" in err
+
+
+def _fake_proc_mounts(tmp_path, text):
+    mounts = tmp_path / "mounts"
+    mounts.write_text(text, encoding="utf-8")
+    return patch.object(yocto_wic, "_PROC_MOUNTS", mounts)
+
+
+def test_require_unused_device_rejects_mounted_partition_of_target(tmp_path) -> None:
+    with _fake_proc_mounts(tmp_path, "/dev/sdb1 /mnt ext4 rw 0 0\n"), \
+         patch.object(yocto_wic, "_block_family",
+                      side_effect=lambda n, seen=None: {n, "sdb"}):
+        err = _require_unused_device(Path("/dev/sdb"))
+    assert err is not None and "mounted" in err
+
+
+def test_require_unused_device_rejects_host_root_disk(tmp_path) -> None:
+    with _fake_proc_mounts(tmp_path, "/dev/sda2 / ext4 rw 0 0\n"):
+        err = _require_unused_device(Path("/dev/sda2"))
+    assert err is not None
+
+
+def test_require_unused_device_allows_unrelated_disk(tmp_path) -> None:
+    with _fake_proc_mounts(
+            tmp_path, "proc /proc proc rw 0 0\n/dev/sda2 / ext4 rw 0 0\n"):
+        assert _require_unused_device(Path("/dev/sdb")) is None
+
+
+def test_yocto_wic_execution_refuses_mounted_device_before_running() -> None:
+    with patch.multiple(
+            "flash_backends.yocto_wic",
+            _resolve_dev_root=lambda target: (Path(target), None),
+            _require_block_device=lambda resolved: None,
+            _require_unused_device=lambda resolved: "yocto_wic: mounted"), \
+         patch("flash_backends.yocto_wic.shutil.which",
+               side_effect=lambda t: f"/usr/bin/{t}" if t == "dd" else None), \
+         patch("flash_backends.yocto_wic.subprocess.run") as run_mock:
+        result = YoctoWicFlash().flash(_ctx(
+            {"target": "/dev/sda", "confirm": True}, artefact="/tmp/image.wic"))
+    assert result.ok is False
+    assert "mounted" in result.message
+    assert run_mock.call_count == 0
 
 
 def test_require_block_device_accepts_valid_block_device(tmp_path) -> None:
