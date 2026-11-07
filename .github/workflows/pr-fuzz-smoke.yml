@@ -13,6 +13,7 @@ on:
     paths:
       - 'src/**'
       - 'include/**'
+      - 'chips/**'
       - 'tests/fuzz/**'
       - 'CMakeLists.txt'
       - '.github/workflows/pr-fuzz-smoke.yml'
