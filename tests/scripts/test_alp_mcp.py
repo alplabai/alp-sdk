@@ -315,3 +315,28 @@ def test_emit_constructs_orchestrate_command(monkeypatch, tmp_path):
     assert str(board.resolve()) in cmd
     # scripts/ is placed on PYTHONPATH so `-m alp_orchestrate` resolves.
     assert str(server.SCRIPTS_DIR) in captured["env"]["PYTHONPATH"]
+
+
+def test_emit_passes_core_and_build_root(monkeypatch, tmp_path):
+    board = tmp_path / "board.yaml"
+    board.write_text("som: E1M-AEN801\n", encoding="utf-8")
+    captured = {}
+
+    class _Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd, cwd=None, env=None):
+        captured["cmd"] = cmd
+        captured["cwd"] = cwd
+        return _Proc()
+
+    monkeypatch.setattr(server, "_run", _fake_run)
+    res = server.emit(str(board), "kconfig", core="m55_hp", build_root="out")
+    assert res["ok"] is True
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--core") + 1] == "m55_hp"
+    assert cmd[cmd.index("--build-root") + 1] == "out"
+    # The project directory is cwd so a relative build root lands there.
+    assert captured["cwd"] == board.resolve().parent

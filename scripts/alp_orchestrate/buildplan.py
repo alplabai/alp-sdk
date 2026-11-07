@@ -22,6 +22,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
 
+from .carveout import resolve_carve_outs
 from .headers import (
     emit_dts_partitions,
     emit_dts_reservations,
@@ -230,6 +231,9 @@ def _v1_shaped_project(project: BoardProject) -> dict[str, Any]:
             "hw_rev": project.hw_rev,
         },
         "pins": list(project.raw.get("pins") or []),
+        # west-libraries reads `ota.provider` to emit the out-of-tree OTA
+        # client module (mender-mcu-client).
+        "ota": dict(project.ota),
         "board": ({
             "name":   project.board_name,
             "hw_rev": project.board_hw_rev,
@@ -1012,6 +1016,23 @@ def emit_build_plan(
         {"path": p.as_posix(), "contents": c}
         for p, c in _shared_artefacts(project, build_root)
     ]
+    # A blocked IPC carve-out still emits zero-stub macros (so consumers
+    # compile), which makes the slice builds green: surface it here, the
+    # one place a plan consumer sees the defect before runtime.
+    for carve in resolve_carve_outs(project):
+        if carve.status != "blocked":
+            continue
+        for core_id in carve.endpoints:
+            warnings.append({
+                "code":    "blocked-ipc-carveout",
+                "coreId":  core_id,
+                "message": (f"ipc channel '{carve.name}' is blocked "
+                            f"({carve.reason or 'unknown reason'}); "
+                            f"alp/system_ipc.h carries zero stubs for it, "
+                            f"so the slices build but the channel fails "
+                            f"at runtime"),
+            })
+
     plan: dict[str, Any] = {
         "schemaVersion":   1,
         # Additive to schemaVersion 1 (issue #865): every path in this plan
