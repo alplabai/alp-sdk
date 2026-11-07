@@ -25,6 +25,7 @@
 
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
-		gpios = <&gpio_emul0 0 GPIO_ACTIVE_HIGH>;   /* [0] console test pin */
+		gpios = <&gpio_emul0 0 GPIO_ACTIVE_HIGH>,   /* [0] console test pin (input) */
+		        <&gpio_emul0 1 GPIO_ACTIVE_HIGH>;   /* [1] console test pin (output) */
 	};
 };
