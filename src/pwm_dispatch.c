@@ -139,7 +139,16 @@ alp_status_t alp_pwm_set_period(alp_pwm_t *pwm, uint32_t period_ns)
 	} else if (pwm->state.ops->set_period == NULL) {
 		rc = ALP_ERR_NOSUPPORT;
 	} else {
-		rc = pwm->state.ops->set_period(&pwm->state, period_ns);
+		/* <alp/pwm.h> promises the duty is reset to 0 % on a period
+		 * change.  zephyr_drv and yocto_drv already reset the duty in
+		 * their own set_period; the GD32 bridge did not (it re-sent
+		 * bs->duty_ns), so the dispatcher now enforces the reset
+		 * before the period write for every backend. */
+		rc = ALP_OK;
+		if (pwm->state.ops->set_duty != NULL) {
+			rc = pwm->state.ops->set_duty(&pwm->state, 0u);
+		}
+		if (rc == ALP_OK) rc = pwm->state.ops->set_period(&pwm->state, period_ns);
 		if (rc == ALP_OK) pwm->period_ns = period_ns;
 	}
 	alp_handle_op_leave(&pwm->active_ops);

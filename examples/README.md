@@ -221,7 +221,7 @@ its `cores:` keys.
 | `rpmsg-v2n`              | V2N flagship -- A55 Yocto consumer + M33-SM Zephyr producer, framed RPC over RPMsg. **(V2N)** |
 | `microros-ros2-v2n`       | micro-ROS node on the M33 publishing `std_msgs/Int32`, seen by ROS 2 on the A55 via a custom XRCE transport over RPMsg (ADR 0035; the M33 slice builds and boots, the ROS 2 round-trip is unproven). **(V2N)** |
 | `rpmsg-aen`              | AEN E8 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer. **(AEN)** |
-| `heterogeneous-offload`  | "Why heterogeneous compute?" -- A55 delegates a 1024-pt FFT to M33-SM via `alp_rpc_call`.     |
+| `heterogeneous-offload`  | "Why heterogeneous compute?" -- A55 delegates a 64-pt FFT to M33-SM via `alp_rpc_call`.       |
 | `mproc-mailbox`          | M55-HP ↔ M55-HE mailbox round-trip -- stage payload in shared SRAM, signal via HW mailbox, read the reply. **(AEN)** |
 
 ### V2N platform

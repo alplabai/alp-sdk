@@ -459,6 +459,7 @@ choice
 	prompt "Active SoC capability profile (for runtime config validation)"
 	default ALP_SOC_ALIF_ENSEMBLE_E8 if SOC_SERIES_E8
 	default ALP_SOC_ALIF_ENSEMBLE_E4 if SOC_SERIES_E4
+	default ALP_SOC_RENESAS_RZV2N_N44 if SOC_SERIES_RZV2N
 	default ALP_SOC_NONE
 	help
 	  Select the SoM's SoC so the SDK can reject runtime configs

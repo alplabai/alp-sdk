@@ -80,13 +80,19 @@ alp_status_t alp_uart_read_fd_bounded(int fd, uint8_t *data, size_t len, uint32_
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
-/* in_use is the LAST member (issue #1115 round-2 dev review, mirrors
- * dsp/sw_fallback.c's struct dsp_be): pool_acquire() below memsets only
- * the bytes ahead of it, so the atomic claim is never transiently
- * undone by the reset. */
+/* pool_acquire() below memsets only the bytes ahead of in_use (issue
+ * #1115 round-2 dev review, mirrors dsp/sw_fallback.c's struct dsp_be),
+ * so the atomic claim is never transiently undone by the reset.
+ * in_use, lifecycle and active_ops sit AFTER that boundary on purpose:
+ * lifecycle and active_ops return to UNOPENED / 0 through the close
+ * protocol, and a late stale-handle op_enter() incrementing active_ops
+ * must not be wiped by a re-claim. */
 struct alp_uart {
 	int  fd;
 	bool in_use;
+	/* Op/close guard (issue #629 pattern); see the block comment above. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
 };
 
 static struct alp_uart g_uart_pool[ALP_SDK_YOCTO_MAX_UART_HANDLES];
@@ -114,6 +120,7 @@ static void pool_release(struct alp_uart *h)
 		(void)close(h->fd);
 		h->fd = -1;
 	}
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	alp_slot_release(&h->in_use);
 }
 
@@ -348,6 +355,7 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
 		return NULL;
 	}
 	h->fd = fd;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	alp_internal_set_last_error(ALP_OK);
 	return h;
 }
@@ -359,24 +367,27 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len)
 	 * #1734's GPIO fix).  A malformed @p data/@p len pairing is a
 	 * separate condition -- ALP_ERR_INVAL, checked only once the
 	 * handle itself is known good. */
-	if (port == NULL || !port->in_use) {
+	if (port == NULL || !alp_handle_op_enter(&port->lifecycle, &port->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	alp_status_t rc = ALP_OK;
 	if (data == NULL && len > 0) {
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
 	}
 	size_t written = 0;
-	while (written < len) {
+	while (rc == ALP_OK && written < len) {
 		ssize_t n = write(port->fd, data + written, len - written);
 		if (n < 0) {
 			if (errno == EINTR) {
 				continue;
 			}
-			return alp_status_from_posix_errno(errno);
+			rc = alp_status_from_posix_errno(errno);
+		} else {
+			written += (size_t)n;
 		}
-		written += (size_t)n;
 	}
-	return ALP_OK;
+	alp_handle_op_leave(&port->active_ops);
+	return rc;
 }
 
 /* Milliseconds remaining until @p deadline, clamped to
@@ -476,16 +487,31 @@ alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t
 	 * matching every Zephyr dispatcher (issue #1834).  A malformed
 	 * @p data/@p len pairing is a separate condition -- ALP_ERR_INVAL,
 	 * checked only once the handle itself is known good. */
-	if (port == NULL || !port->in_use) {
+	if (port == NULL || !alp_handle_op_enter(&port->lifecycle, &port->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	alp_status_t rc;
 	if (data == NULL && len > 0) {
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+	} else {
+		rc = alp_uart_read_fd_bounded(port->fd, data, len, timeout_ms);
 	}
-	return alp_uart_read_fd_bounded(port->fd, data, len, timeout_ms);
+	alp_handle_op_leave(&port->active_ops);
+	return rc;
 }
 
 void alp_uart_close(alp_uart_t *port)
 {
+	if (port == NULL) {
+		return;
+	}
+	/* Gate out new ops, then wait for in-flight ones to leave before the
+	 * fd is closed.  alp_uart_read() takes a caller timeout_ms and can
+	 * block for all of it, so the drain must sleep-poll (_blocking), not
+	 * busy-spin.  false means already closed/closing -- a second close()
+	 * stays a no-op. */
+	if (!alp_handle_begin_close_blocking(&port->lifecycle, &port->active_ops)) {
+		return;
+	}
 	pool_release(port);
 }
