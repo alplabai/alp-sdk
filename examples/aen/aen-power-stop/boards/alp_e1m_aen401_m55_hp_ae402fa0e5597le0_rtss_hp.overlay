@@ -11,8 +11,8 @@
  * ensemble_e4_e6_power.dtsi declares the always-on nodes disabled; this app needs the
  * SE service channel, the LPTIMER wake, the LPRTC and the LPGPIO bank (RV-3028 INT on P15_0).
  * As on the AEN803: the SoM power layer drives the pads of every present domain, and a pad
- * whose GPIO controller is disabled makes the quiesce fail with ALP_ERR_NOT_READY
- * (backlight enable on GPIO5, PHY reset on GPIO11).
+ * whose GPIO controller is disabled makes the quiesce fail with ALP_ERR_NOT_READY; the
+ * stock board tree enables GPIO5 (backlight enable) and GPIO11 (PHY reset).
  */
 &se_service {
 	status = "okay";
@@ -36,12 +36,4 @@
 
 &lpgpio {
 	status = "okay";
-};
-
-&gpio11 {
-	status = "okay"; /* E_PHY_RESET (P11_6), eth_phy domain */
-};
-
-&gpio5 {
-	status = "okay"; /* BACKLIGHT_EN (P5_5), backlight domain */
 };

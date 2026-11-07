@@ -56,8 +56,9 @@ zephyr_sources_ifdef(CONFIG_DMA_PL330_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_pl330_alif.c)
 zephyr_sources_ifdef(CONFIG_DMA_ALIF_EVENT_ROUTER
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_alif_event_router.c)
-# Tier-1.5 glue: the M55-HE PL330 DMA2 boot-manager security latch the fork does
-# in its soc_init (self-gates on the alif,dma-pl330 node being present).
+# Tier-1.5 glue: the PL330 boot-manager security latch the fork does in its
+# soc_init (DMA0 on any core; the M55-HE-local DMA2 half self-gates on
+# the enabled HE-local &dma2 node; the whole file self-gates on an alif,dma-pl330 node).
 zephyr_sources_ifdef(CONFIG_DMA_PL330_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_alif_boot_latch.c)
 
@@ -103,17 +104,22 @@ if(CONFIG_SOC_SERIES_E8)
     zephyr_compile_definitions(CONFIG_FLASH_ADDRESS_IN_SINGLE_FIFO_LOCATION)
 endif()
 
-# Custom fixed MPU region table for the Ensemble E8 (mpu_regions_e8.c),
+# Custom fixed MPU region table for the AEN boards (mpu_regions_e8.c),
 # REPLACING arm_mpu_regions.c's generic FLASH_0/SRAM_0 fallback -- restores
 # the fork's MRAM exec/device split without the DT-node-append overlap bug
-# (see the file header for the full root cause). Gated on
-# CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS, which the E8 HE/HP boards'
-# hand-maintained `Kconfig` (not the generated Kconfig.alp_<board> /
-# Kconfig.defconfig) selects. Needed for ANY Ensemble-E8 build -- including
-# MCUboot itself, which never sets CONFIG_ALP_SDK -- so this is applied
-# before the CONFIG_ALP_SDK early-return, mirroring the GPIO clock-enable /
-# OSPI_XIP_SER precedents above.
-if(CONFIG_SOC_SERIES_E8)
+# (see the file header for the full root cause). Gated on the Ensemble SoC
+# family AND CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS, which the AEN401 /
+# AEN601 / AEN801 / AEN803 boards' hand-maintained `Kconfig` (not the generated
+# Kconfig.alp_<board> / Kconfig.defconfig) sets: every one of them retargets
+# the MRAM flash controller and carries the same boot/slot0/storage/atoc
+# partition labels the table reads. The family guard is load-bearing: upstream
+# selects CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS on many non-Alif SoCs (stm32h7,
+# imxrt, nrf54h, rp2xxx, ...) whose trees have no MRAM labels and carry their
+# own mpu_config, so the symbol alone must never pull this file in. Needed for
+# ANY such Ensemble build -- including MCUboot itself, which never sets
+# CONFIG_ALP_SDK -- so this is applied before the CONFIG_ALP_SDK early-return,
+# mirroring the GPIO clock-enable / OSPI_XIP_SER precedents above.
+if(CONFIG_SOC_FAMILY_ENSEMBLE OR CONFIG_SOC_FAMILY_ENSEMBLE_RTSS)
     zephyr_sources_ifdef(CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mpu_regions_e8.c)
 endif()
@@ -353,6 +359,18 @@ if(CONFIG_USE_RZ_FSP_MHU_B)
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/r_mhu_b_ns/r_mhu_b_ns.c)
     zephyr_library_include_directories(
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/r_mhu_b_ns)
+endif()
+
+# ipc_service backend for the V2N/V2M CM33 <-> A55 rpmsg link, so <alp/rpc.h>
+# (src/backends/rpc/zephyr_drv.c) runs on the CM33; the resource table + beacon
+# are shared with examples/multicore/rpmsg-v2n/m33_sm.  Config:
+# IPC_SERVICE_BACKEND_ALP_V2N_RPMSG (zephyr/kconfigs/ipc-v2n-rpmsg.kconfig).
+if(CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipc/ipc_alp_v2n_rpmsg.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipc/alp_v2n_beacon.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipc/resource_table.c)
+    zephyr_library_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipc)
 endif()
 
 # Renesas RZ/V2N CM33 watchdog (WDT0) -- vendored+adapted FSP r_wdt module.

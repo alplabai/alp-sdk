@@ -227,7 +227,7 @@ the slice's `postCommands`, which an executor MUST run in order once `command`
 exits 0. Running `command` alone reports a green build over a tree holding
 `CMakeCache.txt` and no binary at all (alplabai/tan-cli#550). The slice's
 `-DALP_*` settings ride that configure directly: the `-DNAME=VALUE` entries
-(`-DALP_SOM_SKU`, `-DALP_SOM_FAMILY`, `-DALP_CORE_ID`, `-DALP_TOOLCHAIN`, the
+(`-DALP_SOM_SKU`, `-DALP_SOM_FAMILY`, `-DALP_SOC`, `-DALP_CORE_ID`, `-DALP_TOOLCHAIN`, the
 NPU dispatch enables) as cmake cache arguments, and the bare `#if defined(…)`
 guards
 (`ALP_BOARD_<SLUG>`, `ALP_SOM_<SKU>`) as real compiler definitions through a

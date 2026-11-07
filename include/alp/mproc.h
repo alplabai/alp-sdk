@@ -46,7 +46,20 @@
  *   - `alp_mbox_*` -- Zephyr backend functional since v0.4 (DT-anchored
  *     MBOX devices via the `alp-mboxN` aliases, with optional nanopb
  *     framing).  Yocto backend is a shim only; GD32 backend is
- *     NOSUPPORT.
+ *     NOSUPPORT.  A controller whose frames are one-directional in
+ *     hardware (Alif MHUv2: a frame is a sender or a receiver) is
+ *     split into two aliases per channel: `alp-mboxN` is the sender
+ *     frame (@ref alp_mbox_send), the optional `alp-mbox-rxN` is the
+ *     receiver frame (@ref alp_mbox_set_callback / close).  Without
+ *     `alp-mbox-rxN` both directions use `alp-mboxN`.  A controller
+ *     with no message payload (`mbox_mtu_get()` == 0, again MHUv2)
+ *     carries each message in a 64-byte slot at the end of
+ *     `alp-shmem0` and rings a payload-less doorbell: at most 60
+ *     bytes per message (larger fails with ALP_ERR_OUT_OF_RANGE), one
+ *     message in flight, and `alp_mbox_open` fails with
+ *     ALP_ERR_NOT_READY when there is no `alp-shmem0` to hold it.
+ *     Controllers with a payload (`mtu` > 0) refuse messages over
+ *     `mtu` with ALP_ERR_OUT_OF_RANGE.
  *   - `alp_shmem_*` -- Zephyr backend functional since v0.7 via the
  *     DT aliases `alp-shmem0..N` (commit 2e9deec).  Yocto + GD32
  *     backends still return ALP_ERR_NOSUPPORT.

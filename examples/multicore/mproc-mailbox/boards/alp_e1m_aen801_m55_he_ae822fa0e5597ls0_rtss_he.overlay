@@ -1,0 +1,65 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * mproc-mailbox -- AEN M55 overlay (identical on M55-HP and M55-HE).
+ *
+ * Wires the two DT aliases src/backends/mproc/zephyr_drv.c resolves:
+ *
+ *   alp-shmem0   the 4 KiB raw_shmem carve-out the orchestrator resolves
+ *                for board.yaml's `ipc:` block (`--emit system-manifest`:
+ *                0x023ef000, size 0x1000, in the SoM's `sram_ipc` row of
+ *                global SRAM0).  SRAM0 (Alif DFP AE822FA0E5597
+ *                soc_features.h: SOC_FEAT_BULK_SRAM0_BASE 0x02000000)
+ *                is the same address from both cores.  The orchestrator
+ *                and this overlay must agree on the address.
+ *   alp-mbox1    the MHUv2 sender frame (0x400B0000).  An MHUv2 frame is
+ *                one-directional, so the receiver frame (0x400A0000,
+ *                IRQ 43) is aliased as alp-mbox-rx1; the backend sends on
+ *                the first and takes the reply callback on the second.
+ *
+ * The MHUv2 is doorbell-only (its send rejects a payload), so
+ * src/backends/mproc/zephyr_drv.c carries each alp_mbox_send() payload in
+ * the last 64 bytes of alp-shmem0 and rings the doorbell bit named by
+ * `.channel` (1 = the SoM's `app` mailbox channel, matching
+ * ALP_IPC_ALP_SHMEM0_MBOX_CH in the emitted <alp/system_ipc.h>).  Keep
+ * the example's own shmem offsets clear of that tail slot.
+ *
+ * MHU addresses and IRQ are the bench-proven pair from aen-rpc-pingpong
+ * (Alif DFP rtss_hp/soc.h: MHU_M55HE_M55HP_1_RX_BASE 0x400A0000,
+ * MHU_M55HE_M55HP_1_RX_IRQn 43); each core's 0x400B0000 is its own
+ * "TX to the peer" alias.
+ */
+
+/ {
+	alp_shmem0_node: shmem@23ef000 {
+		compatible = "mmio-sram";
+		reg = <0x023ef000 0x1000>;
+		status = "okay";
+	};
+
+	soc {
+		mhu_tx: mhu@400b0000 {
+			compatible = "alif,mhuv2-mbox";
+			reg = <0x400B0000 0x1000>;
+			alif,direction = "tx";
+			#mbox-cells = <1>;
+			status = "okay";
+		};
+
+		mhu_rx: mhu@400a0000 {
+			compatible = "alif,mhuv2-mbox";
+			reg = <0x400A0000 0x1000>;
+			interrupts = <43 3>;
+			alif,direction = "rx";
+			#mbox-cells = <1>;
+			status = "okay";
+		};
+	};
+
+	aliases {
+		alp-shmem0   = &alp_shmem0_node;
+		alp-mbox1    = &mhu_tx;
+		alp-mbox-rx1 = &mhu_rx;
+	};
+};

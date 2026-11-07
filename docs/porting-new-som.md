@@ -756,8 +756,9 @@ west build \
 > used as the board directory: `board.cmake` (flasher/debugger runner
 > args -- see `docs/architecture.md`'s generators-inventory entry for
 > why), and the bare `Kconfig`, which sets
-> `CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS default y` to select the custom
-> E8 MPU region table.  Missing `Kconfig` is SILENT: the build succeeds
+> `CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS default y` (and
+> `ALIF_FLEX_IO_1V8 default y` on an E1M-AEN SoM) to select the custom
+> MRAM MPU region table, which every AEN board (AEN401/601/801/803) uses.  Missing `Kconfig` is SILENT: the build succeeds
 > and falls back to Zephyr's generic 2-region FLASH_0/SRAM_0 map, whose
 > whole-flash FLASH_0 region is unsafe on Flow D (production MRAM boot).
 > `tests/scripts/test_gen_zephyr_board.py` pins the covered files

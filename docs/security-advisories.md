@@ -13,7 +13,7 @@ the report is visible only to you + the SDK maintainers.
 
 **Do NOT:**
 - File a public issue in the GitHub tracker.
-- Post on [`community.alplab.ai`](https://community.alplab.ai/).
+- Post in any other public channel (discussion threads, social media).
 - Email the maintainers directly with technical details
   (encrypted comms via the GitHub flow are safer than ad-hoc
   email).

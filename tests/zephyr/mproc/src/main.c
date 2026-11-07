@@ -80,6 +80,7 @@ ZTEST(alp_mproc, test_shmem_view_null_handle_errors)
 	alp_shmem_close(NULL);
 }
 
+#ifndef ALP_MPROC_TEST_DOORBELL /* the doorbell scenario defines alp-mbox0 */
 ZTEST(alp_mproc, test_mbox_open_no_backend_returns_null)
 {
 	alp_mbox_config_t cfg = { .channel = 0, .peer = ALP_CORE_M55_HE };
@@ -87,6 +88,7 @@ ZTEST(alp_mproc, test_mbox_open_no_backend_returns_null)
 	zassert_is_null(m);
 	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT);
 }
+#endif
 
 ZTEST(alp_mproc, test_mbox_lifecycle_null_handle_safe)
 {

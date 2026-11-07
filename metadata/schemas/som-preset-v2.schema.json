@@ -1009,7 +1009,8 @@
       "type": "object",
       "required": [
         "chip",
-        "role"
+        "role",
+        "address_7bit"
       ],
       "additionalProperties": false,
       "properties": {
@@ -1027,8 +1028,8 @@
           "oneOf": [
             {
               "type": "string",
-              "pattern": "^0x[0-9A-Fa-f]{1,2}$",
-              "description": "7-bit I2C address as a hex string, e.g. \"0x50\"."
+              "pattern": "^0x([0-7][0-9A-Fa-f]|[0-9A-Fa-f])$",
+              "description": "7-bit I2C address as a hex string in 0x00-0x7F, e.g. \"0x50\". An 8-bit write-address form (0x80-0xFF, e.g. 0xD2) is rejected: convert it (0xD2 >> 1 = 0x69). Use \"TBD\" or \"configurable\" when the address is not hardware-fixed; the key itself is required."
             },
             {
               "type": "string",
