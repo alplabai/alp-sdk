@@ -28,6 +28,8 @@
 #include <alp/testing/common.h>
 #include <alp/testing/uart.h>
 
+#include "alp/chips/quectel_bg77.h"
+
 /* Local copy of main.c's / behavior_gpio.c's enum-membership helper --
  * both are static to their own TU. */
 static bool status_in_enum(alp_status_t s)
@@ -253,6 +255,36 @@ ZTEST(alp_testing_uart_behavior, test_partial_short_read)
 	              "a partial fill must wait out the WHOLE timeout_ms (alp_uart_read bounds the "
 	              "entire call, not the gap between bytes) -- the clock must land on the "
 	              "deadline, not on the last-consumed byte's timestamp");
+
+	alp_uart_close(h);
+}
+
+/* Chip *_read_response() helpers promise "up to max bytes, ALP_OK on at least
+ * one byte": an AT reply is shorter than the caller's buffer, and
+ * alp_uart_read() alone would time out on it under the full-read rule
+ * (issue #2934).  Drives quectel_bg77_read_response() over the test double. */
+ZTEST(alp_testing_uart_behavior, test_chip_read_response_returns_short_reply)
+{
+	const uint32_t port_id  = 17;
+	const uint8_t  reply[]  = { 'O', 'K', '\r', '\n' };
+	uint8_t        buf[32]  = { 0 };
+	size_t         received = 0;
+
+	zassert_equal(
+	    alp_testing_uart_rx_feed(port_id, reply, sizeof(reply)), ALP_OK, "rx_feed failed");
+	alp_uart_t *h = open_port(port_id);
+	zassert_not_null(h);
+
+	quectel_bg77_t dev;
+	zassert_equal(quectel_bg77_init(&dev, h, NULL, NULL), ALP_OK);
+	zassert_equal(quectel_bg77_read_response(&dev, buf, sizeof(buf), &received, 50), ALP_OK);
+	zassert_equal(received, sizeof(reply));
+	zassert_mem_equal(buf, reply, sizeof(reply));
+
+	/* Nothing queued: ALP_ERR_TIMEOUT with a zero count. */
+	zassert_equal(quectel_bg77_read_response(&dev, buf, sizeof(buf), &received, 10),
+	              ALP_ERR_TIMEOUT);
+	zassert_equal(received, 0u);
 
 	alp_uart_close(h);
 }

@@ -205,7 +205,8 @@ static void test_read_fd_returns_ok_when_all_bytes_already_available(void)
 	uint8_t      rx[3] = { 0 };
 	alp_status_t rc    = alp_uart_read_fd_bounded(sv[0], rx, sizeof(rx), 1000u);
 
-	ALP_ASSERT_EQ_INT(rc, ALP_ERR_TIMEOUT);
+	ALP_ASSERT_EQ_INT(rc, ALP_OK);
+	ALP_ASSERT_TRUE(memcmp(rx, tx, sizeof(tx)) == 0);
 
 	close(sv[0]);
 	close(sv[1]);
@@ -224,8 +225,7 @@ static void test_read_fd_partial_arrival_returns_timeout(void)
 	uint8_t      rx[4] = { 0 };
 	alp_status_t rc    = alp_uart_read_fd_bounded(sv[0], rx, sizeof(rx), 60u);
 
-	ALP_ASSERT_EQ_INT(rc, ALP_OK);
-	ALP_ASSERT_TRUE(memcmp(rx, tx, sizeof(tx)) == 0);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_TIMEOUT);
 
 	close(sv[0]);
 	close(sv[1]);

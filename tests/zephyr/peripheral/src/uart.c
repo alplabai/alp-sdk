@@ -278,6 +278,36 @@ ZTEST(alp_peripheral, test_uart_read_overrun_mid_loop_survives_lsr_clearing_poll
 	alp_uart_close(u);
 	lsr_uart_reset();
 }
+
+/* #2934: an overrun during TX (ns16550 poll_out clears the latch) must still be
+ * reported by the next read.  Byte 1's TX latches OVERRUN; z_write's check
+ * before byte 2 must latch it into the port's sticky flag, since byte 2's
+ * poll_out would clear it. */
+ZTEST(alp_peripheral, test_uart_write_latches_overrun_seen_during_tx_for_next_read)
+{
+	lsr_uart_reset();
+	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
+	    .port_id   = 2,
+	    .baudrate  = 115200,
+	    .data_bits = 8,
+	    .stop_bits = 1,
+	    .parity    = ALP_UART_PARITY_NONE,
+	});
+	zassert_not_null(u);
+
+	static const uint8_t tx[2] = { 0x31, 0x32 };
+	static const uint8_t rx[1] = { 0x41 };
+	lsr_uart_push(rx, sizeof(rx));
+	lsr_uart_overrun_after_tx(1);
+	zassert_equal(alp_uart_write(u, tx, sizeof(tx)), ALP_OK);
+
+	uint8_t dst[1];
+	zassert_equal(alp_uart_read(u, dst, sizeof(dst), 50), ALP_ERR_IO);
+	/* Reported once. */
+	zassert_equal(alp_uart_read(u, dst, sizeof(dst), 50), ALP_OK);
+	alp_uart_close(u);
+	lsr_uart_reset();
+}
 #endif /* alp-uart2 */
 
 /* #1639 (review follow-up): uart_emul's .configure stores whatever it
@@ -596,6 +626,26 @@ ZTEST(alp_peripheral, test_uart_read_reports_loss_before_consuming_ring_bytes)
 	zassert_equal(alp_uart_rx_ringbuf_count(rb), 5u, "IO must not have consumed the ring");
 	zassert_equal(alp_uart_read(u, dst, sizeof(dst), 50), ALP_OK);
 	zassert_mem_equal(dst, five, sizeof(five));
+	alp_uart_close(u);
+}
+
+/* #2934: with a ring attached, an overrun latched by write() surfaces at pop(). */
+ZTEST(alp_peripheral, test_uart_rx_ringbuf_pop_reports_overrun_latched_by_write)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+	static uint8_t         backing[64];
+	alp_uart_rx_ringbuf_t *rb = alp_uart_rx_ringbuf_attach(u, backing, sizeof(backing));
+	zassert_not_null(rb);
+
+	uart_emul_set_errors(_uart1_emul_dev, UART_ERROR_OVERRUN);
+	static const uint8_t tx = 0x55;
+	zassert_equal(alp_uart_write(u, &tx, 1), ALP_OK);
+
+	uint8_t dst[8];
+	size_t  got = 0;
+	zassert_equal(alp_uart_rx_ringbuf_pop(rb, dst, sizeof(dst), &got), ALP_ERR_IO);
+	zassert_equal(alp_uart_rx_ringbuf_pop(rb, dst, sizeof(dst), &got), ALP_OK);
 	alp_uart_close(u);
 }
 

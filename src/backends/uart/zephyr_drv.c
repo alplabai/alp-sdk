@@ -171,10 +171,27 @@ z_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st, alp_capabilit
 	return ALP_OK;
 }
 
+/* True when uart_err_check() reports a loss-class line error. */
+static bool _line_error_seen(const struct device *dev)
+{
+	int err = uart_err_check(dev);
+	return err > 0 && (err & (UART_ERROR_OVERRUN | UART_ERROR_PARITY | UART_ERROR_FRAMING)) != 0;
+}
+
 static alp_status_t z_write(alp_uart_backend_state_t *st, const uint8_t *data, size_t len)
 {
 	const struct device *dev = (const struct device *)st->dev;
 	for (size_t i = 0; i < len; i++) {
+		/* ns16550's uart_poll_out() spins on LSR.THRE, and every LSR read
+		 * clears OE/PE/FE -- so an RX overrun that lands while this thread
+		 * transmits (full duplex, loopback) would be wiped before any read
+		 * or the RX ISR looked.  Latch it into the port's sticky flag
+		 * first; the next read / ring pop reports ALP_ERR_IO.  Residual
+		 * window: an error raised between this check and the LSR read
+		 * inside uart_poll_out(). */
+		if (_line_error_seen(dev)) {
+			__atomic_store_n(&st->line_err, 1u, __ATOMIC_RELEASE);
+		}
 		uart_poll_out(dev, data[i]);
 	}
 	return ALP_OK;
@@ -192,6 +209,12 @@ static alp_status_t _line_error(const struct device *dev)
 		return ALP_ERR_IO;
 	}
 	return ALP_OK;
+}
+
+/* Read-and-clear the sticky flag z_write() sets (see uart_ops.h). */
+static bool _take_tx_latched_error(alp_uart_backend_state_t *st)
+{
+	return __atomic_exchange_n(&st->line_err, 0u, __ATOMIC_ACQ_REL) != 0u;
 }
 
 #if defined(CONFIG_ALP_SDK_UART_RX_RINGBUF)
@@ -215,6 +238,9 @@ z_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout
      * (#595/#621).  The old (timeout_ms == 0) ? INT64_MAX : ... form
      * made a zero timeout mean "wait forever" instead. */
 	const int64_t deadline = k_uptime_get() + (int64_t)timeout_ms;
+
+	/* A loss seen while transmitting: report before consuming anything. */
+	if (_take_tx_latched_error(st)) return ALP_ERR_IO;
 
 #if defined(CONFIG_ALP_SDK_UART_RX_RINGBUF)
 	/* An attached ring owns RX: its ISR drains the controller, so polling
@@ -506,6 +532,10 @@ alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len,
 	/* Bytes the ISR had to drop since the last report: surface it (the
 	 * bytes still in @p out are valid) instead of continuing silently. */
 	if (rc == ALP_OK && atomic_set(&rb->dropped, 0) != 0) rc = ALP_ERR_IO;
+	/* ...and an overrun z_write() latched while this port was transmitting. */
+	if (rc == ALP_OK && rb->port != NULL && _take_tx_latched_error(&rb->port->state)) {
+		rc = ALP_ERR_IO;
+	}
 	alp_handle_op_leave(&rb->active_ops);
 	return rc;
 }

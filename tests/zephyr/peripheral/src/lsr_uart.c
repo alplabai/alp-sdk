@@ -25,6 +25,8 @@ static struct {
 	int      latched;     /* pending UART_ERROR_* bits */
 	int      latch_after; /* latch OVERRUN after this many polls; 0 = off */
 	int      polls;
+	int      tx_latch_after; /* latch OVERRUN after this many poll_out calls; 0 = off */
+	int      tx_polls;
 } g;
 
 void lsr_uart_reset(void)
@@ -33,6 +35,13 @@ void lsr_uart_reset(void)
 	g.latched             = 0;
 	g.latch_after         = 0;
 	g.polls               = 0;
+	g.tx_latch_after      = 0;
+	g.tx_polls            = 0;
+}
+
+void lsr_uart_overrun_after_tx(int polls)
+{
+	g.tx_latch_after = polls;
 }
 
 void lsr_uart_push(const uint8_t *data, unsigned n)
@@ -63,6 +72,17 @@ static int lsr_poll_in(const struct device *dev, unsigned char *c)
 	return rc;
 }
 
+static void lsr_poll_out(const struct device *dev, unsigned char c)
+{
+	ARG_UNUSED(dev);
+	ARG_UNUSED(c);
+	g.latched = 0; /* THRE spin reads LSR: clears OE/PE/FE */
+	g.tx_polls++;
+	if (g.tx_latch_after != 0 && g.tx_polls == g.tx_latch_after) {
+		g.latched |= UART_ERROR_OVERRUN; /* hardware overruns during this TX byte */
+	}
+}
+
 static int lsr_err_check(const struct device *dev)
 {
 	ARG_UNUSED(dev);
@@ -73,6 +93,7 @@ static int lsr_err_check(const struct device *dev)
 
 static DEVICE_API(uart, lsr_api) = {
 	.poll_in   = lsr_poll_in,
+	.poll_out  = lsr_poll_out,
 	.err_check = lsr_err_check,
 };
 

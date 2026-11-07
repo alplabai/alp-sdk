@@ -10,4 +10,8 @@ void lsr_uart_push(const uint8_t *data, unsigned n);
  * does mid-burst); the NEXT poll_in() clears it, ns16550-style. */
 void lsr_uart_overrun_after_polls(int polls);
 
+/* After the Nth poll_out() completes, latch UART_ERROR_OVERRUN; the NEXT
+ * poll_out()/poll_in() (an LSR read) clears it, ns16550-style. */
+void lsr_uart_overrun_after_tx(int polls);
+
 #endif

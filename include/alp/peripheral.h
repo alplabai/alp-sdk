@@ -1065,9 +1065,10 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  * arrived -- with zero bytes or with only some -- the call returns
  * @ref ALP_ERR_TIMEOUT.  On ANY non-OK return the contents of @p data
  * are unspecified and the bytes received so far are consumed (they are
- * not redelivered); for partial or streaming reads that need a count,
- * attach an RX ring with @ref alp_uart_rx_ringbuf_attach and use
- * @ref alp_uart_rx_ringbuf_pop.  @c timeout_ms == 0 is a single
+ * not redelivered).  For partial or streaming reads that need a count,
+ * on Zephyr attach an RX ring with @ref alp_uart_rx_ringbuf_attach and
+ * use @ref alp_uart_rx_ringbuf_pop; on backends without the ring (Yocto,
+ * baremetal) call this with @p len == 1 in a loop.  @c timeout_ms == 0 is a single
  * non-blocking poll: it returns @ref ALP_OK only if @p len bytes are
  * already available, otherwise @ref ALP_ERR_TIMEOUT.
  *
@@ -1076,13 +1077,14 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  * arrives faster than the caller polls (high baud, a long
  * timeout-free gap between calls) overruns it; the call then returns
  * @ref ALP_ERR_IO instead of @ref ALP_OK with a corrupted frame (UART
- * overrun, framing or parity error reported by the driver).  Polled
- * mode cannot detect an overrun caused while the same thread is
- * transmitting on ns16550-class UARTs (the Alif UARTs): their TX
- * polling reads the line-status register, which clears the overrun
- * flag, so a full-duplex exchange can lose bytes unreported.  For
- * full-duplex use, or bursts longer than the hardware FIFO, attach an RX ring buffer with
- * @ref alp_uart_rx_ringbuf_attach (Zephyr:
+ * overrun, framing or parity error reported by the driver).  On
+ * ns16550-class UARTs (the Alif UARTs) TX polling reads the
+ * line-status register, which clears the overrun flag; @ref alp_uart_write
+ * therefore checks for a line error before each byte and the next
+ * read or ring pop reports it as @ref ALP_ERR_IO, but an overrun that
+ * lands inside the single LSR read of one TX byte can still be missed.
+ * For full-duplex use, or bursts longer than the hardware FIFO, attach
+ * an RX ring buffer with @ref alp_uart_rx_ringbuf_attach (Zephyr:
  * CONFIG_ALP_SDK_UART_RX_RINGBUF=y): while one is attached this call
  * takes bytes from the ring, woken by the RX interrupt rather than
  * polling, and returns @ref ALP_ERR_IO if bytes were lost (ring
@@ -1108,8 +1110,9 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  * @return ALP_OK / ALP_ERR_INVAL (@p data NULL with @p len > 0) /
  *         ALP_ERR_NOT_READY (NULL or closed @p port, or the ring buffer
  *         was detached during the wait) /
- *         ALP_ERR_TIMEOUT (fewer than @p len bytes by the deadline) / ALP_ERR_IO (line error or RX overrun: bytes
- *         were lost) / ALP_ERR_NOSUPPORT.
+ *         ALP_ERR_TIMEOUT (fewer than @p len bytes by the deadline) /
+ *         ALP_ERR_IO (line error or RX overrun: bytes were lost) /
+ *         ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms);
 
