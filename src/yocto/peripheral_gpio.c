@@ -420,11 +420,17 @@ alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
 
 static void irq_wake(void)
 {
-	if (g_irq.wake_fd < 0) {
+	/* wake_fd is written under g_irq.mu by irq_start_dispatcher_locked();
+	 * snapshot it under the lock too.  Every caller has already dropped
+	 * g_irq.mu (it is a leaf lock), so taking it here cannot deadlock. */
+	pthread_mutex_lock(&g_irq.mu);
+	int fd = g_irq.wake_fd;
+	pthread_mutex_unlock(&g_irq.mu);
+	if (fd < 0) {
 		return;
 	}
 	uint64_t v = 1;
-	(void)write(g_irq.wake_fd, &v, sizeof(v));
+	(void)write(fd, &v, sizeof(v));
 }
 
 static void *irq_dispatcher(void *arg)
@@ -489,7 +495,9 @@ static void *irq_dispatcher(void *arg)
 
 		if (fds[0].revents & POLLIN) {
 			uint64_t drain;
-			(void)read(g_irq.wake_fd, &drain, sizeof(drain));
+			/* The fd this pass polled (snapshot taken under g_irq.mu above),
+			 * not the global: a restart may be rewriting g_irq.wake_fd. */
+			(void)read(fds[0].fd, &drain, sizeof(drain));
 		}
 
 		/* Issue #756: re-validate + read the event UNDER g_irq.mu, but
