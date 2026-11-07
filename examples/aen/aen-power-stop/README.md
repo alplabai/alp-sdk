@@ -76,8 +76,10 @@ Flash it to MRAM (Flow D, slot0 `he_slot0` at `0x80010000`). **The J-Link leaves
 then refuses to sleep with `ALP_ERR_BUSY`. Clear it from the debugger BEFORE releasing
 the core (`w4 0xE000EDF0 0xA05F0000`), then detach the J-Link, then issue the
 flash-loader nRESET; or power-cycle the module with the probe detached. Read the
-console on the E1M edge UART0 at 115200 8N1. Start from a **cold power cycle**: the
-counter lives in SRAM that a reset keeps and a power cycle loses.
+console on the E1M edge UART0 at 115200 8N1. Where the counter lives depends on
+the build. In the bench build it is in BKRAM, which a reset keeps and a power cycle resets to 0.
+In the product build (`variants/product-noscratch.conf`) it is in RV-3028 User RAM 1 and survives
+a power cycle, so the first boot after one reports `record_valid` FAIL and the sequence restarts.
 
 A refused sleep prints `alif_se_power: refuse step=<n> reason=<...> rc=<raw>` (and
 `som_power: ...` for a pad or domain) before the `request FAIL` line.
@@ -204,8 +206,10 @@ profiles as they stand). The word index of the diag blocks is listed in
 
 ```
 POWER_STOP: cycle<n> <check> <PASS|FAIL>
-POWER_STOP: SUMMARY cycles=<n> pass=<n> fail=<n>
+POWER_STOP: SUMMARY cycles=<n> pass=<n> fail=<n> scope=last_boot
 ```
+
+SUMMARY counts only the verdicts of the boot that printed it (every STOP wake is a cold boot, so the counters restart). Judge the run from the per-cycle `cycleN <check> PASS|FAIL` lines, not from SUMMARY.
 
 Checks, per cycle: `record_valid mode_stop wake_source restored_all bkram_counter`
 (`mode_standby` replaces `mode_stop` in the STANDBY variant, and `tcm_retained` is added by the
