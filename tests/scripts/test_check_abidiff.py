@@ -144,11 +144,63 @@ def test_skip_warns_in_ci(monkeypatch, capsys):
     assert "::warning" in capsys.readouterr().out
 
 
-def test_no_minor_tag_warns_under_require_tool(tmp_path, monkeypatch, capsys):
+def test_no_tag_at_all_fails_under_require_tool(tmp_path, monkeypatch, capsys):
     _wire(tmp_path, monkeypatch, 0, "")
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     monkeypatch.setattr(mod.subprocess, "run",
                         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
     monkeypatch.setattr("sys.argv", ["x", "--root", str(tmp_path), "--require-tool"])
-    assert mod.main() == 0
+    assert mod.main() == 1
     assert "::warning" in capsys.readouterr().out
+
+
+def test_no_tag_at_all_skips_without_require_tool(tmp_path, monkeypatch, capsys):
+    _wire(tmp_path, monkeypatch, 0, "")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(mod.subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
+    monkeypatch.setattr("sys.argv", ["x", "--root", str(tmp_path)])
+    assert mod.main() == 0
+    assert "SKIP" in capsys.readouterr().out
+
+
+def test_previous_minor_baseline_ignores_feed_tags_and_orders_numerically():
+    tags = ["feed-v0.17-qemu", "v0.9.0", "v0.10.0-rc1", "v0.10.0-rc9", "v0.10.0-rc10", "v0.8.2"]
+    assert mod.pick_previous_minor_baseline("0.11", tags) == "v0.10.0-rc10"
+    assert mod.pick_previous_minor_baseline("0.10", tags) == "v0.9.0"
+    assert mod.pick_previous_minor_baseline("0.8", ["v0.8.2"]) is None
+
+
+def test_baseline_ignores_feed_tags():
+    assert mod.pick_baseline("0.17", ["feed-v0.17-qemux86", "v0.17.0-rc1"]) == "v0.17.0-rc1"
+    assert mod.pick_baseline("0.17", ["feed-v0.17-qemux86"]) is None
+
+
+def test_new_minor_compares_previous_minor_report_only(tmp_path, monkeypatch, capsys):
+    """dev just bumped to 0.19 with no v0.19.* tag: must still diff, never fail on ABI change."""
+    _wire(tmp_path, monkeypatch, 12, "diff")
+    (tmp_path / "metadata" / "sdk_version.yaml").write_text("version: 0.19.0\n", encoding="utf-8")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+
+    def fake_run(cmd, **kw):
+        if cmd[0] == "git":
+            return subprocess.CompletedProcess(cmd, 0, stdout="v0.17.0 v0.18.0-rc1 v0.18.0", stderr="")
+        return subprocess.CompletedProcess(cmd, 12, stdout="diff", stderr="")
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr("sys.argv", ["x", "--root", str(tmp_path), "--require-tool"])
+    assert mod.main() == 0
+    out = capsys.readouterr().out
+    assert "::warning" in out and "v0.18.0" in out and "report-only" in out
+
+
+def test_baseline_tag_of_other_minor_is_report_only(tmp_path, monkeypatch):
+    _wire(tmp_path, monkeypatch, 12, "diff")
+    monkeypatch.setattr("sys.argv", ["x", "--root", str(tmp_path), "--baseline-tag", "v0.16.0"])
+    assert mod.main() == 0
+
+
+@pytest.mark.parametrize("rc", [1, 2])
+def test_main_abidiff_tool_error_fails(tmp_path, monkeypatch, rc):
+    _wire(tmp_path, monkeypatch, rc, "")
+    assert mod.main() == 1

@@ -13,7 +13,11 @@ only on main/release/**; this gate diffs the compiled library.
 What it does:
   1. Picks the baseline: the highest release tag vX.Y.Z of the same
      MAJOR.MINOR as metadata/sdk_version.yaml, else that minor's highest
-     rc tag, else SKIPS ("first release of minor X.Y, nothing to compare").
+     rc tag.  Before the first tag of a new minor (dev right after a minor
+     bump) it falls back to the PREVIOUS minor's highest release/rc tag in
+     report-only mode, so dev always shows a diff instead of silently
+     checking nothing (#2851).  With no tag at all it SKIPS, or FAILS
+     under --require-tool.
   2. Builds libalp_sdk.so from the baseline tag and from the working tree
      with the same host compiler and the same options (the yocto
      plain-CMake shared configuration, RelWithDebInfo so DWARF is present).
@@ -30,9 +34,11 @@ tag that no tool extracts per symbol, and its "may change in any minor"
 latitude is a minor-to-minor allowance; this gate only compares within a
 minor, where nothing may break.
 
-The gate is ADVISORY: it is not a required context and has no merge_group
-trigger (maintainer decision, #2851).  Every skip emits a ::warning:: under
---require-tool or in CI (GITHUB_ACTIONS) so it is visible on the run page.
+The `abidiff` job in pr-plain-cmake.yml has a merge_group trigger so it can
+be made a required context; it blocks a merge only once the maintainer adds
+that context to branch protection (#2851).  Every skip or report-only
+fallback emits a ::warning:: under --require-tool or in CI (GITHUB_ACTIONS)
+so it is visible on the run page.
 
 A missing abidiff SKIPS loudly (exit 0, banner on stderr) unless
 --require-tool is given (CI), in which case it fails.
@@ -91,6 +97,25 @@ def pick_baseline(minor: str, tags: list[str]) -> str | None:
         if (m := re.fullmatch(rf"v{pre}\.(\d+)-rc(\d+)", t))
     ]
     return max(rcs)[2] if rcs else None
+
+
+def pick_previous_minor_baseline(minor: str, tags: list[str]) -> str | None:
+    """Baseline from the highest earlier minor that has a release or rc tag.
+
+    Used only when `minor` has no tag yet.  Compared numerically
+    (0.9 < 0.10); feed-* and other non-release tags never match.
+    """
+    cur = tuple(int(x) for x in minor.split("."))
+    minors = {
+        (int(m[1]), int(m[2]))
+        for t in tags
+        if (m := re.fullmatch(r"v(\d+)\.(\d+)\.\d+(?:-rc\d+)?", t))
+    }
+    for lo in sorted((m for m in minors if m < cur), reverse=True):
+        base = pick_baseline(f"{lo[0]}.{lo[1]}", tags)
+        if base:
+            return base
+    return None
 
 
 def evaluate(rc: int, same_minor: bool) -> tuple[bool, str]:
@@ -180,15 +205,24 @@ def main() -> int:
 
     root = args.root
     minor = sdk_minor(root)
-    tags = subprocess.run(["git", "-C", str(root), "tag", "--list", f"v{minor}.*"],
+    tags = subprocess.run(["git", "-C", str(root), "tag", "--list", "v*"],
                           capture_output=True, text=True, encoding="utf-8", check=True).stdout.split()
     tag = args.baseline_tag or pick_baseline(minor, tags)
     if tag is None:
-        warn_skip(f"no v{minor}.* tag: nothing compared until the first tag of "
-                  f"minor {minor}", args.require_tool)
-        print(f"SKIP: first release of minor {minor}, nothing to compare "
-              f"(no v{minor}.* tag; in CI make sure tags are fetched).")
-        return 0
+        tag = pick_previous_minor_baseline(minor, tags)
+        if tag is None:
+            warn_skip(f"no release tag at all (minor {minor}): nothing compared",
+                      args.require_tool)
+            if args.require_tool:
+                print(f"FAIL: no v* release tag to compare against (--require-tool); "
+                      f"in CI make sure tags are fetched.", file=sys.stderr)
+                return 1
+            print("SKIP: no release tag to compare against.")
+            return 0
+        warn_skip(f"no v{minor}.* tag yet: comparing against {tag} (previous minor), "
+                  f"report-only; the blocking check starts at the first tag of minor {minor}",
+                  args.require_tool)
+        print(f"note: no v{minor}.* tag yet; {tag} is a report-only baseline.")
 
     work = Path(tempfile.mkdtemp(prefix="abidiff-"))
     try:

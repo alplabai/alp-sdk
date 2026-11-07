@@ -45,6 +45,11 @@ on:
       - 'meta-alp-sdk/recipes-devtools/zcbor/**'
       - 'tests/**'
       - 'examples/aen/aen-trace-runner/**'
+  # merge_group: lets the `abidiff` job run in the merge queue so it can be made a
+  # required context (#2851).  Without it a queued PR would wait forever on a check
+  # this workflow never raises on a merge_group ref (#1415).  No `paths:` filter is
+  # allowed here, so every job of this workflow runs in the queue.
+  merge_group:
   workflow_dispatch:
 
 concurrency:

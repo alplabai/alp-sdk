@@ -1,0 +1,3 @@
+### Fixed — the `abidiff` gate can be required and no longer skips silently between minors (#2851)
+
+**`pr-plain-cmake.yml` gains a `merge_group:` trigger, so the `abidiff` job can be made a required context.** Until the maintainer adds it to branch protection a red run still blocks nothing; `docs/ci/README.md` says so. `scripts/check_abidiff.py` now compares against the previous minor's highest release or rc tag, report-only with a `::warning::`, when the current minor has no tag yet (dev right after a minor bump), and fails under `--require-tool` when no release tag exists at all. Tests cover the fallback, `feed-*` tags, rc10 vs rc9 ordering, abidiff exit 1/2 and a cross-minor `--baseline-tag`.
