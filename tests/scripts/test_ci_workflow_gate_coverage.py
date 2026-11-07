@@ -236,15 +236,20 @@ def test_doc_drift_summary_is_requireable() -> None:
 
 
 def test_python_smoke_runs_in_the_merge_queue() -> None:
-    """`python-smoke · all` is required on dev (#2972): the queue must run
-    the pytest leg on the rebased content, and the summary must not count a
-    merge_group skip as a pass."""
+    """`python-smoke · all` is required on dev (#2972): the queue runs the
+    ubuntu pytest leg on the rebased content, and the summary fails a
+    merge_group skip instead of passing it."""
     jobs = _load("cross-platform-zephyr.yml")["jobs"]
-    smoke_if = jobs["python-smoke"]["if"]
-    assert "!= 'merge_group'" not in smoke_if
-    assert "github.event_name == 'merge_group'" in smoke_if
-    summary_steps = " ".join(str(s.get("run", "")) for s in jobs["python-smoke-summary"]["steps"]) if "python-smoke-summary" in jobs else ""
-    if not summary_steps:
-        summary = next(j for j in jobs.values() if j.get("name") == "python-smoke · all")
-        summary_steps = " ".join(str(s.get("run", "")) for s in summary["steps"])
-    assert "intentionally skipped on merge_group" not in summary_steps
+    smoke = jobs["python-smoke"]
+    assert "!= 'merge_group'" not in smoke["if"]
+    assert "github.event_name == 'merge_group'" in smoke["if"]
+    # The queue leg is capped to ubuntu-latest.
+    os_expr = smoke["strategy"]["matrix"]["os"]
+    assert "github.event_name == 'merge_group'" in os_expr
+    assert 'fromJSON(\'["ubuntu-latest"]\')' in os_expr
+    verdict = " ".join(str(st.get("run", "")) for st in jobs["summary"]["steps"])
+    skipped_branch = verdict[verdict.index("skipped)"):verdict.index("*)")]
+    # The only legitimate skip is pull_request/push with nothing relevant;
+    # merge_group is not in that condition, so its skip reaches `exit 1`.
+    assert '= "merge_group"' not in skipped_branch
+    assert "exit 1" in skipped_branch
