@@ -1,9 +1,24 @@
 # CANopenNode -- CANopen protocol stack (ADR 0018 library manifest).
 #
 # Tier-B industrial connectivity entry: CANopenNode implements the CANopen
-# application/protocol stack used by automation nodes on a CAN bus.  Zephyr
-# carries the integration glue in-tree, while the stack source is an optional
-# west module.
+# application/protocol stack used by automation nodes on a CAN bus.
+#
+# Zephyr version split (checked against the zephyrproject-rtos/zephyr v4.5.0
+# tree on GitHub; no local build was run on either version):
+#   * v4.4.x: the integration glue (CONFIG_CANOPENNODE) is in-tree under
+#     modules/canopennode/, and the stack source is the west project pinned in
+#     submanifests/optional.yaml.  `integration.zephyr.west` below is that
+#     exact project (url + SHA + path), emitted via `--emit west-libraries`,
+#     so the build does not depend on Zephyr's optional group.  The SHA is the
+#     revision v4.4.x shipped, kept as the reproducible source pin.
+#   * v4.5: modules/canopennode/ is gone and the project is no longer in the
+#     manifest.  CANopenNode support moved to the external module
+#     https://github.com/zephyrproject-rtos/CANopenNodeZephyr (zephyr/module.yml
+#     plus Kconfig providing CONFIG_CANOPENNODE, CANopenNode as a git
+#     submodule).  The pin below is the v4.4.x stack repo, which relies on the
+#     removed in-tree glue (cmake-ext/kconfig-ext), so it does NOT provide
+#     CONFIG_CANOPENNODE on v4.5.  A v4.5 pin needs a CANopenNodeZephyr
+#     revision plus submodule handling, still to be added.
 #
 # Grounding (pinned Zephyr v4.4.0 workspace):
 #   * optional west module `canopennode`, path modules/lib/canopennode,

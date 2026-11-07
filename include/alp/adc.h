@@ -180,7 +180,10 @@ typedef struct {
  *                 be less than the selected form factor's ADC count
  *                 (@ref ALP_E1M_ADC_COUNT or @ref ALP_E1M_X_ADC_COUNT).
  * @return Open handle on success, or NULL if the channel can't be
- *         resolved, configured, or the pool is exhausted.
+ *         resolved, configured, or the pool is exhausted.  Last-error
+ *         ALP_ERR_NOSUPPORT: the Alif backends (alif_e7 / alif_e8) need
+ *         a `zephyr,vref-mv` on the channel and refuse the open without
+ *         one.
  */
 alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg);
 

@@ -11,7 +11,9 @@ component it reports that component as skipped.
 
 The flat form runs a linear, stop-on-first-failure sequence:
 
-1. **validate** the bundle (`check_som_bundle.py`)
+1. **validate** the bundle (`check_som_bundle.py`), then check every component's
+   path (it must stay inside the bundle), `size_bytes` and `sha256` as gates, as
+   `gates.artefacts` does in the V2N flow; a mismatch refuses the bundle before any flash
 2. **HiL spec check** — if `--hil-spec` (or a `--carrier`-derived path; a relative
    `--hil-spec` resolves against `--alp-sdk-root`, or the repo root, not the working
    directory) is given, the directory must exist. This is checked here, before any
@@ -36,14 +38,14 @@ The flat form runs a linear, stop-on-first-failure sequence:
 5. **power-on test** — runs `tests/hil/run_smoke.py` for the board (gated on the
    firmware's `alp_hw_info_read()` succeeding first) if a HiL spec was given in step 2;
    a no-op (reported as skipped) otherwise.
-6. **record** the unit to the ledger (`som_ledger.py record`) — `--test-result` is
-   three-valued, one value per outcome (#1305):
+6. **record** the unit to the ledger (`som_ledger.py record`) — this flow records
+   `fail` or `pending-hw` (#1305; `som_ledger.py` also accepts `pass`):
 
    | value | meaning |
    |---|---|
-   | `pass` | `--execute`, a test was configured, it ran, it passed |
+   | `pass` | never recorded by this flow: it does not write the EEPROM, so no unit is verified end to end |
    | `fail` | `--execute`, a test was configured, it ran, it **failed** |
-   | `pending-hw` | everything else: dry-run, no test configured, or a test skipped under `--execute` |
+   | `pending-hw` | everything else: dry-run, no test configured, a test skipped under `--execute`, or a test that passed (the EEPROM write is HW-gated) |
 
    `fail` and `pending-hw` are distinct on purpose: "verified bad" and "not yet
    verified" are different states, and before #1305 both wrote `pending-hw`, so a

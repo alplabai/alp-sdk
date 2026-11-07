@@ -674,6 +674,12 @@ def _aen_check_extents(
         prev_label, prev_end = label, end
 
 
+# Global SRAM0, identical for both M55 cores: Alif DFP AE822FA0E5597
+# soc_features.h SOC_FEAT_BULK_SRAM0_BASE / SOC_FEAT_BULK_SRAM0_SIZE.
+_AEN_SRAM0_BASE = 0x02000000
+_AEN_SRAM0_SIZE = 0x00400000
+
+
 def _aen_check_map_overlaps(
     memory_map: "list[dict[str, Any]]", mram_base: int, total_kib: int,
 ) -> None:
@@ -716,6 +722,23 @@ def _aen_check_map_overlaps(
     ]
     limit = mram_base + total_kib * 1024
     aperture = (mram_base, limit)
+    # RAM-class rows (e.g. the `sram_ipc` IPC carve-out) are not App MRAM:
+    # they are bounds- and overlap-checked against global SRAM0 instead.
+    sram = [row for row in placed
+            if _AEN_SRAM0_BASE <= row[1] < _AEN_SRAM0_BASE + _AEN_SRAM0_SIZE]
+    for name, base, size_kib in sram:
+        end = base + size_kib * 1024
+        if end > _AEN_SRAM0_BASE + _AEN_SRAM0_SIZE:
+            raise ZephyrBoardEmitError(
+                f"AEN memory_map region {name!r} spans "
+                f"0x{base:x}..0x{end:x}, past the end of SRAM0 "
+                f"(0x{_AEN_SRAM0_BASE:x} + 0x{_AEN_SRAM0_SIZE:x})")
+    sram_sorted = sorted(sram, key=lambda r: r[1])
+    for (a_name, a_base, a_kib), (b_name, b_base, _b) in zip(sram_sorted, sram_sorted[1:]):
+        if b_base < a_base + a_kib * 1024:
+            raise ZephyrBoardEmitError(
+                f"AEN memory_map SRAM0 regions {a_name!r} and {b_name!r} overlap")
+    placed = [row for row in placed if row not in sram]
     for name, base, size_kib in placed:
         end = base + size_kib * 1024
         if base < mram_base or end > limit:
@@ -2255,11 +2278,14 @@ def _aen_som_power_dts(
         d["node_label"]
         for d in (links["brd_i2c"].get("devices") or []) if d.get("node_label")}
     children: list[str] = []
+    gpio_ports: set[str] = set()
     for name, dom in domains.items():
         found = _aen_power_domain_presence(dom, on_module)
         if found is None:
             continue
         state, chip = found
+        gpio_ports.update(c["gpio_node"] for c in dom["controls"]
+                          if c["gpio_node"] != "lpgpio")
         label = dom.get("device_label")
         if label and label not in device_labels:
             raise ZephyrBoardEmitError(
@@ -2387,6 +2413,19 @@ def _aen_som_power_dts(
         "};",
         "",
     ]
+    if gpio_ports:
+        # The SoC peripherals dtsi declares every GPIO port disabled.  A domain
+        # whose pad sits on one needs the port ready, or pin_assert() fails with
+        # ALP_ERR_NOT_READY and the quiesce that STOP/STANDBY runs first aborts.
+        # (`&lpgpio` is enabled with BRD_I2C above.)
+        lines += [
+            "/*",
+            " * GPIO ports carrying a SoM power-domain pad (the SoC peripherals dtsi leaves",
+            " * them disabled).  Without them the SoM power layer cannot drive those pads.",
+            " */",
+        ]
+        for port in sorted(gpio_ports, key=lambda g: (len(g), g)):
+            lines += [f"&{port} {{", '\tstatus = "okay";', "};", ""]
     return lines
 
 
@@ -2751,7 +2790,7 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     ' * candidate -- nothing in this firmware reads or writes the address it',
     ' * resolves to.  The real transport uses the hand-authored DDR window below',
     " * instead, sized from this responder's OpenAMP resource table (512 rpmsg",
-    " * buffers x 512 B x 2 vrings -- m33_sm/src/resource_table.h's",
+    " * buffers x 512 B x 2 vrings -- zephyr/drivers/ipc/resource_table.h's",
     ' * RSC_TABLE_NUM_RPMSG_BUFF).  That sizing happens to consume the whole of',
     ' * `ocram_low` when expressed as `carve_out_kb` in board.yaml (both examples',
     ' * on this SoM request 512, i.e. all 512 KiB of `ocram_low`) -- harmless',
@@ -2775,7 +2814,7 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     ' * below is chosen so the whole carve-out (0x4F700000..0x4FFFFFFF) sits',
     ' * entirely inside that populated range, right up against its top.  The',
     ' * rsctbl/vring/shm regions below are all quoted in the CM33 view, matching',
-    " * upstream's openamp_linux_zephyr sample; see resource_table.h for the",
+    " * upstream's openamp_linux_zephyr sample; see zephyr/drivers/ipc/resource_table.h for the",
     ' * CM33->A55 translation macro this same fix corrected.',
     ' *',
     ' * mbox1 is hand-authored: unlike the RZ/V2L SoC dtsi (r9a07g054.dtsi, which',
@@ -2837,7 +2876,7 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '\t\t * @vring-shm0.end@, leaving every buffer outside it).  Silicon-root-caused',
     '\t\t * alongside the vring-DA fix (#683/#697 bench, 2026-07-11). */',
     '\t\tzephyr,ipc_shm = &vring_shm1;',
-    '\t\tzephyr,ipc = &mbox_consumer;',
+    '\t\tzephyr,ipc = &ipc0;',
     '\t};',
     '',
     '\trsctbl: memory@@rsctbl.hex@ {',
@@ -2878,8 +2917,12 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '\t\treg = <@vring-shm1.addr@ @vring-shm1.size@>;',
     '\t};',
     '',
-    '\tmbox_consumer: mbox-consumer {',
-    '\t\tcompatible = "vnd,mbox-consumer";',
+    '\t/* <alp/rpc.h> ipc_service instance (zephyr/drivers/ipc/ipc_alp_v2n_rpmsg.c);',
+    '\t * also the tx/rx mbox pair the raw-OpenAMP examples read via',
+    '\t * MBOX_DT_SPEC_GET(DT_CHOSEN(zephyr_ipc), ...).  Inert unless',
+    '\t * CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG=y. */',
+    '\tipc0: ipc {',
+    '\t\tcompatible = "alp,ipc-v2n-rpmsg";',
     '\t\tmboxes = <&mbox1 1>, <&mbox1 0>;',
     '\t\tmbox-names = "tx", "rx";',
     '\t};',

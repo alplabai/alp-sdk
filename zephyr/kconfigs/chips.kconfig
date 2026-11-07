@@ -117,8 +117,8 @@ config ALP_SDK_CHIP_CC3501E
 	help
 	  Compile chips/cc3501e/cc3501e.c.  Alif-side host driver
 	  that talks to the on-module CC3501E firmware over the
-	  inter-chip SPI1 bus.  The firmware itself is a separate
-	  project at alplabai/cc3501e-firmware (per ADR 0005);
+	  inter-chip SPI1 bus.  The firmware itself lives in
+	  alplabai/cc3501e-bridge-firmware (see docs/cc3501e-bridge.md);
 	  this driver only knows the wire protocol declared in
 	  <alp/protocol/cc3501e.h>.  Pull this in on E1M-AEN
 	  builds; <alp/iot.h> and <alp/ble.h> dispatchers route through

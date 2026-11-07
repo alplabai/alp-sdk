@@ -201,8 +201,12 @@ manifest:
   #                    -- but the five aen-npu-inference* apps still
   #                    set CONFIG_TENSORFLOW_LITE_MICRO=y, so the
   #                    allowlist entry stays load-bearing).
-  #                    canopennode/chre/thrift/zephyr-lang-rust are
-  #                    the group's other members but aren't
+  #                    On v4.4.x canopennode/chre/thrift/zephyr-lang-rust
+  #                    are the group's other members (v4.5 drops
+  #                    canopennode/chre/thrift; CANopenNode source then
+  #                    comes from the manifest's own
+  #                    integration.zephyr.west pin through
+  #                    --emit west-libraries).  They aren't
   #                    name-allowlisted, so this only pulls in
   #                    tflite-micro -- it does not widen the fetch
   #                    set. hal_ethos_u does NOT need this: it's in

@@ -1,0 +1,3 @@
+### Fixed — video: reject undersized ISP buffers, recover CPI capture after a frame error (#2936, #2939)
+
+video: isp_pico isp_enqueue() now rejects, with -EINVAL, a buffer smaller than the negotiated frame (alp_isp_frame_size()). Before, the ISP MI DMA overran it, and the chroma plane bases were computed from buf->size, so an oversized buffer got its chroma at the wrong offset. The plane bases are now computed from the frame size. video_alif memory-capture mode no longer stalls after one FIFO-overrun or BRESP error. The error flag is per CPI instance (it was a function-local static shared by all instances), and the STOP bottom half re-captures into the same buffer instead of leaving the CPI un-armed.

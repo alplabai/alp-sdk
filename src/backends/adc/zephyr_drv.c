@@ -215,11 +215,20 @@ static alp_status_t z_read_raw(alp_adc_backend_state_t *st, int32_t *raw_out)
 	}
 	/* Drivers fill the buffer at their native sample width; a
 	 * conversion of 16 bits or less lands in the low half-word
-	 * (little-endian on every supported target). */
+	 * (little-endian on every supported target).  Only a differential
+	 * channel produces a signed sample (Zephyr adc.h); a single-ended one
+	 * is unsigned, so its half-word is zero-extended -- sign-extending a
+	 * 16-bit single-ended 0xC000 would read back as -16384. */
 	if (s->resolution_bits <= 16u) {
-		int16_t half;
-		memcpy(&half, &s->sample_buf, sizeof(half));
-		*raw_out = (int32_t)half;
+		if (s->spec->channel_cfg.differential) {
+			int16_t half;
+			memcpy(&half, &s->sample_buf, sizeof(half));
+			*raw_out = (int32_t)half;
+		} else {
+			uint16_t half;
+			memcpy(&half, &s->sample_buf, sizeof(half));
+			*raw_out = (int32_t)half;
+		}
 	} else {
 		*raw_out = s->sample_buf;
 	}

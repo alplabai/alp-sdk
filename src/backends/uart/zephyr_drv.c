@@ -293,7 +293,11 @@ static void alp_uart_rx_isr(const struct device *dev, void *user_data)
 {
 	struct alp_uart_rx_ringbuf *s = user_data;
 	if (s == NULL || !s->in_use) return;
-	while (uart_irq_update(dev) > 0 && uart_irq_rx_ready(dev) > 0) {
+	/* Latch the IRQ status once per callback.  uart_irq_update() returns
+	 * int on Zephyr v4.4 but void from v4.5, so its return value must not
+	 * be read; uart_irq_rx_ready() is the portable "bytes pending" test. */
+	uart_irq_update(dev);
+	while (uart_irq_rx_ready(dev) > 0) {
 		uint8_t scratch[32];
 		int     n = uart_fifo_read(dev, scratch, sizeof(scratch));
 		if (n <= 0) break;

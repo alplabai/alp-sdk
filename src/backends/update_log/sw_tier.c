@@ -14,10 +14,14 @@
  *    with power-fail-safe writes and wear levelling handled upstream
  *    (ADR 0017: consume the Zephyr subsystem, don't reimplement it).
  *
- *  - RAM fallback (no Kconfig opt-in, no partition, or the NVS mount
- *    fails at runtime): the pre-persistence behaviour -- entries vanish
- *    on reboot. Boards opt in by adding the partition label; see the
- *    CONFIG_ALP_SDK_UPDATE_LOG_PERSIST help text.
+ *  - RAM fallback (no Kconfig opt-in or no partition, decided at build
+ *    time): the pre-persistence behaviour -- entries vanish on reboot.
+ *    Boards opt in by adding the partition label; see the
+ *    CONFIG_ALP_SDK_UPDATE_LOG_PERSIST help text. A persistent build
+ *    never degrades to RAM at runtime: a failed NVS mount makes ready()
+ *    and every store/counter call report an error (and is retried on the
+ *    next call), so append() cannot return ALP_OK for an entry that will
+ *    vanish on reboot.
  *
  * TRUST BOUNDARY: persistence does NOT change the assurance level. This
  * tier stays app-cooperative (SW_TAMPER_EVIDENT): the chain + counter
@@ -61,7 +65,9 @@
 #endif
 #endif /* CONFIG_ALP_SDK_UPDATE_LOG_PERSIST */
 
-/* ---- RAM store (fallback mode; always compiled) ------------------- */
+/* ---- RAM store (RAM-only builds; the NVS build keeps no RAM state) --- */
+
+#ifndef SW_TIER_NVS
 
 #define SW_SLOTS 32
 #define SW_BLOB  ULOG_ENTRY_WIRE_LEN
@@ -136,6 +142,8 @@ static alp_status_t sw_ram_erase(const char *k)
 	return ALP_OK;
 }
 
+#endif /* !SW_TIER_NVS */
+
 /* ---- NVS-persistent store (opt-in mode) --------------------------- */
 
 #ifdef SW_TIER_NVS
@@ -160,31 +168,40 @@ static alp_status_t sw_ram_erase(const char *k)
 
 static struct nvs_fs g_nvs;
 static bool          g_nvs_ok;
-static bool          g_nvs_tried;
+#ifdef CONFIG_ZTEST
+static bool g_nvs_test_fail_mount; /* test seam: force the mount step to fail */
+#endif
 
-/* Mount NVS on the partition once; on any failure fall back to RAM for
- * the rest of this boot (the pre-persistence behaviour). */
-static bool sw_nvs_ready(void)
+/* Mount NVS on the partition. Success is latched; a failure is NOT -- it
+ * is reported to the caller (ALP_ERR_NOT_READY) and the mount is retried
+ * on the next call, so a flash device that was not ready yet, or a
+ * transient nvs_mount error, recovers instead of silently demoting a
+ * persistent log to the RAM store for the rest of the boot. */
+static alp_status_t sw_nvs_ready(void)
 {
-	if (g_nvs_tried) {
-		return g_nvs_ok;
+	if (g_nvs_ok) {
+		return ALP_OK;
 	}
-	g_nvs_tried = true;
 
 	const struct device *dev = PARTITION_DEVICE(alp_ulog_partition);
 	if (!device_is_ready(dev)) {
-		return false;
+		return ALP_ERR_NOT_READY;
 	}
 	struct flash_pages_info info;
 	if (flash_get_page_info_by_offs(dev, PARTITION_OFFSET(alp_ulog_partition), &info) != 0) {
-		return false;
+		return ALP_ERR_NOT_READY;
 	}
 	g_nvs.flash_device = dev;
 	g_nvs.offset       = PARTITION_OFFSET(alp_ulog_partition);
 	g_nvs.sector_size  = (uint32_t)info.size;
 	g_nvs.sector_count = (uint16_t)(PARTITION_SIZE(alp_ulog_partition) / info.size);
-	g_nvs_ok           = (nvs_mount(&g_nvs) == 0);
-	return g_nvs_ok;
+#ifdef CONFIG_ZTEST
+	if (g_nvs_test_fail_mount) {
+		return ALP_ERR_NOT_READY;
+	}
+#endif
+	g_nvs_ok = (nvs_mount(&g_nvs) == 0);
+	return g_nvs_ok ? ALP_OK : ALP_ERR_NOT_READY;
 }
 
 /* "ulog.meta" -> META id; "ulog.<decimal>" -> ENTRY_BASE + seq. */
@@ -324,33 +341,42 @@ static alp_status_t sw_put(void *c, const char *k, const uint8_t *b, size_t n)
 {
 	(void)c;
 #ifdef SW_TIER_NVS
-	if (sw_nvs_ready()) {
-		return sw_nvs_put(k, b, n);
+	alp_status_t rc = sw_nvs_ready();
+	if (rc != ALP_OK) {
+		return rc;
 	}
-#endif
+	return sw_nvs_put(k, b, n);
+#else
 	return sw_ram_put(k, b, n);
+#endif
 }
 
 static alp_status_t sw_get(void *c, const char *k, uint8_t *b, size_t cap, size_t *o)
 {
 	(void)c;
 #ifdef SW_TIER_NVS
-	if (sw_nvs_ready()) {
-		return sw_nvs_get(k, b, cap, o);
+	alp_status_t rc = sw_nvs_ready();
+	if (rc != ALP_OK) {
+		return rc;
 	}
-#endif
+	return sw_nvs_get(k, b, cap, o);
+#else
 	return sw_ram_get(k, b, cap, o);
+#endif
 }
 
 static alp_status_t sw_erase(void *c, const char *k)
 {
 	(void)c;
 #ifdef SW_TIER_NVS
-	if (sw_nvs_ready()) {
-		return sw_nvs_erase(k);
+	alp_status_t rc = sw_nvs_ready();
+	if (rc != ALP_OK) {
+		return rc;
 	}
-#endif
+	return sw_nvs_erase(k);
+#else
 	return sw_ram_erase(k);
+#endif
 }
 
 static alp_status_t sw_cread(void *c, uint32_t id, uint64_t *v)
@@ -358,12 +384,15 @@ static alp_status_t sw_cread(void *c, uint32_t id, uint64_t *v)
 	(void)c;
 	(void)id;
 #ifdef SW_TIER_NVS
-	if (sw_nvs_ready()) {
-		return sw_nvs_counter_read(v);
+	alp_status_t rc = sw_nvs_ready();
+	if (rc != ALP_OK) {
+		return rc;
 	}
-#endif
+	return sw_nvs_counter_read(v);
+#else
 	*v = g_sw.counter;
 	return ALP_OK;
+#endif
 }
 
 static alp_status_t sw_cinc(void *c, uint32_t id, uint64_t *v)
@@ -371,13 +400,16 @@ static alp_status_t sw_cinc(void *c, uint32_t id, uint64_t *v)
 	(void)c;
 	(void)id;
 #ifdef SW_TIER_NVS
-	if (sw_nvs_ready()) {
-		return sw_nvs_counter_increment(v);
+	alp_status_t rc = sw_nvs_ready();
+	if (rc != ALP_OK) {
+		return rc;
 	}
-#endif
+	return sw_nvs_counter_increment(v);
+#else
 	g_sw.counter++;
 	*v = g_sw.counter;
 	return ALP_OK;
+#endif
 }
 
 static const alp_secure_store_if      g_store = { sw_put, sw_get, sw_erase, NULL };
@@ -390,23 +422,31 @@ static const alp_monotonic_counter_if g_ctr   = { sw_cread, sw_cinc, NULL };
  * With wipe=true the NVS partition is cleared too (pristine store). */
 void alp_ulog_sw_tier_test_reset(bool wipe)
 {
+#ifndef SW_TIER_NVS
 	memset(&g_sw, 0, sizeof(g_sw));
-#ifdef SW_TIER_NVS
+	(void)wipe;
+#else
 	if (wipe && g_nvs_ok) {
 		(void)nvs_clear(&g_nvs); /* leaves fs unmounted */
 	}
-	g_nvs_ok    = false;
-	g_nvs_tried = false; /* force a fresh mount on next use */
-#else
-	(void)wipe;
+	g_nvs_ok              = false; /* force a fresh mount on next use */
+	g_nvs_test_fail_mount = false;
 #endif
 }
 
 #ifdef SW_TIER_NVS
+/* Make mount attempts fail (true) or succeed again (false). Also drops the
+ * cached mount so the change takes effect immediately. */
+void alp_ulog_sw_tier_test_fail_mount(bool fail)
+{
+	g_nvs_test_fail_mount = fail;
+	g_nvs_ok              = false;
+}
+
 alp_status_t
 alp_ulog_sw_tier_test_corrupt_persisted_entry(uint64_t seq, size_t offset, uint8_t xor_mask)
 {
-	if (!sw_nvs_ready()) {
+	if (sw_nvs_ready() != ALP_OK) {
 		return ALP_ERR_IO;
 	}
 	if (seq > SW_NVS_ENTRY_MAX || offset >= ULOG_ENTRY_WIRE_LEN) {
@@ -430,7 +470,7 @@ alp_ulog_sw_tier_test_corrupt_persisted_entry(uint64_t seq, size_t offset, uint8
 
 alp_status_t alp_ulog_sw_tier_test_delete_persisted_entry(uint64_t seq)
 {
-	if (!sw_nvs_ready()) {
+	if (sw_nvs_ready() != ALP_OK) {
 		return ALP_ERR_IO;
 	}
 	if (seq > SW_NVS_ENTRY_MAX) {
@@ -477,6 +517,10 @@ static alp_status_t sw_ready(void)
 #if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT) && \
     !defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
 	return ALP_ERR_NOSUPPORT;
+#elif defined(SW_TIER_NVS)
+	/* Persistent build: refuse to bind (a hard error, not NOSUPPORT, so no
+	 * lower tier masks it) while the partition cannot be mounted. */
+	return sw_nvs_ready();
 #else
 	return ALP_OK;
 #endif

@@ -620,7 +620,7 @@ static int i2s_dw_write(const struct device *dev, void *mem_block,
 	return 0;
 }
 
-static const struct i2s_driver_api i2s_dw_driver_api = {
+static DEVICE_API(i2s, i2s_dw_driver_api) = {
 	.configure = i2s_dw_configure,
 	.read = i2s_dw_read,
 	.write = i2s_dw_write,

@@ -34,7 +34,7 @@ manifest-driven **top-level** `libraries:` selection.
 | `coap`      | B    | 4.4.1      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
 | `aws-iot`   | B    | 202412.00     | MIT | zephyr    | Zephyr; west project pin § |
 | `azure-iot` | B    | 1.5.0      | MIT        | zephyr    | Zephyr; west project pin § |
-| `canopennode` | B  | dec12fa3f0d790cafa8414a4c2930ea71ab72ffd | Apache-2.0 | zephyr | Cortex-M; optional west pin; CAN controller |
+| `canopennode` | B  | dec12fa3f0d790cafa8414a4c2930ea71ab72ffd | Apache-2.0 | zephyr | Cortex-M; own west pin; CAN controller |
 | `micropython` | B  | v1.24.1    | MIT        | zephyr    | Cortex-M; source pin; dedicated owner needed |
 | `cmsis-stream` | B | v3.2.0     | Apache-2.0 | zephyr    | west module `cmsisstream`; app must override `CONFIG_CMSISSTREAM_POOL_SECTION` off-AEN; app must also set `CONFIG_CPP=y` + a C++ stdlib choice |
 | `cmsis-cv`  | B    | (SHA pin, no upstream tags) | Apache-2.0 | zephyr | no upstream Zephyr module glue yet; recipe-only |
@@ -98,10 +98,16 @@ remaining curation set without inventing capabilities or symbols:
   `subsys/modbus/Kconfig`, version `4.4.1`, Apache-2.0).  The native_sim CI
   lane uses `CONFIG_MODBUS_RAW_ADU`; serial RTU/ASCII deployments need a UART
   plus a devicetree `zephyr,modbus-serial` node.
-- `canopennode` is **Tier B CAN**: Zephyr pins it as an optional west project
-  in `submanifests/optional.yaml` and its integration glue exposes
-  `CONFIG_CANOPENNODE`.  It needs a real Zephyr CAN controller, but alp-sdk has
-  no CAN capability key, so the manifest records only OS/core constraints.
+- `canopennode` is **Tier B CAN**.  On Zephyr v4.4.x the integration glue
+  (`CONFIG_CANOPENNODE`) is in-tree and the stack source is an external west
+  project (pinned in `submanifests/optional.yaml`).  Zephyr v4.5 moves the glue
+  out to the external `zephyrproject-rtos/CANopenNodeZephyr` module, so the
+  v4.4.x pin recorded here does not provide `CONFIG_CANOPENNODE` on v4.5
+  (dual-version support is not yet done; no build was run on either
+  version).  The manifest carries its own exact `integration.zephyr.west` pin,
+  emitted by `--emit west-libraries`, so it does not depend on Zephyr's
+  optional group.  It needs a real Zephyr CAN controller, but alp-sdk has no
+  CAN capability key, so the manifest records only OS/core constraints.
 - `micropython` is **Tier B scripting**: the pinned workspace has no
   `modules/lib/micropython` checkout, so the manifest is an enable-by-presence
   source pin to upstream `micropython/micropython` at `v1.24.1` with no

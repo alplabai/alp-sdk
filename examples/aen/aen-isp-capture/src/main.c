@@ -518,7 +518,7 @@ int main(void)
 
 		struct video_frmival effective = { 0 };
 
-		if (video_get_frmival(sensor_dev, &effective) == 0 && effective.denominator > 0) {
+		if (video_get_frmival(sensor_dev, &effective) == 0 && effective.numerator > 0) {
 			printk("sensor frmival EFFECTIVE %u/%u (%u.%02u fps)\n",
 			       effective.numerator,
 			       effective.denominator,
