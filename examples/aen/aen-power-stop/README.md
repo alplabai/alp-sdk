@@ -206,10 +206,10 @@ profiles as they stand). The word index of the diag blocks is listed in
 
 ```
 POWER_STOP: cycle<n> <check> <PASS|FAIL>
-POWER_STOP: SUMMARY cycles=<n> pass=<n> fail=<n> scope=last_boot
+POWER_STOP: SUMMARY cycles=<n> pass=<n> fail=<n> scope=run
 ```
 
-SUMMARY counts only the verdicts of the boot that printed it (every STOP wake is a cold boot, so the counters restart). Judge the run from the per-cycle `cycleN <check> PASS|FAIL` lines, not from SUMMARY.
+SUMMARY totals every cycle of the run: the pass/fail counts ride in the same retained cell as the cycle counter (bench cell in BKRAM; RV-3028 User RAM 2 in the product build), so they survive the cold-boot wakes. Pass saturates at 31 and fail at 7. The per-cycle `cycleN <check> PASS|FAIL` lines are still printed on their own boots.
 
 Checks, per cycle: `record_valid mode_stop wake_source restored_all bkram_counter`
 (`mode_standby` replaces `mode_stop` in the STANDBY variant, and `tcm_retained` is added by the
