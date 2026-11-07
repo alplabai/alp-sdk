@@ -74,7 +74,7 @@ target_include_directories(app PRIVATE ${LIBMETAL_INCLUDE_DIR} ${OPENAMP_INCLUDE
                             ${PLATFORM_DIR})
 target_include_directories(app PRIVATE src)
 
-# resource_table.[ch] are rpmsg-v2n's, not copies (same as microros-ros2-v2n).
-set(_rpmsg_v2n_src ${CMAKE_CURRENT_SOURCE_DIR}/../../rpmsg-v2n/m33_sm/src)
-target_include_directories(app PRIVATE ${_rpmsg_v2n_src})
-target_sources(app PRIVATE src/main.c ${_rpmsg_v2n_src}/resource_table.c)
+# resource_table.[ch] are the shared V2N/V2M CM33 copy, not duplicated here.
+set(_alp_v2n_ipc ${ALP_SDK_ROOT}/zephyr/drivers/ipc)
+target_include_directories(app PRIVATE ${_alp_v2n_ipc})
+target_sources(app PRIVATE src/main.c ${_alp_v2n_ipc}/resource_table.c)

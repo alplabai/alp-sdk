@@ -26,7 +26,7 @@ examples/multicore/heterogeneous-offload/
 │   ├── CMakeLists.txt   + FFT requester via alp_rpc_call)
 │   └── src/main.c
 └── m33_sm/             (m33_sm's Zephyr slice -- the FFT worker)
-    ├── CMakeLists.txt  (builds ../../rpmsg-v2n/m33_sm/src/resource_table.c)
+    ├── CMakeLists.txt  (builds zephyr/drivers/ipc/resource_table.c)
     ├── prj.conf
     └── src/main.c
 ```

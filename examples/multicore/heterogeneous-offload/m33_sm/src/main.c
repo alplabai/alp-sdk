@@ -14,7 +14,8 @@
  * endpoint at the fixed address APP_EPT_ADDR, and the version-2 AMP beacon
  * (<alp/protocol/amp_beacon.h>) with its attach-epoch handshake.  Only the
  * responder differs: rpmsg-v2n echoes, this file runs the FFT.
- * resource_table.[ch] are NOT copied: CMakeLists.txt builds rpmsg-v2n's.
+ * resource_table.[ch] are NOT copied: CMakeLists.txt builds the shared copy in
+ * zephyr/drivers/ipc/.
  * The transport code duplicated here (and in rpmsg-v2n and microros) is meant
  * to go away once the generic Zephyr RPC backend serves V2N: tracked in #3067.
  *
