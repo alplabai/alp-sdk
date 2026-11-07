@@ -77,6 +77,19 @@ if [ -n "${APT_ARCHIVE_DIR:-}" ]; then
   ACQ+=(-o "Dir::Cache::archives=${APT_ARCHIVE_DIR}")
 fi
 
+# #3063: apt (run as root) leaves partial/ (0700, owned by _apt) and a root-owned
+# lock file in APT_ARCHIVE_DIR. actions/cache/save tars that directory as the
+# unprivileged runner user, cannot read either entry, and abandons the whole
+# save ("tar: .../partial: Cannot open: Permission denied"), so the .deb cache
+# was never written and every merge-queue run refetched from the mirror. Both
+# entries are transient -- mkdir -p above recreates partial/, apt takes a fresh
+# lock -- so drop them once apt has finished. The .debs are world-readable.
+release_archive_dir() {
+  if [ -n "${APT_ARCHIVE_DIR:-}" ]; then
+    $SUDO rm -rf "${APT_ARCHIVE_DIR}/partial" "${APT_ARCHIVE_DIR}/lock" || true
+  fi
+}
+
 rc=0
 attempts_made=0
 
@@ -117,7 +130,10 @@ for attempt in $(seq 1 "$APT_ATTEMPTS"); do
   $SUDO timeout --signal=TERM --kill-after=30 "$slice" apt-get "${ACQ[@]}" "$@"
   rc=$?
   set -e
-  [ "$rc" -eq 0 ] && exit 0
+  if [ "$rc" -eq 0 ]; then
+    release_archive_dir
+    exit 0
+  fi
   if [ "$rc" -ne 124 ] && [ "$rc" -ne 100 ]; then
     echo "apt-bounded: apt-get exited $rc (not a timeout/transient) -- not retrying" >&2
     exit "$rc"
