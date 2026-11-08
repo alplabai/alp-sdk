@@ -211,23 +211,28 @@ security:
 # declarative shape only, not a working layout, on this SKU.
 storage:
   - name:         mcuboot_primary
+    offset_kib:   5888
     fs:           raw
     size_kib:     1024
     flash_device: mram_main
   - name:         mcuboot_secondary
+    offset_kib:   6976
     fs:           raw
     size_kib:     1024
     flash_device: mram_main
   - name:         mcuboot_scratch
+    offset_kib:   6912
     fs:           raw
     size_kib:     64
     flash_device: mram_main
   - name:         settings
+    offset_kib:   8000
     fs:           littlefs
     size_kib:     64
     flash_device: mram_main
     mount:        /lfs/settings
   - name:         app_data
+    offset_kib:   5632
     fs:           littlefs
     size_kib:     256
     flash_device: mram_main

@@ -215,6 +215,10 @@ ota:
     total_size_mb: 4096
 ```
 
+When `ota:` is declared, every `storage:` partition must pin
+`offset_kib:`; the validator refuses otherwise. Unpinned partitions are
+allocated in name order, so adding or renaming one would move OTA slots.
+
 Project-wide, provider-driven dispatch (ADR 0009 resolved):
 
 | Provider   | Yocto emit                              | Zephyr emit                                                                       |

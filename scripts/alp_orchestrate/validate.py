@@ -232,6 +232,18 @@ def _validate_consistency(project: "BoardProject") -> None:
                 "cores.<id>.os: zephyr (MCUmgr is Zephyr's SMP "
                 "transport for OTA); none found.")
 
+    # ---- OTA + storage: every partition pins its offset (#2988) --
+    # Unpinned partitions are allocated in name order, so adding or
+    # renaming one MOVES later ones -- fatal for a shipped OTA layout.
+    if provider:
+        unpinned = [e.name for e in project.storage if e.offset_kib is None]
+        if unpinned:
+            raise OrchestratorError(
+                "ota: is enabled, so every storage[] partition must pin "
+                "`offset_kib:` (unpinned partitions shift when another is "
+                "added or renamed, moving OTA slots); missing on: "
+                + ", ".join(sorted(unpinned)) + ".")
+
     # ---- Rule 2: boot.signing.algorithm supported by SoM family --
     boot = project.boot or {}
     sign = (boot.get("signing") or {}) if isinstance(boot, dict) else {}
