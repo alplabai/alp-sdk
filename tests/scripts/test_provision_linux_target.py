@@ -120,10 +120,16 @@ def test_run_timeout_is_bench_error():
 def test_md5_uses_offset_and_size():
     t, fake = target([("md5sum", "11" * 16 + "  -\n")])
     t.md5("/dev/mtd1", 0x1A0000, 16)
-    assert fake.commands[-1] == "dd if=/dev/mtd1 bs=1 skip=1703936 count=16 2>/dev/null | md5sum"
+    assert fake.commands[-1] == lt.DROP_CACHES + "; dd if=/dev/mtd1 bs=1 skip=1703936 count=16 2>/dev/null | md5sum"
     t.md5("/dev/mtd1", 0, 4097)
-    assert fake.commands[-1] == ("{ dd if=/dev/mtd1 bs=4096 skip=0 count=1 2>/dev/null; "
+    assert fake.commands[-1] == (lt.DROP_CACHES + "; { dd if=/dev/mtd1 bs=4096 skip=0 count=1 2>/dev/null; "
                                  "dd if=/dev/mtd1 bs=1 skip=4096 count=1 2>/dev/null; } | md5sum")
+
+
+def test_md5_drops_caches_before_the_dd():
+    t, fake = target([("md5sum", "11" * 16 + "  -\n")])
+    t.md5("/dev/mtd1")
+    assert fake.commands[-1].startswith(lt.DROP_CACHES + "; dd ")
 
 
 def test_md5_refuses_an_empty_read():
@@ -262,9 +268,8 @@ def test_emmc_boot_write_verify(tmp_path):
     assert lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, 0x300) == good
     assert "dd if=/tmp/fip.bin of=/dev/mmcblk1boot0 bs=512 seek=768 && sync" in fake.commands
     # the readback must come from the media: caches dropped between the write and the md5
-    md5_cmd = "dd if=/dev/mmcblk1boot0 bs=1 skip=393216 count=1000 2>/dev/null | md5sum"
+    md5_cmd = lt.DROP_CACHES + "; dd if=/dev/mmcblk1boot0 bs=1 skip=393216 count=1000 2>/dev/null | md5sum"
     assert fake.commands.index(lt.DROP_CACHES) < fake.commands.index(md5_cmd)
-    assert "dd if=/dev/mmcblk1boot0 bs=1 skip=393216 count=1000 2>/dev/null | md5sum" in fake.commands
 
 
 def test_set_boot_config_verifies():
@@ -281,11 +286,11 @@ def test_rootfs_write_verify_streams_and_compares(tmp_path):
     raw = bytes(range(256)) * 64
     wic = tmp_path / "rootfs.wic.gz"
     wic.write_bytes(gzip.compress(raw))
-    t, fake = target([("gunzip", ""), ("rereadpt", ""), ("drop_caches", ""), ("md5sum", f"{md5(raw)}  -\n")])
+    t, fake = target([("gunzip", ""), ("rereadpt", ""), ("md5sum", f"{md5(raw)}  -\n"), ("drop_caches", "")])
     assert lt.rootfs_write_verify(t, "/dev/mmcblk1", wic)["rootfs_md5"] == md5(raw)
     assert fake.commands[0] == "gunzip -c | dd of=/dev/mmcblk1 bs=4M && sync"
     assert fake.commands[-2] == lt.DROP_CACHES            # readback from the media, not the page cache
-    assert fake.commands[-1] == f"dd if=/dev/mmcblk1 bs=4096 skip=0 count={len(raw) // 4096} 2>/dev/null | md5sum"
+    assert fake.commands[-1] == f"{lt.DROP_CACHES}; dd if=/dev/mmcblk1 bs=4096 skip=0 count={len(raw) // 4096} 2>/dev/null | md5sum"
 
 
 # --- I2C + the N24S128 selector table ------------------------------------------------------

@@ -1480,3 +1480,17 @@ def test_emit_build_plan_rejects_unrooted_absolute_build_root(tmp_path: Path) ->
     with pytest.raises(OrchestratorError, match="outside both"):
         emit_build_plan(project, board_yaml=path,
                         build_root=Path("/nonexistent-root/build"))
+
+
+def test_tokenize_prefers_the_more_specific_root_when_sdk_nested_in_project(
+    tmp_path: Path,
+) -> None:
+    """An SDK checkout nested under the project dir: a path under the SDK is
+    under BOTH roots and must tokenize against the deeper `${SDK_ROOT}`."""
+    from alp_orchestrate.orchestrator import _tokenize
+
+    project_dir = tmp_path / "project"
+    sdk = project_dir / "vendor" / "alp-sdk"
+    assert _tokenize(sdk / "samples" / "x", project_dir, sdk) == "${SDK_ROOT}/samples/x"
+    assert _tokenize(sdk, project_dir, sdk) == "${SDK_ROOT}"
+    assert _tokenize(project_dir / "app", project_dir, sdk) == "${PROJECT_ROOT}/app"

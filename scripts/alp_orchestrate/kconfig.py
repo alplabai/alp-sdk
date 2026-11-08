@@ -2345,7 +2345,7 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
         if sto.get("total_size_mb"):
             lines.append(f'MENDER_STORAGE_TOTAL_SIZE_MB ?= "{sto["total_size_mb"]}"')
         if ota.get("poll_interval_s"):
-            lines.append(f'MENDER_INVENTORY_INTERVAL ?= "{ota["poll_interval_s"]}"')
+            lines.append(f'MENDER_INVENTORY_POLL_INTERVAL_SECONDS ?= "{ota["poll_interval_s"]}"')
 
     return "\n".join(lines) + "\n"
 

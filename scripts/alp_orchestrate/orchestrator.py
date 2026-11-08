@@ -319,15 +319,17 @@ def _tokenize(path: Path, base_dir: Path, repo: Path) -> str:
     emitted on one machine/checkout can be materialised faithfully on
     another -- the split-brain risk a baked-in absolute path invites.
 
-    Prefers `${PROJECT_ROOT}` (the project's own board.yaml directory) since
-    most anchored paths are project-owned; falls back to `${SDK_ROOT}` for
-    paths the SDK itself owns (e.g. the family sysbuild base, the stock
-    M-core shim app). Raises `UnrootedPathError` for a path under neither
+    Prefers the MORE SPECIFIC (deeper) root when both contain the path -- an
+    SDK nested inside the project dir must tokenize an SDK-owned path as
+    `${SDK_ROOT}`, not `${PROJECT_ROOT}/<sdk>/...` -- and `${PROJECT_ROOT}`
+    on a tie (the family sysbuild base and the stock M-core shim app are
+    SDK-owned; most other anchored paths are project-owned). Raises `UnrootedPathError` for a path under neither
     root -- never returns a bare absolute path, so a non-hermetic path can
     never silently reach a `planPathMode: tokened` plan.
     """
     path = Path(path)
-    for root, token in ((base_dir, "${PROJECT_ROOT}"), (repo, "${SDK_ROOT}")):
+    roots = ((base_dir, "${PROJECT_ROOT}"), (repo, "${SDK_ROOT}"))
+    for root, token in sorted(roots, key=lambda r: -len(Path(r[0]).parts)):
         try:
             rel = path.relative_to(root)
         except ValueError:

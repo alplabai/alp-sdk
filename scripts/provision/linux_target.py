@@ -173,7 +173,9 @@ class LinuxTarget:
             whole, rem = divmod(size, bs)
             parts = ([f"dd if={q} bs={bs} skip={offset // bs} count={whole} 2>/dev/null"] if whole else []) +                     ([f"dd if={q} bs=1 skip={offset + whole * bs} count={rem} 2>/dev/null"] if rem else [])
             src = parts[0] if len(parts) == 1 else "{ " + "; ".join(parts or ["true"]) + "; }"
-        out = self.run(f"{src} | md5sum", timeout=600.0).stdout.split()
+        # Drop the page cache first so the hash reads the media, not the
+        # cache a just-written file still sits in (no iflag=direct: busybox).
+        out = self.run(f"{DROP_CACHES}; {src} | md5sum", timeout=600.0).stdout.split()
         if not out or not re.fullmatch(r"[0-9a-f]{32}", out[0]):
             raise BenchError(f"unparsable md5sum output for {path}")
         if size and out[0] == _EMPTY_MD5:
