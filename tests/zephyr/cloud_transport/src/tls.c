@@ -287,7 +287,7 @@ ZTEST(cloud_transport_tls, test_sockopt_failure_closes_the_socket)
 		/* The stack frees a closed socket asynchronously. */
 		k_msleep(50);
 		t.last_errno = 0;
-		int st = alp_cloud_transport_connect(&t, &cfg);
+		int st       = alp_cloud_transport_connect(&t, &cfg);
 		zassert_equal(st, ALP_ERR_INVAL, "attempt %d st %d errno %d", i, st, t.last_errno);
 		zassert_equal(t.last_errno, EINVAL);
 		zassert_false(t.connected);
