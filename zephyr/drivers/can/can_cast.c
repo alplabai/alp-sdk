@@ -983,12 +983,6 @@ static int can_cast_send(const struct device *dev, const struct can_frame *frame
 		return -ENOTSUP;
 	}
 
-	/* If the error warning, then returns an error */
-	if (can_cast_err_warn_limit_reached(can_base)) {
-		LOG_ERR("Error Warning limit crossed");
-		return -EIO;
-	}
-
 	/* Checks for Tx queue free status */
 	if (!can_cast_stb_free(can_base)) {
 		fifo_free = false;

@@ -104,6 +104,13 @@ static int mhuv2_send(const struct device *dev, int wait, uint32_t ch_id,
 		return ret;
 	}
 
+	/* ipm_send() contract: -EBUSY while the previous word is unconsumed
+	 * (CH_SET would overwrite it); same check as mhuv2_poll_out(). */
+	if ((SND->CHANNEL[ch_id].CH_ST & MHU_CH_INT_ST_SET) == MHU_CH_INT_ST_SET) {
+		SND->ACCESS_REQUEST = !MHU_ACC_REQ;
+		return -EBUSY;
+	}
+
 	/* Clear Interrupt Status */
 	SND->INT_CLR = (NR2R_INTR | R2NR_INTR | CHCOMB_INTR);
 	/* Clear Interrupt generation (NR2R Int, R2NR Int, Combined Int) */

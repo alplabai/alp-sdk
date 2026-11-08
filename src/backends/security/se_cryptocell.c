@@ -116,6 +116,7 @@
  * the compute paths; the RNG path goes through the public client which does
  * its own translation internally. */
 #include <soc_memory_map.h>
+#include <zephyr/cache.h>
 #endif
 
 #ifndef CONFIG_ALP_SDK_MAX_HASH_HANDLES
@@ -366,6 +367,39 @@ static alp_status_t se_hash_delegate(alp_hash_backend_state_t *state, struct se_
 
 #if defined(CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM)
 
+/* One buffer the SE reads or writes (see alp_se_crypto_send_request). */
+struct se_buf {
+	const void *p;
+	size_t      n;
+};
+
+/* Invalidate an SE output buffer.  Only whole cache lines may be dropped: a
+ * partial edge line can hold a neighbour's dirty bytes, so it is cleaned
+ * and invalidated instead. */
+static void se_cache_invd_out(void *p, size_t n)
+{
+	const uintptr_t line = sys_cache_data_line_size_get();
+	const uintptr_t a    = (uintptr_t)p;
+	const uintptr_t e    = a + n;
+	const uintptr_t as   = (line != 0u) ? ROUND_UP(a, line) : a;
+	const uintptr_t ae   = (line != 0u) ? ROUND_DOWN(e, line) : e;
+
+	if (p == NULL || n == 0u) {
+		return;
+	}
+	if (as >= ae) {
+		(void)sys_cache_data_flush_and_invd_range(p, n);
+		return;
+	}
+	if (a < as) {
+		(void)sys_cache_data_flush_and_invd_range(p, as - a);
+	}
+	(void)sys_cache_data_invd_range((void *)as, ae - as);
+	if (e > ae) {
+		(void)sys_cache_data_flush_and_invd_range((void *)ae, e - ae);
+	}
+}
+
 /*
  * @brief Send a fully populated CryptoCell request packet to the SE and
  *        block for the response.
@@ -387,10 +421,36 @@ static alp_status_t se_hash_delegate(alp_hash_backend_state_t *state, struct se_
  * @return 0 on a completed transport round-trip (the caller then reads the
  *         packet's resp_error_code); a negative errno on transport failure.
  */
-static int alp_se_crypto_send_request(void *packet, size_t size, uint16_t svc_id)
+static int alp_se_crypto_send_request(void                *packet,
+                                      size_t               size,
+                                      uint16_t             svc_id,
+                                      const struct se_buf *in,
+                                      size_t               nin,
+                                      const struct se_buf *out,
+                                      size_t               nout)
 {
 	(void)svc_id; /* the id is already in packet->header.hdr_service_id */
-	return se_service_send_request((uint32_t *)packet, (uint32_t)size);
+
+	/* The SE reads and writes caller memory behind the D-cache: clean what
+	 * it will read, clean+invalidate what it will write (so no dirty line
+	 * is evicted over its output), and invalidate that output afterwards. */
+	for (size_t i = 0; i < nin; i++) {
+		if (in[i].p != NULL && in[i].n != 0u) {
+			(void)sys_cache_data_flush_range((void *)in[i].p, in[i].n);
+		}
+	}
+	for (size_t i = 0; i < nout; i++) {
+		if (out[i].p != NULL && out[i].n != 0u) {
+			(void)sys_cache_data_flush_and_invd_range((void *)out[i].p, out[i].n);
+		}
+	}
+
+	int rc = se_service_send_request((uint32_t *)packet, (uint32_t)size);
+
+	for (size_t i = 0; i < nout; i++) {
+		se_cache_invd_out((void *)out[i].p, out[i].n);
+	}
+	return rc;
 }
 
 #endif /* CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM */
@@ -521,8 +581,11 @@ static alp_status_t se_hash_finish(alp_hash_backend_state_t *state,
 	pkt.send_data_length      = (uint32_t)be->used;
 	pkt.send_shasum_addr      = local_to_global(digest_out);
 
-	alp_status_t s =
-	    (alp_se_crypto_send_request(&pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_SHA) == 0)
+	const struct se_buf sha_in  = { be->buf, be->used };
+	const struct se_buf sha_out = { digest_out, dlen };
+	alp_status_t        s =
+	    (alp_se_crypto_send_request(
+	         &pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_SHA, &sha_in, 1, &sha_out, 1) == 0)
 	        ? se_rc_to_alp((int)pkt.resp_error_code)
 	        : ALP_ERR_IO;
 	if (digest_len != NULL) {
@@ -710,8 +773,17 @@ static alp_status_t se_aead_encrypt(alp_aead_backend_state_t *state,
 		pkt.send_input_addr       = local_to_global(plain);
 		pkt.send_output_addr      = local_to_global(cipher_out);
 
-		const int rc = alp_se_crypto_send_request(
-		    &pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_CHACHAPOLY_CRYPT);
+		const struct se_buf in[] = {
+			{ se_ctx, sizeof(se_ctx) }, { iv, iv_len }, { aad, aad_len }, { plain, plain_len }
+		};
+		const struct se_buf out[] = { { cipher_out, plain_len }, { tag_out, tag_len } };
+		const int rc = alp_se_crypto_send_request(&pkt,
+		                                          sizeof(pkt),
+		                                          SERVICE_CRYPTOCELL_MBEDTLS_CHACHAPOLY_CRYPT,
+		                                          in,
+		                                          ARRAY_SIZE(in),
+		                                          out,
+		                                          ARRAY_SIZE(out));
 
 		/* Wipe the staged key copy off the stack.  The barrier keeps the
 		 * compiler from eliding the memset on the dying frame. */
@@ -741,7 +813,17 @@ static alp_status_t se_aead_encrypt(alp_aead_backend_state_t *state,
 	pkt.send_output_addr      = local_to_global(cipher_out);
 	pkt.send_tag_addr         = local_to_global(tag_out);
 	pkt.send_tag_length       = (uint32_t)tag_len;
-	return (alp_se_crypto_send_request(&pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_CCM_GCM) == 0)
+	const struct se_buf in[]  = {
+		{ be->key, be->key_len }, { iv, iv_len }, { aad, aad_len }, { plain, plain_len }
+	};
+	const struct se_buf out[] = { { cipher_out, plain_len }, { tag_out, tag_len } };
+	return (alp_se_crypto_send_request(&pkt,
+	                                   sizeof(pkt),
+	                                   SERVICE_CRYPTOCELL_MBEDTLS_CCM_GCM,
+	                                   in,
+	                                   ARRAY_SIZE(in),
+	                                   out,
+	                                   ARRAY_SIZE(out)) == 0)
 	           ? se_rc_to_alp((int)pkt.resp_error_code)
 	           : ALP_ERR_IO;
 #else
@@ -818,8 +900,19 @@ static alp_status_t se_aead_decrypt(alp_aead_backend_state_t *state,
 		pkt.send_input_addr       = local_to_global(cipher);
 		pkt.send_output_addr      = local_to_global(plain_out);
 
-		const int rc = alp_se_crypto_send_request(
-		    &pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_CHACHAPOLY_CRYPT);
+		const struct se_buf in[]  = { { se_ctx, sizeof(se_ctx) },
+			                          { iv, iv_len },
+			                          { aad, aad_len },
+			                          { tag, tag_len },
+			                          { cipher, cipher_len } };
+		const struct se_buf out[] = { { plain_out, cipher_len } };
+		const int rc = alp_se_crypto_send_request(&pkt,
+		                                          sizeof(pkt),
+		                                          SERVICE_CRYPTOCELL_MBEDTLS_CHACHAPOLY_CRYPT,
+		                                          in,
+		                                          ARRAY_SIZE(in),
+		                                          out,
+		                                          ARRAY_SIZE(out));
 
 		/* Wipe the staged key copy (see encrypt path). */
 		memset(se_ctx, 0, sizeof(se_ctx));
@@ -846,7 +939,19 @@ static alp_status_t se_aead_decrypt(alp_aead_backend_state_t *state,
 	pkt.send_output_addr      = local_to_global(plain_out);
 	pkt.send_tag_addr         = local_to_global(tag);
 	pkt.send_tag_length       = (uint32_t)tag_len;
-	return (alp_se_crypto_send_request(&pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_CCM_GCM) == 0)
+	const struct se_buf in[]  = { { be->key, be->key_len },
+		                          { iv, iv_len },
+		                          { aad, aad_len },
+		                          { tag, tag_len },
+		                          { cipher, cipher_len } };
+	const struct se_buf out[] = { { plain_out, cipher_len } };
+	return (alp_se_crypto_send_request(&pkt,
+	                                   sizeof(pkt),
+	                                   SERVICE_CRYPTOCELL_MBEDTLS_CCM_GCM,
+	                                   in,
+	                                   ARRAY_SIZE(in),
+	                                   out,
+	                                   ARRAY_SIZE(out)) == 0)
 	           ? se_rc_to_alp((int)pkt.resp_error_code)
 	           : ALP_ERR_IO;
 #else
