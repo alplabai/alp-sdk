@@ -799,10 +799,10 @@
 	};
 };
 
-&usb3_phy0 {	status = "okay";
+&usb3_phy {	status = "okay";
 };
 
-&xhci0 {
+&xhci {
 	memory-region = <&global_cma>;
 	status = "okay";
 };
@@ -923,7 +923,7 @@
 	 *
 	 * No usb30 pinmux or OVC-disable hog either: PB0 (VBUS, func14) and
 	 * PB1 (usb30 OVC) are the on-module WLAN_SDIO.CLK and WLAN_SDIO.D0
-	 * nets (see &xhci0's comment above) -- they never reach this
+	 * nets (see &xhci's comment above) -- they never reach this
 	 * carrier's E1M connector, so no carrier-level pinctrl group may
 	 * claim them. */
 

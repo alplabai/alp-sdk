@@ -28,28 +28,23 @@
 # (set `fdtfile` per MACHINE, or derive it from the EEPROM SoM manifest)
 # instead of the stock renesas/r9a09g056n48-rzv2n-evk.dtb.
 #
-# STATUS: UNVALIDATED through dtc/bitbake -- first structured port from
-# the RZ/V2N EVK reference dts (kernel SHA 6717c06, BSP v6.30; since ported to cip48, see below). Build
-# `bitbake virtual/kernel` per MACHINE and fix any dtc errors; the dts
-# files carry inline VERIFY notes (memory size per SKU, DEEPX bench
-# checks).
+# STATUS: build-checked on the host only (bitbake linux-renesas -c compile,
+# dtbs included, for e1m-v2m103-a55 and e1m-v2n101-a55); nothing here has
+# booted on cip48.  The dts files carry inline VERIFY notes (memory size per
+# SKU, DEEPX bench checks).  The dts/dtsi were first written against the RZ/V2N
+# EVK reference dts (kernel SHA 6717c06, BSP v6.30) and are ported to the
+# cip48 labels and bindings (gpt1 PWM index, rsci4, usb3_phy, xhci).
 #
-# KERNEL-VERSION SCOPE: the patch series and the board dts/dtsi are ported to
-# the linux-renesas tree rz-6.1-cip48 (6.1.157-cip48, the kernel meta-renesas
-# BSP-4.0.2 ships) and pinned below.  They #include the SoC dtsi
-# r9a09g056.dtsi and use BSP-specific bindings (renesas,mmngr,
-# RZV2N_PORT_PINMUX, etc.), so they are NOT portable across linux-renesas
-# versions: the pin below overrides the meta-renesas recipe's own
-# LINUX_VERSION / KERNEL_BRANCH / KERNEL_REV so the layer builds the kernel
-# the series was ported against whatever BSP release is in bblayers.conf.
+# KERNEL-VERSION SCOPE: the patch series and the board dts/dtsi target the
+# linux-renesas tree rz-6.1-cip48 (6.1.157-cip48, the kernel meta-renesas
+# BSP-4.0.2 ships).  They #include the SoC dtsi r9a09g056.dtsi and use
+# BSP-specific bindings (renesas,mmngr, RZV2N_PORT_PINMUX, etc.), so they
+# are NOT portable across linux-renesas versions.  The kernel pin
+# (LINUX_VERSION / KERNEL_BRANCH / KERNEL_REV) lives in
+# linux-renesas_6.1.bbappend so it applies to the 6.1 recipe only; this `%`
+# file still matches every linux-renesas PV, so a 6.12 build gets the board
+# dts but not a matching patch series.
 # Port notes (what changed against 6.1.141-cip43): docs/build-yocto-v2n.md.
-LINUX_VERSION = "6.1.157-cip48"
-KERNEL_BRANCH = "rz-6.1-cip48"
-KERNEL_REV = "1cac8c7e4cdb2d8194f5249e309493dadd9015c3"
-
-# meta-renesas' rz-dmac "Protect the driver specific lists" patch is already in
-# cip48 (commit 9b40d6ca106f); applying it again fails do_patch.
-SRC_URI:remove = "file://0001-dmaengine-sh-rz-dmac-Protect-the-driver-specific-lis.patch"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
@@ -220,7 +215,8 @@ python () {
 # assignable instance owned by the M33.  The earlier hard-coded
 # DEF_MOD_CRITICAL form of this fix was silicon-validated 2026-06-03 (two
 # cold cycles + warm reboot, link autonomous from ~2 s after power-on); this
-# DT-driven form applies to the BSP kernel (6717c06) but is NOT yet
+# DT-driven form is ported to cip48 (1cac8c7e; the logic moved into
+# rzv2h_cpg_enable_clock_mstop()) but is NOT yet
 # bench-validated -- re-run that cold-cycle check on the first build.
 #
 # RIIC8 (BRD_I2C) is not listed: the maintainer decision that
@@ -474,7 +470,7 @@ SRC_URI:append = " file://rv3028-rtc.cfg"
 # six V2N-family SKUs carry the same module (see wifi_ble: in each
 # metadata/e1m_modules/E1M-V2{N,M}10{1,2,3}.yaml). Unconditional like
 # rv3028-rtc.cfg above: a SoM-level fact, not a per-machine one. See
-# e1m-v2n-som.dtsi for the &sdhi2 WLAN node + &sci4 BT node, and
+# e1m-v2n-som.dtsi for the &sdhi2 WLAN node + &rsci4 BT node, and
 # meta-alp-sdk/recipes-kernel/cyw-fmac{,-firmware}/ for the out-of-tree
 # driver + blobs this fragment's CFG80211=m / BRCMFMAC=n pairs with.
 SRC_URI:append = " file://wifi-bt.cfg"

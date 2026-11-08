@@ -124,7 +124,7 @@ not the distro.
 > to `"6.1%"` (linux-renesas) for BSP v6.30.  Leaving it at
 > the template default causes a recipe mismatch and build failure.
 >
-> **Kernel pin (cip48):** `linux-renesas_%.bbappend` overrides the BSP
+> **Kernel pin (cip48):** `linux-renesas_6.1.bbappend` (6.1 recipe only) overrides the BSP
 > recipe's `LINUX_VERSION` / `KERNEL_BRANCH` / `KERNEL_REV` to
 > `6.1.157-cip48` / `rz-6.1-cip48` / `1cac8c7e4cdb2d8194f5249e309493dadd9015c3`
 > (the kernel `meta-renesas` `BSP-4.0.2` ships), so the ALP patch series
@@ -134,8 +134,12 @@ not the distro.
 > 0011 (ICU error masks, rewritten against the new `rzv2h_icu_setup_irqs()`),
 > 0017 (`vclk_rec_rate` is gone), 0020 (enum/context shift), 0021 (dtsi
 > context) and 0033 (`rzv2h_wdt_refresh()`) were refreshed by hand; no patch was
-> dropped.  Host `bitbake linux-renesas -c compile` for the A55 MACHINEs is the
-> only check done so far; the board is not yet booted on cip48
+> dropped.  The board dts/dtsi use the cip48 labels (`&gpt1` pwm index 5 for the
+> backlight, `&rsci4`, `&usb3_phy`, `&xhci`).  Host `bitbake linux-renesas -c
+> compile` for the A55 MACHINEs is the only check done, and it passes only with
+> the vendor patches `meta-rz-drpai` 0003/0004 and `0001-add-drp-property-to-devicetree.patch`
+> (codecs/opencva) removed -- they fail `do_patch` on cip48 and must be updated
+> in those layers before this ships.  The board is not yet booted on cip48
 > (changelog fragment `2640-kernel-cip48.md` lists the open items).
 
 > **Core ownership (kernel `do_configure`):** the linux-renesas bbappend needs

@@ -1,5 +1,16 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/linux-renesas:"
 
+# Kernel pin: rz-6.1-cip48 (6.1.157-cip48).  Hard `=` overrides of the
+# meta-renesas recipe's own values; this file matches only the 6.1 recipe, so
+# linux-renesas_6.12.bb keeps its own.  See linux-renesas_%.bbappend.
+LINUX_VERSION = "6.1.157-cip48"
+KERNEL_BRANCH = "rz-6.1-cip48"
+KERNEL_REV = "1cac8c7e4cdb2d8194f5249e309493dadd9015c3"
+
+# meta-renesas' rz-dmac "Protect the driver specific lists" patch is already in
+# cip48 (commit 9b40d6ca106f); applying it again fails do_patch.
+SRC_URI:remove = "file://0001-dmaengine-sh-rz-dmac-Protect-the-driver-specific-lis.patch"
+
 # 0018 (DRP-AI register ioctls): the vendor drpai driver lets any opener of
 # /dev/drpai0 read/write the DRP, DRP-AI and CPG register blocks (ioctls
 # 64-69; WRITE_CPG_REG can gate CM33-owned clocks).  The runtime never calls

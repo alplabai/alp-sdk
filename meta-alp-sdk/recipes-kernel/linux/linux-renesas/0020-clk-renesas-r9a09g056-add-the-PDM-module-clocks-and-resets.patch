@@ -1,6 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
-Date: Sun, 8 Nov 2026 20:11:56 +0000
 Subject: [PATCH] clk: renesas: r9a09g056: add the PDM module clocks and resets
 
 Copyright (c) 2026 Alp Lab AB

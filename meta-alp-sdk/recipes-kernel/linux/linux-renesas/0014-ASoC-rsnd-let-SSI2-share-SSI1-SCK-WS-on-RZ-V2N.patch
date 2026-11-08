@@ -1,6 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
-Date: Sun, 8 Nov 2026 20:12:31 +0000
 Subject: [PATCH] ASoC: rsnd: let SSI2 share SSI1's SCK/WS (RZ/V2N
  SSIU_SSI_MODE1)
 

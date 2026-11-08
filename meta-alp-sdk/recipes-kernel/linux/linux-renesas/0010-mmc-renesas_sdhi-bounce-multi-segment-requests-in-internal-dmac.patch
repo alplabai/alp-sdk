@@ -1,6 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
-Date: Sun, 8 Nov 2026 20:10:28 +0000
 Subject: [PATCH] mmc: renesas_sdhi: bounce multi-segment requests on the
  internal DMAC
 
@@ -22,7 +21,7 @@ next is in flight), so the buffer is owned by exactly one mmc_data at
 a time and only that request copies from or releases it.
 
 Upstream-Status: Pending
-Signed-off-by: Alp Lab AB
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/mmc/host/renesas_sdhi.h               |  3 +
  drivers/mmc/host/renesas_sdhi_internal_dmac.c | 67 ++++++++++++++++++-

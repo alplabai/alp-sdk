@@ -1,6 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
-Date: Sun, 8 Nov 2026 20:11:25 +0000
 Subject: [PATCH] gpiolib: sysfs: reject export of a number in a chipless
  gpio_device
 

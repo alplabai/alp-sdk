@@ -1,6 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
-Date: Sun, 8 Nov 2026 20:11:24 +0000
 Subject: [PATCH] irqchip/renesas-rzv2h: mask the ICU error sources the handler
  cannot acknowledge
 
@@ -10,8 +9,8 @@ resets fully unmasked) and every other bit of group 1 unmasked. Once a
 non-GPT error source asserts -- on an E1M-V2M103 group 0 bit 0 is set
 as soon as the Cortex-M33 runs -- nothing acknowledges it, the line
 storms ('irq 14: nobody cared') and genirq disables it, taking the GPT
-overflow interrupts with it. Also, the GPT unit-0 dead-time mask was
-written to group 2 instead of group 1.
+overflow interrupts with it. cip48 writes no ERINTA55MSK at all, so
+group 0 is still unmasked upstream.
 
 Unmask only the GPT overflow bits the handler services and mask
 everything else in groups 0-3, warning once about any error status
@@ -36,7 +35,7 @@ and is not reset by PRESETn, so a reboot that does not assert ERROR_RESETn
 can miss it.
 
 Upstream-Status: Pending
-Signed-off-by: Alp Lab AB
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/irqchip/irq-renesas-rzv2h.c | 48 +++++++++++++++++++++++++++++
  1 file changed, 48 insertions(+)
@@ -79,7 +78,7 @@ index b4984db25655..78e91d2ecd43 100644
  	writel_relaxed(rzv2h_irqc_reg_cache_data->iitsr, base + ICU_IITSR);
  	writel_relaxed(rzv2h_irqc_reg_cache_data->iptsr, base + ICU_IPTSR);
 +
-+	/* Keep the non-GPT error sources masked (see rzv2h_icu_init_common()). */
++	/* Keep the non-GPT error sources masked (see rzv2h_icu_setup_irqs()). */
 +	for (u8 i = 0; i < 4; i++)
 +		writel_relaxed(rzv2h_irqc_reg_cache_data->erintmsk[i], base + ICU_ERINTA55MSK(i));
  }
