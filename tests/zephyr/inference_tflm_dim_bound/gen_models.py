@@ -74,6 +74,7 @@ if __name__ == "__main__":
         "/* Largest dim the uint16_t shape[] can carry. */\n"
         + c_array("k_model_dim_65535", relu_model(65535))
         + "\n/* One past it: tflm_open() must refuse this. */\n"
-        + c_array("k_model_dim_65536", relu_model(65536))
+        + c_array("k_model_dim_65536", relu_model(65536)),
+        encoding="utf-8",
     )
     print(f"wrote {out}")
