@@ -59,6 +59,19 @@ lptimer_clock_seg_elapsed(const struct lptimer_clock *c, uint32_t cur, bool unde
 	return (underflowed ? c->load + 1U : 0U) + in_seg;
 }
 
+/* After LOADCOUNT is rewritten CURRENTVAL keeps showing the previous count (or
+ * 0 before the first LF edge after ENABLE) for a clock or so.  The `> load`
+ * clamp above only catches that when load is below the old count; reloading
+ * back to free-run (load == 0xFFFFFFFF) has nothing above it, so the driver
+ * polls (bounded) until this says the new segment is visibly running: the
+ * reading is within LPTIMER_CLK_START_WINDOW clocks below the load value. */
+#define LPTIMER_CLK_START_WINDOW 3U
+
+static inline bool lptimer_clock_start_seen(const struct lptimer_clock *c, uint32_t cur)
+{
+	return cur <= c->load && (c->load - cur) <= LPTIMER_CLK_START_WINDOW;
+}
+
 /* Virtual free-running down-counter value. */
 static inline uint32_t
 lptimer_clock_value(const struct lptimer_clock *c, uint32_t cur, bool underflowed)

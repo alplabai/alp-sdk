@@ -30,7 +30,10 @@
  * period and restores free-run (LOADCOUNT 0xFFFFFFFF), so get_value() is a
  * continuous free-running down-counter and get_top_value() stays 0xFFFFFFFF.
  * Residual error: the clocks between reading CURRENTVAL and the reload taking
- * effect (a few ticks) are lost per set_alarm()/cancel_alarm().
+ * effect (a few ticks) are lost per set_alarm()/cancel_alarm().  The ISR folds
+ * one period plus the clocks since the reload, so ISR latency must stay below
+ * one alarm period: at 32768 Hz a 1- or 2-tick alarm (30.5/61 us) is only
+ * accurate if the ISR runs within that, else whole periods are lost.
  *
  * ============================== STATUS ==============================
  * ADR 0017 Tier-1.5 -- a thin in-tree Zephyr driver over the memory-mapped
@@ -91,6 +94,27 @@ static inline uint32_t ch_base(const struct counter_alif_lptimer_config *cfg)
 }
 
 static uint32_t counter_alif_lptimer_get_pending_int(const struct device *dev);
+
+/* Snapshot CURRENTVAL and "underflow pending" consistently: pending, cur,
+ * pending again; if the pending bit changed in between, read cur again.
+ * Caller holds irq_lock. */
+static uint32_t lptimer_snapshot(const struct device *dev, bool *underflowed)
+{
+	const struct counter_alif_lptimer_config *cfg  = dev->config;
+	const struct counter_alif_lptimer_data   *data = dev->data;
+	bool                                      p1, p2;
+	uint32_t                                  cur;
+
+	p1  = counter_alif_lptimer_get_pending_int(dev) != 0U;
+	cur = sys_read32(ch_base(cfg) + LPTIMER_CH_CURRENTVAL);
+	p2  = counter_alif_lptimer_get_pending_int(dev) != 0U;
+	if (p1 != p2) {
+		cur = sys_read32(ch_base(cfg) + LPTIMER_CH_CURRENTVAL);
+	}
+	/* A pending underflow only counts while an alarm is armed. */
+	*underflowed = p2 && data->alarm_cb != NULL;
+	return cur;
+}
 
 static int counter_alif_lptimer_start(const struct device *dev)
 {
@@ -167,8 +191,6 @@ static int counter_alif_lptimer_stop(const struct device *dev)
 
 static int counter_alif_lptimer_get_value(const struct device *dev, uint32_t *ticks)
 {
-	const struct counter_alif_lptimer_config *cfg = dev->config;
-
 	const struct counter_alif_lptimer_data *data = dev->data;
 
 	/* CURRENTVAL is the live (decrementing) count (Alif DFP lptimer.h
@@ -184,11 +206,12 @@ static int counter_alif_lptimer_get_value(const struct device *dev, uint32_t *ti
 	}
 
 	unsigned int key = irq_lock();
-	/* Underflow while an alarm is armed but the ISR has not folded it yet. */
-	bool underflowed = data->alarm_cb != NULL && counter_alif_lptimer_get_pending_int(dev);
+	bool         underflowed;
+	/* Underflow while an alarm is armed but the ISR has not folded it yet is
+	 * counted by lptimer_clock_value(). */
+	uint32_t cur = lptimer_snapshot(dev, &underflowed);
 
-	*ticks = lptimer_clock_value(
-	    &data->clk, sys_read32(ch_base(cfg) + LPTIMER_CH_CURRENTVAL), underflowed);
+	*ticks = lptimer_clock_value(&data->clk, cur, underflowed);
 	irq_unlock(key);
 	return 0;
 }
@@ -212,9 +235,16 @@ static uint32_t counter_alif_lptimer_get_top_value(const struct device *dev)
 }
 
 /* Reload `load` with MODE/INT_MASK as given (ENABLE is cleared first, HWRM
- * 13.1.4.4, then set again).  Caller holds irq_lock. */
-static void lptimer_reload(uint32_t cbase, uint32_t load, bool user_mode)
+ * 13.1.4.4, then set again), then wait (bounded, ~100 us = 3 LF clocks) until
+ * CURRENTVAL shows the new segment: it keeps the previous count, or 0 before the
+ * first LF edge after ENABLE, and a stale read would be folded into the base
+ * as real elapsed time (#2944).  Caller holds irq_lock. */
+static void lptimer_reload(uint32_t cbase, const struct lptimer_clock *clk, bool user_mode)
 {
+	uint32_t load = clk->load;
+	uint32_t t0;
+	uint32_t bound = (sys_clock_hw_cycles_per_sec() / 1000000U) * 100U;
+
 	uint32_t ctrl = sys_read32(cbase + LPTIMER_CH_CONTROLREG);
 
 	ctrl &= ~LPTIMER_CTRL_ENABLE;
@@ -233,6 +263,11 @@ static void lptimer_reload(uint32_t cbase, uint32_t load, bool user_mode)
 
 	ctrl |= LPTIMER_CTRL_ENABLE;
 	sys_write32(ctrl, cbase + LPTIMER_CH_CONTROLREG);
+
+	t0 = k_cycle_get_32();
+	while (!lptimer_clock_start_seen(clk, sys_read32(cbase + LPTIMER_CH_CURRENTVAL)) &&
+	       (k_cycle_get_32() - t0) < bound) {
+	}
 }
 
 static int counter_alif_lptimer_set_alarm(const struct device            *dev,
@@ -257,11 +292,6 @@ static int counter_alif_lptimer_set_alarm(const struct device            *dev,
 	if (alarm_cfg->flags & COUNTER_ALARM_CFG_ABSOLUTE) {
 		LOG_ERR("absolute alarm not supported on LPTIMER");
 		return -ENOTSUP;
-	}
-
-	/* Pending alarm (Zephyr API: -EBUSY).  Unlocked read: the ISR only clears it. */
-	if (data->alarm_cb != NULL) {
-		return -EBUSY;
 	}
 
 	/*
@@ -290,6 +320,13 @@ static int counter_alif_lptimer_set_alarm(const struct device            *dev,
 	 * counter starts it. */
 	key = irq_lock();
 
+	/* Pending alarm: -EBUSY per the Zephyr counter API (checked under the
+	 * lock so two threads cannot both pass). */
+	if (data->alarm_cb != NULL) {
+		irq_unlock(key);
+		return -EBUSY;
+	}
+
 	if (data->running) {
 		lptimer_clock_fold(&data->clk,
 		                   sys_read32(cbase + LPTIMER_CH_CURRENTVAL),
@@ -299,7 +336,7 @@ static int counter_alif_lptimer_set_alarm(const struct device            *dev,
 		lptimer_clock_reset(&data->clk);
 		data->clk.load = alarm_cfg->ticks - 1U;
 	}
-	lptimer_reload(cbase, data->clk.load, true);
+	lptimer_reload(cbase, &data->clk, true);
 
 	data->alarm_cb  = alarm_cfg->callback;
 	data->user_data = alarm_cfg->user_data;
@@ -337,13 +374,11 @@ static int counter_alif_lptimer_cancel_alarm(const struct device *dev, uint8_t c
 	key = irq_lock();
 
 	if (data->alarm_cb != NULL) {
-		bool underflowed = counter_alif_lptimer_get_pending_int(dev) != 0U;
+		bool     underflowed;
+		uint32_t cur = lptimer_snapshot(dev, &underflowed);
 
-		lptimer_clock_fold(&data->clk,
-		                   sys_read32(cbase + LPTIMER_CH_CURRENTVAL),
-		                   underflowed,
-		                   LPTIMER_CLK_FREE_LOAD);
-		lptimer_reload(cbase, LPTIMER_CLK_FREE_LOAD, false);
+		lptimer_clock_fold(&data->clk, cur, underflowed, LPTIMER_CLK_FREE_LOAD);
+		lptimer_reload(cbase, &data->clk, false);
 		data->alarm_cb  = NULL;
 		data->user_data = NULL;
 	}
@@ -369,27 +404,31 @@ static void counter_alif_lptimer_isr(const struct device *dev)
 	const struct counter_alif_lptimer_config *cfg   = dev->config;
 	struct counter_alif_lptimer_data         *data  = dev->data;
 	uint32_t                                  cbase = ch_base(cfg);
-	counter_alarm_callback_t                  cb;
-	void                                     *user_data;
+	counter_alarm_callback_t                  cb    = NULL;
+	void                                     *user_data = NULL;
 	uint32_t                                  ticks = 0U;
 	unsigned int                              key   = irq_lock();
 
-	cb        = data->alarm_cb;
-	user_data = data->user_data;
+	/* Fold only if the underflow is really pending: a latched NVIC pending
+	 * left over from a cancelled/stopped alarm must not count a phantom
+	 * period against a freshly armed one. */
+	if (data->alarm_cb != NULL && counter_alif_lptimer_get_pending_int(dev) != 0U) {
+		cb        = data->alarm_cb;
+		user_data = data->user_data;
 
-	/* Single alarm: fold the full period (plus the ISR latency, i.e. the
-	 * clocks since the reload) and restore free-run before the callback, so
-	 * the count continues and the callback may re-arm (#2944). */
-	if (cb != NULL) {
+		/* Fold the full period (plus the ISR latency, i.e. the clocks
+		 * since the reload) and restore free-run before the callback, so
+		 * the count continues and the callback may re-arm (#2944). */
 		lptimer_clock_fold(&data->clk,
 		                   sys_read32(cbase + LPTIMER_CH_CURRENTVAL),
 		                   true,
 		                   LPTIMER_CLK_FREE_LOAD);
-		lptimer_reload(cbase, LPTIMER_CLK_FREE_LOAD, false);
+		lptimer_reload(cbase, &data->clk, false);
 		data->alarm_cb  = NULL;
 		data->user_data = NULL;
-		ticks           = lptimer_clock_value(
-                    &data->clk, sys_read32(cbase + LPTIMER_CH_CURRENTVAL), false);
+		/* The free-run segment has just started: no CURRENTVAL read (it
+		 * can still show the previous count). */
+		ticks = lptimer_clock_value(&data->clk, LPTIMER_CLK_FREE_LOAD, false);
 	}
 
 	/* Clear the pending channel interrupt: reading the per-channel EOI
