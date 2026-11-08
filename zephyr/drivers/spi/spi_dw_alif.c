@@ -62,6 +62,7 @@ LOG_MODULE_REGISTER(spi_dw_alif);
 #endif
 
 #include <zephyr/drivers/spi.h>
+#include <zephyr/drivers/spi/alp_spi_compat.h>
 #include <zephyr/drivers/spi/rtio.h>
 #include <zephyr/irq.h>
 
@@ -110,7 +111,7 @@ LOG_MODULE_REGISTER(spi_dw_alif);
 static inline bool spi_dw_is_slave(struct spi_dw_data *spi)
 {
 	return (IS_ENABLED(CONFIG_SPI_SLAVE) &&
-		spi_context_is_slave(&spi->ctx));
+		ALP_SPI_CTX_IS_PERIPHERAL(&spi->ctx));
 }
 
 static void completed(const struct device *dev, int error)
@@ -821,7 +822,7 @@ static int spi_dw_configure(const struct device *dev,
 	}
 
 	/* Verify if requested op mode is relevant to this controller */
-	if (config->operation & SPI_OP_MODE_SLAVE) {
+	if (config->operation & SPI_OP_MODE_PERIPHERAL) {
 		if (!(info->serial_target)) {
 			LOG_ERR("Slave mode not supported");
 			return -ENOTSUP;
@@ -859,7 +860,7 @@ static int spi_dw_configure(const struct device *dev,
 	}
 
 	/* Setting SSI_IS_MST in CTRLR0 if it is dwc_ssi on AHB */
-	if (!(config->operation & SPI_OP_MODE_SLAVE) && spi->dwc_ssi) {
+	if (!(config->operation & SPI_OP_MODE_PERIPHERAL) && spi->dwc_ssi) {
 		ctrlr0 |= DWC_SSI_SPI_IS_MST_BIT;
 	}
 
@@ -891,7 +892,7 @@ static int spi_dw_configure(const struct device *dev,
 		/* Baud rate and Slave select, for master only */
 		write_baudr(dev, SPI_DW_CLK_DIVIDER(clk_freq,
 						    config->frequency));
-		write_ser(dev, 1 << config->slave);
+		write_ser(dev, 1 << ALP_SPI_CFG_PERIPHERAL_NUM(config));
 	}
 
 	if (spi_dw_is_slave(spi)) {
@@ -918,7 +919,7 @@ static int spi_dw_configure(const struct device *dev,
 			     SPI_MODE_CPHA) ? 1 : 0,
 			    (SPI_MODE_GET(config->operation) &
 			     SPI_MODE_LOOP) ? 1 : 0,
-			    config->slave);
+			    ALP_SPI_CFG_PERIPHERAL_NUM(config));
 	}
 
 	return 0;
@@ -1443,7 +1444,7 @@ static int transceive(const struct device *dev,
 		if (spi_cs_is_gpio(config)) {
 			spi_context_cs_control(&spi->ctx, true);
 		} else {
-			write_ser(dev, BIT(config->slave));
+			write_ser(dev, BIT(ALP_SPI_CFG_PERIPHERAL_NUM(config)));
 		}
 	}
 
