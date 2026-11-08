@@ -15,6 +15,7 @@ Run locally:
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 import sys
@@ -346,7 +347,8 @@ def test_require_block_device_rejects_missing_target(tmp_path) -> None:
     assert "cannot stat" in err
 
 
-def _fake_host(tmp_path, mountinfo, swaps="Filename Type Size Used Priority\n"):
+def _fake_host(tmp_path, mountinfo, swaps="Filename Type Size Used Priority\n",
+               ebusy=(), aliases=None):
     """A fake /proc + /sys: sda (sda2 = root), sdb (sdb1), dm-0 on sda3,
     with /sys/dev/block maj:min links like the kernel's."""
     if os.name == "nt":
@@ -377,8 +379,20 @@ def _fake_host(tmp_path, mountinfo, swaps="Filename Type Size Used Priority\n"):
     mi.write_text(mountinfo, encoding="utf-8")
     sw = tmp_path / "swaps"
     sw.write_text(swaps, encoding="utf-8")
+    majmin = {n: tuple(int(x) for x in v[1].split(":")) for n, v in nodes.items()}
+    aliases = aliases or {}
+
+    def rdev(path):
+        key = os.path.basename(str(path))
+        return os.makedev(*aliases.get(key, majmin.get(key, (99, 99))))
+
+    def open_excl(path):
+        if os.path.basename(path) in ebusy:
+            raise OSError(errno.EBUSY, "busy")
+
     return patch.multiple(yocto_wic, _PROC_MOUNTINFO=mi, _PROC_SWAPS=sw,
-                          _SYS_BLOCK=cls, _SYS_DEV_BLOCK=devblk)
+                          _SYS_BLOCK=cls, _SYS_DEV_BLOCK=devblk,
+                          _rdev=rdev, _open_excl=open_excl)
 
 
 _ROOT_AS_DEV_ROOT = "22 1 8:2 / / rw,relatime - ext4 /dev/root rw\n"
@@ -412,6 +426,42 @@ def test_require_unused_device_rejects_active_swap_partition(tmp_path) -> None:
 def test_require_unused_device_allows_unrelated_disk(tmp_path) -> None:
     with _fake_host(tmp_path, _ROOT_AS_DEV_ROOT + _PROC):
         assert _require_unused_device(Path("/dev/sdb")) is None
+
+
+def test_require_unused_device_rejects_ebusy_device_not_in_mountinfo(tmp_path) -> None:
+    """Container case: the host's mount is invisible, the kernel says EBUSY."""
+    with _fake_host(tmp_path, _PROC, ebusy=("sdb1",)):
+        err = _require_unused_device(Path("/dev/sdb"))
+    assert err is not None and "EBUSY" in err
+
+
+def test_require_unused_device_rejects_non_empty_holders(tmp_path) -> None:
+    with _fake_host(tmp_path, _PROC):
+        (yocto_wic._SYS_BLOCK / "sdb1" / "holders").mkdir()
+        (yocto_wic._SYS_BLOCK / "sdb1" / "holders" / "dm-0").touch()
+        err = _require_unused_device(Path("/dev/sdb"))
+    assert err is not None and "holders" in err
+
+
+def test_require_unused_device_matches_mknod_alias_by_device_number(tmp_path) -> None:
+    """A node with another name but sda2's maj:min is the mounted root."""
+    with _fake_host(tmp_path, _ROOT_AS_DEV_ROOT + _PROC, aliases={"mydisk": (8, 2)}):
+        assert _require_unused_device(Path("/dev/mydisk")) is not None
+
+
+def test_require_unused_device_fails_closed_on_unreadable_swaps(tmp_path) -> None:
+    with _fake_host(tmp_path, _PROC), \
+         patch.object(yocto_wic, "_PROC_SWAPS", tmp_path / "missing"):
+        err = _require_unused_device(Path("/dev/sdb"))
+    assert err is not None and "cannot verify" in err
+
+
+def test_require_unused_device_fails_closed_on_open_eacces(tmp_path) -> None:
+    def deny(path):
+        raise OSError(errno.EACCES, "denied")
+    with _fake_host(tmp_path, _PROC), patch.object(yocto_wic, "_open_excl", deny):
+        err = _require_unused_device(Path("/dev/sdb"))
+    assert err is not None and "cannot verify" in err
 
 
 def test_require_unused_device_fails_closed_without_mount_table(tmp_path) -> None:
