@@ -753,10 +753,14 @@ def test_swd_probe_prefers_jlink_when_present() -> None:
                if t in ("JLinkExe", "openocd") else None), \
          patch("flash_backends.swd_probe.subprocess.run") as run_mock:
         result = backend.flash(_ctx(
-            {"base": "0x08000000"}, dry_run=True, artefact=artefact))
+            {"base": "0x08000000", "jlink_serial": "123456789"},
+            dry_run=True, artefact=artefact))
     assert result.ok is True
     assert run_mock.call_count == 0
     assert result.command[0].endswith("JLinkExe")
+    assert result.command[1:3] == ["-SelectEmuBySN", "123456789"]
+    assert "-AutoConnect" not in result.command
+    assert "exec DisableAutoUpdateFW\nconnect" in result.message
     assert "-device" in result.command and "GD32G553MEY7TR" in result.command
     assert "SWD" in " ".join(result.command)
     assert "loadfile" in result.message
@@ -769,12 +773,87 @@ def test_swd_probe_jlink_happy_path() -> None:
                side_effect=lambda t: "/usr/bin/JLinkExe"
                if t == "JLinkExe" else None), \
          patch("flash_backends.swd_probe.subprocess.run",
-               return_value=_proc(rc=0)) as run_mock:
+               return_value=_proc(rc=0, stdout=_JLINK_OK_LOG)) as run_mock:
         result = backend.flash(_ctx(
-            {"jlink_device": "GD32G553MEY7TR"}, artefact="/tmp/gd32-bridge.hex"))
+            {"jlink_device": "GD32G553MEY7TR", "jlink_serial": "123456789"},
+            artefact="/tmp/gd32-bridge.hex"))
     assert result.ok is True
     assert run_mock.call_count == 1
     assert run_mock.call_args[0][0][0].endswith("JLinkExe")
+
+
+_JLINK_OK_LOG = "Downloading file [x.hex]...\nJ-Link: Flash download: O.K.\n"
+
+_JLINK_FULL_LOG = (
+    "SEGGER J-Link Commander V9.46\n"
+    "Connecting to J-Link via USB...O.K.\n"
+    "Firmware: J-Link V11 compiled Jan  1 2026\n"
+    "Found 1 JTAG device, Core ID: 0x6BA02477 (None)\n"
+    "Cortex-M33 identified.\n"
+    "Downloading file [/tmp/x.hex]...\n"
+    "J-Link: Flash download: Bank 0 @ 0x80000000: 1 range affected "
+    "(5767168 bytes)\n"
+    "J-Link: Flash download: Total: 26.541s (Prepare: 0.1s, Compare: 1.2s)\n"
+    "O.K.\n"
+)
+
+
+def test_swd_probe_jlink_full_transcript_passes() -> None:
+    assert swd_probe._jlink_transcript_error(_JLINK_FULL_LOG) is None
+    assert swd_probe._jlink_transcript_error(
+        "Downloading file [x.bin]...\nVerify successful.\n") is None
+
+
+@pytest.mark.parametrize("log", [
+    "Cannot connect to target.\n",                    # never reached the probe
+    "Downloading file...\nERROR: Could not download\n",
+    "J-Link Commander V9.46\n",                       # no programming confirmation
+    # Connect succeeded (prints O.K.) but no download ever ran.
+    "Connecting to J-Link via USB...O.K.\n",
+])
+def test_swd_probe_jlink_rc0_with_bad_transcript_is_not_success(log) -> None:
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: "/usr/bin/JLinkExe"
+               if t == "JLinkExe" else None), \
+         patch("flash_backends.swd_probe.subprocess.run",
+               return_value=_proc(rc=0, stdout=log)):
+        result = SwdProbeFlash().flash(_ctx(
+            {"jlink_serial": "123456789"}, artefact="/tmp/gd32-bridge.hex"))
+    assert result.ok is False
+    assert "not reporting a flash" in result.message
+
+
+def test_swd_probe_jlink_requires_probe_serial(monkeypatch) -> None:
+    monkeypatch.delenv("ALP_JLINK_SERIAL", raising=False)
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: "/usr/bin/JLinkExe"
+               if t == "JLinkExe" else None), \
+         patch("flash_backends.swd_probe.subprocess.run") as run_mock:
+        result = SwdProbeFlash().flash(_ctx(artefact="/tmp/gd32-bridge.hex"))
+    assert result.ok is False
+    assert "jlink_serial" in result.message
+    assert run_mock.call_count == 0
+
+
+def test_swd_probe_jlink_serial_from_env(monkeypatch) -> None:
+    monkeypatch.setenv("ALP_JLINK_SERIAL", "000603000869")
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: "/usr/bin/JLinkExe"
+               if t == "JLinkExe" else None):
+        result = SwdProbeFlash().flash(_ctx(
+            dry_run=True, artefact="/tmp/gd32-bridge.hex"))
+    assert result.ok is True
+    assert result.command[1:3] == ["-SelectEmuBySN", "000603000869"]
+
+
+def test_swd_probe_jlink_rejects_non_numeric_serial() -> None:
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: "/usr/bin/JLinkExe"
+               if t == "JLinkExe" else None):
+        result = SwdProbeFlash().flash(_ctx(
+            {"jlink_serial": "1; exec x"}, dry_run=True,
+            artefact="/tmp/gd32-bridge.hex"))
+    assert result.ok is False
 
 
 def test_jlink_commander_script_hex_uses_loadfile() -> None:
@@ -802,7 +881,8 @@ def test_swd_probe_jlink_failure_returns_error_result() -> None:
                if t == "JLinkExe" else None), \
          patch("flash_backends.swd_probe.subprocess.run",
                return_value=_proc(rc=1, stderr="Cannot connect to target")):
-        result = backend.flash(_ctx(artefact="/tmp/gd32-bridge.hex"))
+        result = backend.flash(_ctx(
+            {"jlink_serial": "123456789"}, artefact="/tmp/gd32-bridge.hex"))
     assert result.ok is False
     assert "J-Link exited" in result.message
 
@@ -909,7 +989,7 @@ def test_swd_probe_jlink_handles_whitespace_bearing_path() -> None:
                if t == "JLinkExe" else None), \
          patch("flash_backends.swd_probe.subprocess.run") as run_mock:
         result = backend.flash(_ctx(
-            {"base": "0x08000000"},
+            {"base": "0x08000000", "jlink_serial": "123456789"},
             dry_run=True,
             artefact="/tmp/dir with spaces/gd32-bridge.hex"))
     assert result.ok is True
