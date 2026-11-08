@@ -37,36 +37,32 @@
 
 name: pr-tan-build
 
+# Required-context shape (alp-sdk#2972, same as pr-metadata-validate.yml):
+# `tan-build · all` (the `summary` job) is the context meant to be required on `dev` (merge queue).
+#   - No `paths:` on the triggers: a path-filtered trigger leaves a required
+#     context "Expected" forever on a PR touching no watched path (#1474).
+#     The path list lives in the `detect` job's filter instead.
+#   - `merge_group:` is present so a queued PR never waits on a context this
+#     workflow cannot raise on a queue ref (#1415).
+#   - The summary name is static; it passes on a legitimate skip and fails on
+#     failure / cancelled / any unexpected skip.
+# merge_group runs the real matrix (both SoM-family legs, ~45 min cap) only
+# when detect finds a watched path against the queue's base_sha; the matrix is
+# already minimal.
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'src/**'
-      - 'include/**'
-      - 'firmware/**'
-      - 'blocks/**'
-      - 'vendors/**'
-      - 'tools/**'
-      - '.python-version'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - 'chips/**'
-      - 'metadata/**'
-      - 'scripts/**'
-      - 'examples/**'
-      - 'zephyr/**'
-      - 'cmake/**'
-      - 'CMakeLists.txt'
-      - 'west.yml'
-      - '.github/workflows/pr-tan-build.yml'
   merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  # merge_group refs are unique per queue entry, so queue runs never share
+  # a group; never cancel one anyway.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 permissions:
   contents: read
+  pull-requests: read
 
 env:
   # The tan-cli release this gate installs. MUST move with the tan release:
@@ -79,7 +75,65 @@ env:
   TAN_REF: v0.6.0
 
 jobs:
+  # Cheap path detector (same shape as cross-platform-zephyr.yml `detect`).
+  # Not a required context. Skipped on merge_group / workflow_dispatch, where
+  # the real jobs always run (see their `if:`).
+  detect:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      # push / merge_group: dorny diffs with git, so it needs a checkout WITH
+      # history (a bare runner has no repo: `fatal: not a git repository`, exit
+      # 128, which reddened the summary on every push). pull_request uses the API.
+      - name: Checkout (history for the git diff)
+        if: github.event_name != 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Detect tan-build-relevant changes
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
+        timeout-minutes: 2
+        with:
+          # merge_group: the queue's base commit. push: the pre-push SHA, so the
+          # diff is before..after (empty base would diff the default branch
+          # against main and false-pass every post-merge push; an all-zero
+          # `before` on a new branch falls back to the default merge-base).
+          # pull_request: empty, dorny uses the API.
+          base: ${{ github.event.merge_group.base_sha || (github.event_name == 'push' && github.event.before) || '' }}
+          filters: |
+            relevant:
+            - 'src/**'
+            - 'include/**'
+            - 'firmware/**'
+            - 'blocks/**'
+            - 'vendors/**'
+            - 'tools/**'
+            - '.python-version'
+            - 'pyproject.toml'
+            - 'uv.lock'
+            - 'chips/**'
+            - 'metadata/**'
+            - 'scripts/**'
+            - 'examples/**'
+            - 'zephyr/**'
+            - 'cmake/**'
+            - 'CMakeLists.txt'
+            - 'west.yml'
+            - '.github/workflows/pr-tan-build.yml'
+
   tan-build:
+    needs: detect
+    # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
+    # path changed. merge_group, workflow_dispatch and any `detect`
+    # non-success run the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     name: tan-build · ${{ matrix.family }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -273,3 +327,51 @@ jobs:
             fi
           done
           exit "${missing}"
+
+  # ---------------------------------------------------------------
+  # THE context to require (#2972). Static name, always runs.
+  # `skipped` is a pass ONLY when detect genuinely ran and found nothing.
+  # ---------------------------------------------------------------
+  summary:
+    name: tan-build · all
+    needs: [detect, tan-build]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Compute verdict from tan-build's + detect's results
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DETECT_RESULT: ${{ needs.detect.result }}
+          DETECT_RELEVANT: ${{ needs.detect.outputs.relevant }}
+          GATE_RESULT: ${{ needs.tan-build.result }}
+        run: |
+          set -euo pipefail
+          echo "event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.relevant=${DETECT_RELEVANT} tan-build.result=${GATE_RESULT}"
+
+          case "${DETECT_RESULT}" in
+            failure|cancelled)
+              echo "::error::detect concluded '${DETECT_RESULT}'"
+              exit 1
+              ;;
+          esac
+
+          case "${GATE_RESULT}" in
+            success)
+              echo "PASS: tan-build ran and succeeded"
+              exit 0
+              ;;
+            skipped)
+              if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ] || [ "${EVENT_NAME}" = "merge_group" ]; } \
+                 && [ "${DETECT_RESULT}" = "success" ] && [ "${DETECT_RELEVANT}" != "true" ]; then
+                echo "PASS: tan-build legitimately skipped -- detect ran, succeeded, and found no watched path changed"
+                exit 0
+              fi
+              echo "::error::tan-build reported 'skipped' but event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.relevant=${DETECT_RELEVANT} does not match the one legitimate-skip condition -- treating this as a broken gate, not a pass"
+              exit 1
+              ;;
+            *)
+              echo "::error::tan-build concluded '${GATE_RESULT}'"
+              exit 1
+              ;;
+          esac

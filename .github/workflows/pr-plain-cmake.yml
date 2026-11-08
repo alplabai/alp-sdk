@@ -16,43 +16,96 @@
 
 name: pr-plain-cmake
 
+# Required-context shape (alp-sdk#2972, same as pr-metadata-validate.yml):
+# `plain-cmake · all` (the `summary` job) is the context meant to be required on `dev` (merge queue) and `main`.
+#   - No `paths:` on the triggers: a path-filtered trigger leaves a required
+#     context "Expected" forever on a PR touching no watched path (#1474).
+#     The path list lives in the `detect` job's filter instead.
+#   - `merge_group:` is present so a queued PR never waits on a context this
+#     workflow cannot raise on a queue ref (#1415).
+#   - The summary name is static; it passes on a legitimate skip and fails on
+#     failure / cancelled / any unexpected skip.
+# The old push trigger used a shorter path list than pull_request; detect
+# uses the pull_request list for both (a superset: push can only run more).
+# merge_group cost cap: `abidiff` (advisory, full-history checkout + two
+# builds) is skipped there and is NOT part of the summary verdict;
+# `consumer-add-subdirectory` runs only its `none` leg.
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'include/**'
-      - 'src/**'
-      - 'CMakeLists.txt'
-      - 'cmake/**'
-      - 'meta-alp-sdk/recipes-devtools/zcbor/**'
-      # tests/** is BUILT by this workflow (-DALP_BUILD_TESTS=ON below, plus
-      # CMakeLists.txt's add_subdirectory(tests)), so a change there decides
-      # which targets these jobs compile and which ctest cases run.  It was
-      # missing here until #1997: PR #1996 guarded a tests/yocto/ target
-      # behind CMAKE_SYSTEM_NAME and this workflow did not run on it at all.
-      - 'tests/**'
-      - 'examples/aen/aen-trace-runner/**'
-      - 'scripts/check_abidiff.py'
-      - 'metadata/sdk_version.yaml'
-      - '.github/workflows/pr-plain-cmake.yml'
   push:
     branches: [main, dev]
-    paths:
-      - 'include/**'
-      - 'src/**'
-      - 'CMakeLists.txt'
-      - 'cmake/**'
-      - 'meta-alp-sdk/recipes-devtools/zcbor/**'
-      - 'tests/**'
-      - 'examples/aen/aen-trace-runner/**'
+  merge_group:
   workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # merge_group refs are unique per queue entry, so queue runs never share
+  # a group; never cancel one anyway.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 jobs:
+  # Cheap path detector (same shape as cross-platform-zephyr.yml `detect`).
+  # Not a required context. Skipped only on workflow_dispatch, where the real
+  # jobs always run (see their `if:`).
+  detect:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      # push / merge_group: dorny diffs with git, so it needs a checkout WITH
+      # history (a bare runner has no repo: `fatal: not a git repository`, exit
+      # 128, which reddened the summary on every push). pull_request uses the API.
+      - name: Checkout (history for the git diff)
+        if: github.event_name != 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Detect plain-cmake-relevant changes
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
+        timeout-minutes: 2
+        with:
+          # merge_group: the queue's base commit. push: the pre-push SHA, so the
+          # diff is before..after (empty base would diff the default branch
+          # against main and false-pass every post-merge push; an all-zero
+          # `before` on a new branch falls back to the default merge-base).
+          # pull_request: empty, dorny uses the API.
+          base: ${{ github.event.merge_group.base_sha || (github.event_name == 'push' && github.event.before) || '' }}
+          filters: |
+            relevant:
+            - 'include/**'
+            - 'src/**'
+            - 'CMakeLists.txt'
+            - 'cmake/**'
+            - 'meta-alp-sdk/recipes-devtools/zcbor/**'
+            # tests/** is BUILT by this workflow (-DALP_BUILD_TESTS=ON below, plus
+            # CMakeLists.txt's add_subdirectory(tests)), so a change there decides
+            # which targets these jobs compile and which ctest cases run.  It was
+            # missing here until #1997: PR #1996 guarded a tests/yocto/ target
+            # behind CMAKE_SYSTEM_NAME and this workflow did not run on it at all.
+            - 'tests/**'
+            - 'examples/aen/aen-trace-runner/**'
+            - 'scripts/check_abidiff.py'
+            - 'docs/abi/abidiff-waivers.yaml'
+            - 'metadata/sdk_version.yaml'
+            - '.github/workflows/pr-plain-cmake.yml'
+
   baremetal:
+    needs: detect
+    # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
+    # path changed. merge_group, workflow_dispatch and any `detect`
+    # non-success run the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     name: plain-cmake · baremetal stub backend
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -69,6 +122,11 @@ jobs:
         run: cmake --build build/baremetal --parallel
 
   aen-trace-runner-host:
+    needs: detect
+    # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
+    # path changed. merge_group, workflow_dispatch and any `detect`
+    # non-success run the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     # The aen-trace-runner host unit tests (game logic, vision post-processing,
     # renderer goldens, release interlocks) ran nowhere in CI before this job.
     # The A32/qemu stage inside runner.sh skips itself when arm-none-eabi-gcc
@@ -86,6 +144,11 @@ jobs:
         run: bash examples/aen/aen-trace-runner/tests/host/runner.sh
 
   baremetal-aen:
+    needs: detect
+    # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
+    # path changed. merge_group, workflow_dispatch and any `detect`
+    # non-success run the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     # ALP_OS=baremetal + ALP_SOM=aen activates the vendors/alif/
     # wrapper directory.  Without ALP_HAS_ALIF_HAL=ON the four
     # wrapper sources (i2c.c, spi.c, gpio.c, uart.c) compile to
@@ -109,6 +172,11 @@ jobs:
         run: cmake --build build/baremetal-aen --parallel
 
   baremetal-v2n:
+    needs: detect
+    # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
+    # path changed. merge_group, workflow_dispatch and any `detect`
+    # non-success run the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     # ALP_OS=baremetal + ALP_SOM=v2n activates the
     # vendors/renesas-rzv2n/ wrapper directory.  Same pattern as
     # baremetal-aen above -- without ALP_HAS_RENESAS_FSP=ON the
@@ -131,6 +199,11 @@ jobs:
         run: cmake --build build/baremetal-v2n --parallel
 
   consumer-add-subdirectory:
+    needs: detect
+    # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
+    # path changed. merge_group, workflow_dispatch and any `detect`
+    # non-success run the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     # Issue #598: the README documents add_subdirectory() as a first-class
     # consumption mode, but nothing built alp-sdk as a NESTED project until
     # this job -- every job above builds alp-sdk as the top-level project,
@@ -143,7 +216,8 @@ jobs:
     timeout-minutes: 10
     strategy:
       matrix:
-        som: ["none", "aen"]
+        # merge_group: only the `none` leg (queue runner-cost cap, #2972).
+        som: ${{ fromJSON(github.event_name == 'merge_group' && '["none"]' || '["none","aen"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -160,6 +234,11 @@ jobs:
         run: cmake --build build/consumer-${{ matrix.som }} --parallel
 
   yocto:
+    needs: detect
+    # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
+    # path changed. merge_group, workflow_dispatch and any `detect`
+    # non-success run the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     name: plain-cmake · yocto backend + tests
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -218,6 +297,11 @@ jobs:
         run: ctest --test-dir build/yocto --output-on-failure
 
   abidiff:
+    needs: detect
+    # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
+    # path changed. merge_group, workflow_dispatch and any `detect`
+    # non-success run the real job.
+    if: always() && github.event_name != 'merge_group' && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     # Issue #2840: within one minor line (the SONAME carries the minor
     # while the major is 0, #2839) libalp_sdk.so must stay ABI-compatible
     # with the latest release tag of that minor, or an in-place package
@@ -242,11 +326,19 @@ jobs:
         run: |
           scripts/ci/apt-bounded.sh update
           scripts/ci/apt-bounded.sh install -y --no-install-recommends               abigail-tools libmosquitto-dev libasound2-dev libssl-dev pkg-config
+      - name: Install PyYAML (waiver file)
+        timeout-minutes: 3
+        run: python3 -m pip install pyyaml
       - name: abidiff
         timeout-minutes: 15
         run: python3 scripts/check_abidiff.py --require-tool
 
   yocto-zcbor:
+    needs: detect
+    # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
+    # path changed. merge_group, workflow_dispatch and any `detect`
+    # non-success run the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     # Issue #1254 CI-coverage follow-up (adversarial review on PR #1280):
     # the `yocto` leg above configures with a bare -DALP_OS=yocto on a
     # stock Ubuntu runner that has no zcbor package at all, so
@@ -337,6 +429,11 @@ jobs:
           fi
 
   strict-warnings:
+    needs: detect
+    # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
+    # path changed. merge_group, workflow_dispatch and any `detect`
+    # non-success run the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     # Issue #634: first-party alp-sdk C (dispatchers + src/backends/**,
     # NEVER vendors/**) must compile warning-free under the Alp-maintainer
     # strict profile (cmake/alp-sdk-warnings.cmake).  -Werror turns that
@@ -405,6 +502,11 @@ jobs:
           fi
 
   link-complete:
+    needs: detect
+    # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
+    # path changed. merge_group, workflow_dispatch and any `detect`
+    # non-success run the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     # Issue #593: every public <alp/*.h> function must be a real symbol
     # in BOTH the baremetal and yocto plain-CMake libalp_sdk.a archives
     # (a dispatcher, a real backend, or an explicit stub_backend.c
@@ -431,6 +533,11 @@ jobs:
         run: python3 scripts/check_plain_cmake_link_complete.py
 
   find-package-consumer:
+    needs: detect
+    # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
+    # path changed. merge_group, workflow_dispatch and any `detect`
+    # non-success run the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     # Issue #607: an INSTALLED alp-sdk (ALP_SDK_BUILD_SHARED=ON) must be
     # a real CMake package -- `find_package(alp-sdk <major.minor> REQUIRED)`
     # resolves, `alp::sdk` links, and the reported version matches the
@@ -481,3 +588,54 @@ jobs:
           ver="$(sed -n 's/^version:[[:space:]]*//p' metadata/sdk_version.yaml | head -1 | awk '{print $1}')"
           echo "expected: alp-sdk version: $ver"
           echo "$out" | grep -qx "alp-sdk version: $ver"
+
+  # ---------------------------------------------------------------
+  # THE context to require (#2972). Static name, always runs. `abidiff` is
+  # advisory (see docs/ci/README.md) and deliberately not in `needs`.
+  # ---------------------------------------------------------------
+  summary:
+    name: plain-cmake · all
+    needs: [detect, baremetal, aen-trace-runner-host, baremetal-aen, baremetal-v2n, consumer-add-subdirectory, yocto, yocto-zcbor, strict-warnings, link-complete, find-package-consumer]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Compute verdict from every build job's + detect's results
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DETECT_RESULT: ${{ needs.detect.result }}
+          DETECT_RELEVANT: ${{ needs.detect.outputs.relevant }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.relevant=${DETECT_RELEVANT}"
+
+          case "${DETECT_RESULT}" in
+            failure|cancelled)
+              echo "::error::detect concluded '${DETECT_RESULT}'"
+              exit 1
+              ;;
+          esac
+
+          python3 - <<'PY'
+          import json, os, sys
+          ev = os.environ["EVENT_NAME"]
+          legit_skip = (
+              ev in ("pull_request", "push", "merge_group")
+              and os.environ["DETECT_RESULT"] == "success"
+              and os.environ["DETECT_RELEVANT"] != "true"
+          )
+          bad = []
+          for job, info in json.loads(os.environ["NEEDS_JSON"]).items():
+              if job == "detect":
+                  continue
+              res = info["result"]
+              print(f"{job}: {res}")
+              if res == "success" or (res == "skipped" and legit_skip):
+                  continue
+              bad.append(f"{job} concluded '{res}' (event={ev}, legit_skip={legit_skip})")
+          for b in bad:
+              print(f"::error::{b}")
+          sys.exit(1 if bad else 0)
+          PY
+          echo "PASS: every build job succeeded or was legitimately skipped"
