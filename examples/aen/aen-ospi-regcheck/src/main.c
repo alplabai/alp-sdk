@@ -208,6 +208,8 @@ static void aen_ospi_program_erase_selftest(const struct device *ospi_dev)
 {
 	uint32_t original_crc, blank_crc, pattern_crc, readback_crc, restored_crc;
 	int      rc;
+	bool     erase_ok   = false;
+	bool     program_ok = false;
 
 	printk("\n=== #915 program/erase self-test: sector 0x%08x ===\n", AEN_OSPI_SELFTEST_OFFSET);
 
@@ -226,8 +228,9 @@ static void aen_ospi_program_erase_selftest(const struct device *ospi_dev)
 	/* 2. Erase, then verify the sector actually reads back all-0xFF. */
 	rc = flash_erase(ospi_dev, AEN_OSPI_SELFTEST_OFFSET, AEN_OSPI_SELFTEST_SECTOR_SIZE);
 	if (rc != 0) {
+		/* A failed erase may still have wiped part of the sector: restore. */
 		printk("RESULT FAIL: flash_erase() rc=%d\n", rc);
-		return;
+		goto restore;
 	}
 	rc = flash_read(ospi_dev,
 	                AEN_OSPI_SELFTEST_OFFSET,
@@ -235,10 +238,10 @@ static void aen_ospi_program_erase_selftest(const struct device *ospi_dev)
 	                sizeof(aen_ospi_selftest_scratch));
 	if (rc != 0) {
 		printk("RESULT FAIL: post-erase flash_read() rc=%d\n", rc);
-		return;
+		goto restore;
 	}
-	blank_crc     = crc32_ieee(aen_ospi_selftest_scratch, sizeof(aen_ospi_selftest_scratch));
-	bool erase_ok = true;
+	blank_crc = crc32_ieee(aen_ospi_selftest_scratch, sizeof(aen_ospi_selftest_scratch));
+	erase_ok  = true;
 
 	for (size_t i = 0; i < sizeof(aen_ospi_selftest_scratch); i++) {
 		if (aen_ospi_selftest_scratch[i] != 0xFFU) {
@@ -259,7 +262,7 @@ static void aen_ospi_program_erase_selftest(const struct device *ospi_dev)
 	                          sizeof(aen_ospi_selftest_scratch));
 	if (rc != 0) {
 		printk("RESULT FAIL: flash_write() (pattern) rc=%d\n", rc);
-		return;
+		goto restore;
 	}
 	rc = flash_read(ospi_dev,
 	                AEN_OSPI_SELFTEST_OFFSET,
@@ -267,19 +270,21 @@ static void aen_ospi_program_erase_selftest(const struct device *ospi_dev)
 	                sizeof(aen_ospi_selftest_scratch));
 	if (rc != 0) {
 		printk("RESULT FAIL: post-program flash_read() rc=%d\n", rc);
-		return;
+		goto restore;
 	}
-	readback_crc    = crc32_ieee(aen_ospi_selftest_scratch, sizeof(aen_ospi_selftest_scratch));
-	bool program_ok = (readback_crc == pattern_crc);
+	readback_crc = crc32_ieee(aen_ospi_selftest_scratch, sizeof(aen_ospi_selftest_scratch));
+	program_ok   = (readback_crc == pattern_crc);
 
 	printk("pattern: crc32=0x%08x readback_crc32=0x%08x match=%d\n",
 	       pattern_crc,
 	       readback_crc,
 	       (int)program_ok);
 
-	/* 4. Restore the original contents unconditionally (even on a program
-	 * mismatch above) -- this sector must not be left in the pattern
-	 * state, whatever else this test concludes. */
+restore:
+	/* 4. Restore the original contents unconditionally -- on a program
+	 * mismatch AND on every early failure after the erase above (each of
+	 * those jumps here) -- this sector must not be left erased or in the
+	 * pattern state, whatever else this test concludes. */
 	rc = flash_erase(ospi_dev, AEN_OSPI_SELFTEST_OFFSET, AEN_OSPI_SELFTEST_SECTOR_SIZE);
 	if (rc == 0) {
 		rc = flash_write(ospi_dev,
@@ -362,9 +367,10 @@ int main(void)
 	 * missing part only ever excused the removed XiP-enable step, never
 	 * anything upstream of it).
 	 */
-	const struct device *ospi_dev = DEVICE_DT_GET(OSPI_NODE);
+	const struct device *ospi_dev  = DEVICE_DT_GET(OSPI_NODE);
+	bool                 dev_ready = device_is_ready(ospi_dev);
 
-	if (!device_is_ready(ospi_dev)) {
+	if (!dev_ready) {
 		printk("driver: flash_ospi_alif.c linked but device NOT ready (init failed)\n");
 	} else {
 		printk("driver: flash_ospi_alif.c linked, device READY (ospi_alif_init() "
@@ -440,7 +446,8 @@ int main(void)
 	/*
 	 * PASS gate: the ospi0 node BINDS -- ospi0@83000000 binds to
 	 * "snps,designware-ospi" at the fork reg/aes-reg base with IRQ 96 --
-	 * AND alif_hal_ospi_initialize() was called and returned OSPI_ERR_NONE
+	 * AND the driver's own init left the device READY (dev_ready) -- AND
+	 * alif_hal_ospi_initialize() was called and returned OSPI_ERR_NONE
 	 * both from the driver's own init and directly from this app -- AND the
 	 * register file reads back its documented CTRLR0 reset value. XiP setup
 	 * is out of scope for this gate (see the module header SKIP note --
@@ -448,7 +455,7 @@ int main(void)
 	 * select carries); this app makes no device-level transfer either way,
 	 * so its PASS says nothing about whether a NOR/HyperBus part answers.
 	 */
-	if (node_ok && hal_init_ok && ctrlr0_ok) {
+	if (node_ok && dev_ready && hal_init_ok && ctrlr0_ok) {
 		printk("RESULT PASS: OSPI/HexSPI node BINDS -- ospi0@83000000 binds to "
 		       "snps,designware-ospi at the fork reg/aes-reg base with IRQ 96; "
 		       "alif_hal_ospi_initialize() is reachable and links; CTRLR0 reads "
@@ -456,13 +463,15 @@ int main(void)
 		       "no device-level transfer attempted (controller-register proof only)\n");
 	} else {
 		printk("RESULT FAIL: OSPI/HexSPI node NOT staged "
-		       "(bound=%d base_ok=%d irq_ok=%d hal_init_ok=%d ctrlr0_ok=%d -- node "
-		       "missing, disabled, bound to the wrong compatible/reg/irq, the "
+		       "(bound=%d base_ok=%d irq_ok=%d dev_ready=%d hal_init_ok=%d ctrlr0_ok=%d -- node "
+		       "missing, disabled, bound to the wrong compatible/reg/irq, the driver init "
+		       "left the device not ready, the "
 		       "hal_alif init call did not return OSPI_ERR_NONE, or the register "
 		       "file did not read back its reset value)\n",
 		       (int)OSPI_BOUND,
 		       (int)(ospi_base == OSPI_BASE_EXPECTED && ospi_aes_base == OSPI_AES_BASE_EXPECTED),
 		       (int)(ospi_irq == OSPI_IRQ_EXPECTED),
+		       (int)dev_ready,
 		       (int)hal_init_ok,
 		       (int)ctrlr0_ok);
 	}
