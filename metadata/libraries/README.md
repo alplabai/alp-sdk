@@ -56,11 +56,9 @@ headers rather than papered over:
   `8477de124763e4701f8029d01216d6f6b524dde9`. Its Zephyr integration names the
   west module and transcribes the real master symbol from
   `modules/libmicroros/Kconfig`: `CONFIG_MICROROS=y`.
-- `ros2` is **Tier A**: `bitbake alp-image-edge` for `e1m-v2n101-a55` with
-  `meta-ros2-humble` was built on the host (#372) and the image carries `rclcpp` +
-  `alp-perception`. Its wiring is grounded in-tree
+- `ros2` is **Tier B (recipe-only)**: its wiring is grounded in-tree
   (`rclcpp` in `meta-alp-sdk/recipes-images/alp-image-common.inc`,
-  `meta-ros2-humble` as a `LAYERRECOMMENDS`).
+  `meta-ros2-humble` as a `LAYERRECOMMENDS`), but alp-sdk CI does not build it.
   A build adds `meta-ros2-humble` to `bblayers.conf` (`meta-alp-sdk/README.md` step 4b).
 - The **cross-core RMW bridge** (micro-ROS↔ROS 2 over UDP-on-virtio or a custom
   RMW over the existing RPMsg transport, ADR 0016) is **bench-gated** and out of
