@@ -349,6 +349,8 @@ def test_require_block_device_rejects_missing_target(tmp_path) -> None:
 def _fake_host(tmp_path, mountinfo, swaps="Filename Type Size Used Priority\n"):
     """A fake /proc + /sys: sda (sda2 = root), sdb (sdb1), dm-0 on sda3,
     with /sys/dev/block maj:min links like the kernel's."""
+    if os.name == "nt":
+        pytest.skip("sysfs symlink tree: Linux-only check, symlinks need privileges on Windows")
     sysroot = tmp_path / "sys"
     devices = sysroot / "devices"
     cls = sysroot / "class" / "block"
@@ -366,7 +368,7 @@ def _fake_host(tmp_path, mountinfo, swaps="Filename Type Size Used Priority\n"):
     for name, (path, majmin, is_part) in nodes.items():
         path.mkdir(parents=True, exist_ok=True)
         if is_part:
-            (path / "partition").write_text("1\n")
+            (path / "partition").write_text("1\n", encoding="utf-8")
         (cls / name).symlink_to(path)
         (devblk / majmin).symlink_to(path)
     (nodes["dm-0"][0] / "slaves").mkdir()
