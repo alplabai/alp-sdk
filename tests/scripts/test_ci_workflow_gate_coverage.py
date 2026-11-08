@@ -253,3 +253,83 @@ def test_python_smoke_runs_in_the_merge_queue() -> None:
     # merge_group is not in that condition, so its skip reaches `exit 1`.
     assert '= "merge_group"' not in skipped_branch
     assert "exit 1" in skipped_branch
+
+
+def _assert_requireable(
+    name: str,
+    ctx: str,
+    *,
+    not_in_needs: frozenset[str] = frozenset(),
+    skip_on_merge_group: frozenset[str] = frozenset(),
+) -> tuple[dict, str]:
+    """Shared #2972 shape check; returns (jobs, concatenated verdict script)."""
+    data = _load(name)
+    triggers = data.get("on", data.get(True))
+    assert "merge_group" in triggers, f"{name}: no merge_group trigger (#1415)"
+    for t in ("pull_request", "push"):
+        if t in triggers:
+            assert "paths" not in (triggers[t] or {}), f"{name}: {t} must be unfiltered"
+    assert data["concurrency"]["group"].endswith("${{ github.ref }}")
+
+    jobs = data["jobs"]
+    summary = jobs["summary"]
+    assert summary["name"] == ctx
+    assert "${{" not in summary["name"], "required context name must be static"
+    assert summary["if"].replace(" ", "") == "always()"
+    gate_jobs = set(jobs) - {"summary", "detect"}
+    assert set(summary["needs"]) == (gate_jobs - not_in_needs) | {"detect"}
+    # detect carries the path list; real jobs run on merge_group.
+    assert any(
+        s.get("uses", "").startswith("dorny/paths-filter@")
+        for s in jobs["detect"]["steps"]
+    )
+    for job in gate_jobs - skip_on_merge_group:
+        assert "merge_group" in jobs[job]["if"], f"{name}:{job} must run on merge_group"
+    run = " ".join(str(s.get("run", "")) for s in summary["steps"])
+    assert "exit 1" in run and "failure|cancelled" in run
+    return jobs, run
+
+
+def test_generated_files_summary_is_requireable() -> None:
+    _, run = _assert_requireable("pr-generated-files.yml", "generated-files · all")
+    assert '= "merge_group"' not in run  # a merge_group skip is a broken gate
+
+
+def test_doxygen_summary_is_requireable() -> None:
+    _, run = _assert_requireable("pr-doxygen.yml", "doxygen · all")
+    assert '= "merge_group"' not in run
+
+
+def test_tan_build_summary_is_requireable() -> None:
+    _, run = _assert_requireable("pr-tan-build.yml", "tan-build · all")
+    assert '= "merge_group"' not in run
+
+
+def test_plain_cmake_summary_is_requireable() -> None:
+    jobs, run = _assert_requireable(
+        "pr-plain-cmake.yml",
+        "plain-cmake · all",
+        # abidiff is advisory (docs/ci/README.md) and skipped in the queue.
+        not_in_needs=frozenset({"abidiff"}),
+        skip_on_merge_group=frozenset({"abidiff"}),
+    )
+    assert "merge_group" not in run  # a merge_group skip is a broken gate
+    assert "!= 'merge_group'" in jobs["abidiff"]["if"]
+    # queue cost cap: the add_subdirectory consumer runs only its `none` leg
+    assert "merge_group" in jobs["consumer-add-subdirectory"]["strategy"]["matrix"]["som"]
+
+
+def test_abi_snapshot_summary_is_requireable() -> None:
+    jobs, run = _assert_requireable(
+        "pr-abi-snapshot.yml",
+        "abi-snapshot · all",
+        skip_on_merge_group=frozenset({"snapshot-diff"}),
+    )
+    data = _load("pr-abi-snapshot.yml")
+    triggers = data.get("on", data.get(True))
+    # PR trigger keeps its main/release/** branch semantics.
+    assert triggers["pull_request"]["branches"] == ["main", "release/**"]
+    # The diff is PR-only; on merge_group the summary passes explicitly
+    # ("not applicable") rather than hanging or silently skipping.
+    assert "github.event_name == 'pull_request'" in jobs["snapshot-diff"]["if"]
+    assert "not applicable on merge_group" in run

@@ -30,24 +30,65 @@
 
 name: pr-abi-snapshot
 
+# Required-context shape (alp-sdk#2972, same as pr-metadata-validate.yml):
+# `abi-snapshot · all` (the `summary` job) is the context meant to be required on `main` (direct PRs; `dev` has no PR-level ABI gate).
+#   - No `paths:` on the triggers: a path-filtered trigger leaves a required
+#     context "Expected" forever on a PR touching no watched path (#1474).
+#     The path list lives in the `detect` job's filter instead.
+#   - `merge_group:` is present so a queued PR never waits on a context this
+#     workflow cannot raise on a queue ref (#1415).
+#   - The summary name is static; it passes on a legitimate skip and fails on
+#     failure / cancelled / any unexpected skip.
+# The snapshot diff stays PR-to-main/release/** only (informational pre-1.0).
+# On merge_group the workflow reports but does no work: `snapshot-diff` is
+# skipped and the summary passes with an explicit 'not applicable' log line,
+# so a required context can never hang the queue.
 on:
   pull_request:
     branches:
       - main
       - 'release/**'
-    paths:
-      - 'include/alp/**'
-      - 'metadata/sdk_version.yaml'
-      - 'scripts/abi_snapshot.py'
-      - 'docs/abi/**'
-      - '.github/workflows/pr-abi-snapshot.yml'
+  merge_group:
 
 permissions:
   contents: read
   pull-requests: write  # to post the diff as a comment
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Queue refs are unique per entry; never cancel a merge_group run.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
+
 jobs:
+  # Cheap path detector (same shape as cross-platform-zephyr.yml `detect`).
+  # Not a required context. Skipped on merge_group / workflow_dispatch, where
+  # the real jobs always run (see their `if:`).
+  detect:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - name: Detect abi-snapshot-relevant changes
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
+        timeout-minutes: 2
+        with:
+          filters: |
+            relevant:
+            - 'include/alp/**'
+            - 'metadata/sdk_version.yaml'
+            - 'scripts/abi_snapshot.py'
+            - 'docs/abi/**'
+            - '.github/workflows/pr-abi-snapshot.yml'
+
   snapshot-diff:
+    needs: detect
+    # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
+    # path changed. merge_group, workflow_dispatch and any `detect`
+    # non-success run the real job.
+    if: always() && github.event_name == 'pull_request' && (needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     runs-on: ubuntu-latest
     # #1477: worst observed successful run 11s across 3 sampled runs.
     # Raised from the formula's 10min to 15min so the ceiling stays
@@ -148,3 +189,55 @@ jobs:
             # bumped vs main.  Logic lives in this block once the
             # gate flips active.
           fi
+
+  # ---------------------------------------------------------------
+  # THE context to require (#2972). Static name, always runs.
+  # `skipped` is a pass ONLY when detect genuinely ran and found nothing.
+  # ---------------------------------------------------------------
+  summary:
+    name: abi-snapshot · all
+    needs: [detect, snapshot-diff]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Compute verdict from snapshot-diff's + detect's results
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DETECT_RESULT: ${{ needs.detect.result }}
+          DETECT_RELEVANT: ${{ needs.detect.outputs.relevant }}
+          GATE_RESULT: ${{ needs.snapshot-diff.result }}
+        run: |
+          set -euo pipefail
+          echo "event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.relevant=${DETECT_RELEVANT} snapshot-diff.result=${GATE_RESULT}"
+
+          case "${DETECT_RESULT}" in
+            failure|cancelled)
+              echo "::error::detect concluded '${DETECT_RESULT}'"
+              exit 1
+              ;;
+          esac
+
+          case "${GATE_RESULT}" in
+            success)
+              echo "PASS: snapshot-diff ran and succeeded"
+              exit 0
+              ;;
+            skipped)
+              if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ]; } \
+                 && [ "${DETECT_RESULT}" = "success" ] && [ "${DETECT_RELEVANT}" != "true" ]; then
+                echo "PASS: snapshot-diff legitimately skipped -- detect ran, succeeded, and found no watched path changed"
+                exit 0
+              fi
+              if [ "${EVENT_NAME}" = "merge_group" ]; then
+                echo "PASS: snapshot-diff is not applicable on merge_group (PR-to-main gate); nothing to grade"
+                exit 0
+              fi
+              echo "::error::snapshot-diff reported 'skipped' but event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.relevant=${DETECT_RELEVANT} does not match the one legitimate-skip condition -- treating this as a broken gate, not a pass"
+              exit 1
+              ;;
+            *)
+              echo "::error::snapshot-diff concluded '${GATE_RESULT}'"
+              exit 1
+              ;;
+          esac
