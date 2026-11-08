@@ -465,7 +465,7 @@ a55_only_resources:
     evidence: "V2M only. Released by U-Boot board_late_init() only after the DA9292 CH2 rail is power-good (0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch); e1m-v2m-deepx.dtsi:69-73 documents that Linux must not hog it. Audit PCIE-4"
   - resource: "USB (hsusb / usb3 phy)"
     core: "a55"
-    evidence: "Linux devicetree enables &hsusb, &usb2_phy0, &usb3_phy0 (e1m-x-evk.dtsi:731-781); no FSP USB module in the Renesas rzv tree (audit XSPI-2, OWN-1)"
+    evidence: "Linux devicetree enables &hsusb, &usb2_phy0, &usb3_phy, &xhci (e1m-x-evk.dtsi:752-805); no FSP USB module in the Renesas rzv tree (audit XSPI-2, OWN-1)"
   - resource: "PCIe0"
     core: "a55"
     evidence: "Linux node &pcie0 (disabled on V2N, e1m-v2n101-x-evk.dts:32; enabled for the DX-M1 on V2M, e1m-v2m-deepx.dtsi:36); no FSP PCIe module in the Renesas rzv tree (audit XSPI-2, OWN-1)"

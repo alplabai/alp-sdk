@@ -504,7 +504,7 @@ The **Linux** side lives entirely in `meta-alp-sdk` (the Zephyr/M33
 side has no Wi-Fi role):
 
 * `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi` --
-  `&sdhi2` (WLAN, `mmc-pwrseq-simple` on line 19), `&sci4` (BT,
+  `&sdhi2` (WLAN, `mmc-pwrseq-simple` on line 19), `&rsci4` (BT,
   `infineon,cyw55572-bt` `shutdown-gpios` on line 18), the `sd2_wlan_pins` /
   `sci4_bt_pins` pinctrl groups.
 * `meta-alp-sdk/recipes-kernel/linux/linux-renesas/wifi-bt.cfg` --
@@ -573,7 +573,7 @@ IP blocks (the RZ/V2N has both):
 | Linux node | Block | Device | Role |
 |------------|-------|--------|------|
 | `&scif` (alias `serial0`) | SCIF | `/dev/ttySC0` | console |
-| `&sci4` (alias `serial4`) | RSCI4 | `/dev/ttySC4` | on-module Bluetooth HCI |
+| `&rsci4` (alias `serial4`) | RSCI4 | `/dev/ttySC4` | on-module Bluetooth HCI |
 
 `alp_uart_open()` reaches `/dev/ttySC<N>` with `port_id = 300 + N`
 (300..399). Both ports above are owned by the kernel (console, BT), so do not

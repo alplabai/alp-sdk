@@ -30,8 +30,8 @@ native leg would have to target: 16× 32-bit GPT timers
 (`:74`), 8× GTM 32-bit timers (`:75`), and 24× 12-bit ADC channels
 (`:71`). None of it is wired to an E1M-standard analog or counter
 pad (see below). The only GPT instance in use anywhere in the tree
-is `gpt1_2`, driving the LCD backlight PWM on the Linux side
-(`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi:125-157`)
+is `&gpt1` pwm index 5, driving the LCD backlight PWM on the Linux side
+(`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi:211-243`)
 — a board-specific, non-portable use, not an E1M peripheral.
 
 ## Decision
@@ -196,7 +196,7 @@ grounds:
    connector pad fails silently instead of loudly.
 
 **Exposing the SoC's own GPT/ADC as a natural-name or Linux-side
-surface** for on-module timing needs, as `gpt1_2` already is for the
+surface** for on-module timing needs, as `&gpt1` pwm index 5 already is for the
 backlight. Compatible with this decision — it lives outside
 `<alp/*>`, needs no priority mechanism, and makes no portability
 claim. Recorded here as **available later without revisiting this
