@@ -394,6 +394,38 @@ void test_concurrent_invokes_are_serialised()
 	drpai_test::g_device_present = false;
 }
 
+/* Test 2i (#2980): Run() is void, so invoke() asks the driver for the job
+ * result.  Idle/no error is ALP_OK; a job still in RUN is ALP_ERR_TIMEOUT; a
+ * DRP/AIMAC error or a failed status query is ALP_ERR_IO. */
+void test_invoke_reports_driver_job_status()
+{
+	fake_device(64 * kMiB);
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   a   = {};
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_OK);
+
+	drpai_test::g_status_state       = 2; /* DRPAI_STATUS_RUN */
+	drpai_test::g_status_ioctl_errno = EBUSY;
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_ERR_TIMEOUT);
+
+	drpai_test::g_status_state       = 1;  /* DRPAI_STATUS_IDLE */
+	drpai_test::g_status_err         = -1; /* DRPAI_ERRINFO_DRP_ERR */
+	drpai_test::g_status_ioctl_errno = EIO;
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_ERR_IO);
+
+	drpai_test::g_status_err         = 0; /* DRPAI_ERRINFO_SUCCESS */
+	drpai_test::g_status_ioctl_errno = ENOTTY;
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_ERR_IO);
+
+	drpai_test::g_status_ioctl_errno = 0;
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_OK);
+
+	alp_inference_drpai_close(&a);
+	drpai_test::g_device_present = false;
+}
+
 /* Test 2h: open() and close() of one handle wait for another handle's job:
  * the model load and the runtime teardown touch the device, which runs one
  * job at a time.  A job is held open on handle A; B is opened and C closed
@@ -516,6 +548,7 @@ int main(void)
 	test_area_change_with_live_handle_is_refused();
 	test_concurrent_invokes_are_serialised();
 	test_open_and_close_wait_for_a_running_job();
+	test_invoke_reports_driver_job_status();
 	test_one_drpai_process_per_board();
 	test_unopenable_lock_fails_open();
 	test_num_inputs_outputs_zero_when_not_open();

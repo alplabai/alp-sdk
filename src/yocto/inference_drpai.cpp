@@ -270,6 +270,44 @@ alp_status_t _drpai_mem_start(uint64_t &out, uint64_t &out_size)
 	return ALP_OK;
 }
 
+/** Report whether the job the runtime just ran succeeded.
+ *
+ *  MeraDrpRuntimeWrapper::Run() is void, so a rejected or timed-out
+ *  DRPAI_START is otherwise invisible.  The driver keeps the job result in
+ *  device-global state (priv->drpai_status), not per fd, and DRPAI_GET_STATUS
+ *  reads it.  The runtime still holds its own fd here, so this extra open()
+ *  only takes the driver semaphore (<= 1000 ms) briefly: the first-open
+ *  re-init (which would clear the result) runs only when no fd is open.
+ *
+ *  @return ALP_OK; ALP_ERR_TIMEOUT when the job is still RUN or the status
+ *          open/ioctl timed out; ALP_ERR_IO for a DRP/AIMAC error, reset or
+ *          suspend, or any other failure of the query itself. */
+alp_status_t _drpai_job_status()
+{
+	const int fd = ::open(kDrpAiDevice, O_RDWR | O_CLOEXEC);
+	if (fd < 0) {
+		return _drpai_errno_to_status(errno);
+	}
+
+	drpai_status_t st = {};
+	const int      rc = ::ioctl(fd, DRPAI_GET_STATUS, &st);
+	const int      e  = errno;
+	::close(fd);
+
+	/* The driver fills @st even when it fails the call (-EBUSY while RUN,
+	 * -EIO on a hardware error, -EAGAIN after suspend). */
+	if (st.status == DRPAI_STATUS_RUN) {
+		return ALP_ERR_TIMEOUT;
+	}
+	if (st.err != DRPAI_ERRINFO_SUCCESS) {
+		return ALP_ERR_IO;
+	}
+	if (rc != 0) {
+		return _drpai_errno_to_status(e);
+	}
+	return ALP_OK;
+}
+
 /** Recursively remove a staging directory created by _stage_drpai_blob().
  *  No-op on an empty path.  Best-effort: the path is always an mkdtemp()
  *  result, so there is no untrusted input in the command. */
@@ -708,16 +746,10 @@ extern "C" alp_status_t alp_inference_drpai_invoke(struct alp_inference *h_)
 		}
 	}
 
-	/* Run() is void and blocks until DRP-AI completes; it reports
-     * hard faults via its own logging/abort path, not a return code.
-	 * A failed job therefore CANNOT be detected here: this returns ALP_OK
-	 * even if the driver rejected DRPAI_START or timed out.  A driver status
-	 * query is not a cheap fix -- it needs another open() of /dev/drpai0,
-	 * which takes the driver semaphore (up to 1000 ms) and the shared-memory
-	 * lock and can itself fail -- so none is made.  Callers must sanity-check
-	 * outputs (see <alp/inference.h> and docs/bring-up-drpai-v2n.md). */
+	/* Run() is void and blocks until DRP-AI completes; a rejected or
+	 * timed-out DRPAI_START is not reported by it, so ask the driver. */
 	st->runtime.Run();
-	return ALP_OK;
+	return _drpai_job_status();
 }
 
 extern "C" void alp_inference_drpai_close(struct alp_inference *h_)

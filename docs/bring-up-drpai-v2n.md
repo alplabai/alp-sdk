@@ -571,11 +571,13 @@ driver has no queue (a second `DRPAI_START` while a job runs returns
   and the runtime teardown in `close()`, so threads on different handles
   wait their turn instead of colliding on the driver. Two models on DRP-AI
   therefore cost the sum of their latencies.
-- **A failed job is not reported.** The runtime's `Run()` returns void,
-  so a rejected or timed-out job still returns `ALP_OK`. A driver status
-  query is not a cheap fix (it needs a second open of `/dev/drpai0`,
-  which takes the driver semaphore for up to 1000 ms and the
-  shared-memory lock), so the SDK makes none; sanity-check the outputs.
+- **A failed job is reported after `Run()`.** The runtime's `Run()`
+  returns void, so `alp_inference_invoke()` asks the driver
+  (`DRPAI_GET_STATUS` on a second open of `/dev/drpai0`; the runtime's own
+  fd keeps the NPU initialised, so the extra open only takes the driver
+  semaphore, up to 1000 ms). A job still in RUN or a status query that
+  times out returns `ALP_ERR_TIMEOUT`; a DRP/AIMAC error, reset, suspend or
+  failed query returns `ALP_ERR_IO`.
 - **DRP-AI is one process per board.** The arena placement above is per
   process, so two processes would both load at the arena base and corrupt
   each other. The first DRP-AI handle in a process therefore takes an

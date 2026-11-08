@@ -1,0 +1,3 @@
+### Changed — DRP-AI `alp_inference_invoke()` reports a failed job (#2980)
+
+**`alp_inference_invoke()` on the DRP-AI3 backend now returns `ALP_ERR_TIMEOUT` or `ALP_ERR_IO` when the job failed, instead of always returning `ALP_OK`.** The vendor runtime's `Run()` is void, so after it returns the backend reads `DRPAI_GET_STATUS` on one extra open of `/dev/drpai0` (the runtime's own fd keeps the NPU initialised, so the open only takes the driver semaphore, up to 1000 ms): a job still in RUN maps to `ALP_ERR_TIMEOUT`, a DRP/AIMAC error, reset, suspend or a failed query to `ALP_ERR_IO`. Callers that ignored the return value now see the failure; the host regression test `alp_test_inference_drpai_regression` covers each mapping.

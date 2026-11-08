@@ -33,7 +33,18 @@ typedef struct drpai_data {
 	unsigned long size;
 } drpai_data_t;
 
-#define DRPAI_GET_DRPAI_AREA 0x4010c401UL
+typedef struct drpai_status {
+	unsigned int status;
+	int          err;
+	unsigned int reserved[32];
+} drpai_status_t;
+
+#define DRPAI_GET_DRPAI_AREA  0x4010c401UL
+#define DRPAI_GET_STATUS      0x8088c403UL
+#define DRPAI_STATUS_IDLE     (1)
+#define DRPAI_STATUS_RUN      (2)
+#define DRPAI_ERRINFO_SUCCESS (0)
+#define DRPAI_ERRINFO_DRP_ERR (-1)
 
 /* inference_drpai.cpp reaches the device with `::open("/dev/drpai0")` and
  * `::ioctl()`.  Route both to the fakes below for the file that includes
@@ -50,9 +61,20 @@ inline int alp_fake_drpai_open(const char *path, int flags)
 	return ::open("/dev/null", flags);
 }
 
-inline int alp_fake_drpai_ioctl(int fd, unsigned long req, drpai_data_t *area)
+inline int alp_fake_drpai_ioctl(int fd, unsigned long req, void *arg)
 {
 	(void)fd;
+	if (req == DRPAI_GET_STATUS) {
+		auto *st   = static_cast<drpai_status_t *>(arg);
+		st->status = drpai_test::g_status_state;
+		st->err    = drpai_test::g_status_err;
+		if (drpai_test::g_status_ioctl_errno != 0) {
+			errno = drpai_test::g_status_ioctl_errno;
+			return -1;
+		}
+		return 0;
+	}
+	auto *area = static_cast<drpai_data_t *>(arg);
 	if (req != DRPAI_GET_DRPAI_AREA) {
 		errno = ENOTTY;
 		return -1;
