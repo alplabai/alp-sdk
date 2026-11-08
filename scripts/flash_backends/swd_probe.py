@@ -42,6 +42,11 @@ flash_args contract:
                      but don't assume one backend's `jlink_device` describes
                      what the other would do with it.
   jlink_speed  int?  SWD speed in kHz (default 4000).
+  jlink_serial str   J-Link probe serial number (or env ALP_JLINK_SERIAL).
+                     REQUIRED on the J-Link path: shared benches hold several
+                     probes (some with a cloned OEM serial), and without
+                     `-SelectEmuBySN` J-Link attaches to whichever enumerates
+                     first and would program another board.  Digits only.
 """
 
 from __future__ import annotations
@@ -204,7 +209,11 @@ def _jlink_commander_script(
             f"swd_probe: artefact path {path!r} contains a double quote "
             f"-- refusing to build a J-Link script from it."
         )
-    lines = ["r", "halt"]
+    # `exec DisableAutoUpdateFW` must run BEFORE `connect`: Commander opens
+    # the probe lazily, and a firmware-update write to a cloned probe is
+    # unrecoverable (same guard as provision/bench.py JLinkProbe).  So no
+    # `-AutoConnect` on the command line; `connect` is explicit here.
+    lines = ["exec DisableAutoUpdateFW", "connect", "r", "halt"]
     if artefact.suffix.lower() == ".bin":
         lines.append(f"loadbin {quoted_path}, {base}")
     else:
@@ -213,6 +222,36 @@ def _jlink_commander_script(
         lines += ["r", "g"]
     lines.append("qc")
     return "\n".join(lines) + "\n", None
+
+
+# J-Link exits 0 even when it never opened the probe, so success is decided
+# from the transcript as well as the exit code (as provision/bench.py does).
+_JLINK_FAIL_RE = re.compile(
+    r"(?i)\berror\b|cannot connect|could not|failed")
+_JLINK_OK_RE = re.compile(r"(?i)O\.K\.")
+
+
+def _jlink_transcript_error(output: str) -> "str | None":
+    """Return a reason when the J-Link transcript does not show a clean flash."""
+    m = _JLINK_FAIL_RE.search(output)
+    if m:
+        return f"transcript reports {m.group(0)!r}"
+    if not _JLINK_OK_RE.search(output):
+        return "transcript has no 'O.K.' programming confirmation"
+    return None
+
+
+def _jlink_serial(fa: dict) -> "tuple[str | None, str | None]":
+    raw = str(fa.get("jlink_serial") or os.environ.get("ALP_JLINK_SERIAL") or "")
+    if not raw:
+        return None, (
+            "swd_probe: no J-Link probe selected -- set flash_args.jlink_serial "
+            "or ALP_JLINK_SERIAL (several probes on one host would otherwise "
+            "make J-Link flash whichever enumerates first).")
+    if not re.fullmatch(r"[0-9]{1,12}", raw):
+        return None, (
+            f"swd_probe: J-Link serial {raw!r} must be 1-12 decimal digits.")
+    return raw, None
 
 
 def _which_jlink() -> "str | None":
@@ -252,10 +291,15 @@ class SwdProbeFlash:
                 return FlashResult(
                     ok=False, elapsed_s=time.monotonic() - start,
                     message=script_err)
+            serial, serial_err = _jlink_serial(fa)
+            if serial_err:
+                return FlashResult(
+                    ok=False, elapsed_s=time.monotonic() - start,
+                    message=serial_err)
             base_cmd = [
-                jlink, "-device", device, "-if", "SWD", "-speed", speed,
-                "-AutoConnect", "1", "-ExitOnError", "1", "-NoGui", "1",
-                "-CommanderScript",
+                jlink, "-SelectEmuBySN", serial, "-device", device,
+                "-if", "SWD", "-speed", speed, "-ExitOnError", "1",
+                "-NoGui", "1", "-CommanderScript",
             ]
             if ctx.dry_run:
                 cmd = base_cmd + ["<generated.jlink>"]
@@ -290,6 +334,15 @@ class SwdProbeFlash:
                 except OSError:                      # pragma: no cover
                     pass
             elapsed = time.monotonic() - start
+            transcript = (proc.stdout or "") + "\n" + (proc.stderr or "")
+            bad = (_jlink_transcript_error(transcript)
+                   if proc.returncode == 0 else None)
+            if bad:
+                return FlashResult(
+                    ok=False, elapsed_s=elapsed,
+                    message=(f"swd_probe[{ctx.core_id}]: J-Link exited rc=0 "
+                             f"but {bad} -- not reporting a flash"),
+                    command=cmd)
             if proc.returncode == 0:
                 return FlashResult(
                     ok=True, elapsed_s=elapsed,
