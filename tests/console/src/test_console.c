@@ -7,6 +7,7 @@
 #include <zephyr/shell/shell_dummy.h>
 #include <string.h>
 
+#include <alp/peripheral.h>
 #include <alp/version.h> /* ALP_VERSION_STRING -- the single SDK-version source */
 
 /* Run a shell line on the dummy backend and return its captured output. */
@@ -62,12 +63,37 @@ ZTEST(alp_console, test_mem_wr_then_rd_roundtrips)
 
 ZTEST(alp_console, test_gpio_read_runs)
 {
+	/* `alp gpio read` only samples pins that are already inputs (#2933). */
+	alp_gpio_t *g = alp_gpio_open(0);
+
+	zassert_not_null(g, "open pin 0");
+	zassert_equal(alp_gpio_configure(g, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE), ALP_OK, "cfg");
+	alp_gpio_close(g);
+
+	/* The gpio-emul reset level is low = 0. */
 	const char *out = run("alp gpio read 0");
 
-	/* On native_sim pin 0 of the emulated gpio_emul0 reads back a
-	 * defined level (the gpio-emul reset default is low = 0).
-	 * Assert the command resolved and printed a level, not an error. */
 	zassert_true(strstr(out, "= 0") || strstr(out, "= 1"), "got: %s", out);
+}
+
+ZTEST(alp_console, test_gpio_read_refuses_output_pin)
+{
+	alp_gpio_t *g = alp_gpio_open(1);
+
+	zassert_not_null(g, "open pin 1");
+	zassert_equal(alp_gpio_configure(g, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE), ALP_OK, "cfg");
+	zassert_equal(alp_gpio_write(g, true), ALP_OK, "drive high");
+	alp_gpio_close(g);
+
+	const char *out = run("alp gpio read 1");
+
+	zassert_not_null(strstr(out, "not configured as an input"), "got: %s", out);
+	zassert_is_null(strstr(out, "pin 1 ="), "must not print a level: %s", out);
+
+	/* The refused read must not have turned the output into an input: a
+	 * second read is still refused. */
+	out = run("alp gpio read 1");
+	zassert_not_null(strstr(out, "not configured as an input"), "pin was reconfigured: %s", out);
 }
 
 ZTEST(alp_console, test_i2c_scan_runs)

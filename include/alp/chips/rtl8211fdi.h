@@ -12,6 +12,10 @@
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
  *
+ * The driver covers the whole RTL8211F(D)(I)-VD-CG family (same register
+ * map), including the RTL8211FI-VD-CG that DS-V2N-001 / DS-V2N-M1-001 list
+ * as the fitted part; the `rtl8211fdi` name is kept for all of them.
+ *
  * The V2N module populates **two** RTL8211FDI-VD-CG PHYs (ET0 + ET1)
  * sitting behind the Renesas RZ/V2N RGMII MAC.  Each PHY exposes:
  *

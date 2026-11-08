@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Sun, 8 Nov 2026 13:32:31 +0000
+Subject: [PATCH] drp: re-initialise on resume only when the hardware was
+ running
+
+drp_resume_noirq() calls drp_init_device() whenever the shared DRP-AI
+hardware is inactive, including when /dev/drp1 was never opened.
+open() powers the block up first (drp_drp_cpg_init()); resume does
+not, so on a system where nothing has used the DRP since boot the
+first register access in R_DRP_DRP_Open() hits a block whose CPG is
+off and an asynchronous SError panics the resume.
+
+Remember in drp_suspend_noirq() whether the hardware was running and
+stopped, and skip the hardware re-initialisation (and the active-status
+record) on resume when it was not.  The software state restore -- status,
+IRQ-check flag and the waitqueue wake -- still runs every time, so a
+poller woken by the resume never waits on an IRQ that cannot come;
+the next open() then brings the block up the same way it does after
+boot.
+
+Upstream-Status: Inappropriate [Renesas BSP driver added by meta-rz-codecs / meta-rz-opencva, not upstream]
+---
+ drivers/drp/drp-if.c | 26 ++++++++++++++++++++++----
+ 1 file changed, 22 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/drp/drp-if.c b/drivers/drp/drp-if.c
+index abf0e83..327bad1 100644
+--- a/drivers/drp/drp-if.c
++++ b/drivers/drp/drp-if.c
+@@ -2575,6 +2575,14 @@ static int drp_flag_test( unsigned int num )
+ }
+ #endif
+ 
++/*
++ * Whether drp_suspend_noirq() found the DRP hardware running and stopped it.
++ * drp_resume_noirq() re-initialises the hardware only in that case: when the
++ * DRP was never opened, its CPG is still off, and the register writes in
++ * drp_init_device() raise an asynchronous SError that panics the resume.
++ */
++static bool drp_hw_active_at_suspend;
++
+ static int drp_suspend_noirq(struct device *dev)
+ {
+     int result = 0;
+@@ -2630,11 +2638,13 @@ static int drp_suspend_noirq(struct device *dev)
+     }
+ 
+     dev_info(dev, "suspend: The stopping process has been executed.");
++    drp_hw_active_at_suspend = true;
+ #ifdef ENABLE_DRP_SUPPORT_SHARED_MEMORY
+     }
+     else
+     {
+         dev_info(dev, "suspend: The stopping process was skipped because the DRP was already stopped.");
++        drp_hw_active_at_suspend = false;
+     }
+ #endif
+ 
+@@ -2710,7 +2720,12 @@ static int drp_resume_noirq(struct device *dev)
+         goto end;
+     }
+ 
+-    if(-1 == R_DRP_IsDrpaiHwStatusActive(drp_shared_exclusion))
++    if(!drp_hw_active_at_suspend)
++    {
++        /* Not running before suspend: leave it stopped, the next open() powers it up. */
++        dev_info(dev, "resume: The initialization process was skipped because the DRP was stopped at suspend.");
++    }
++    else if(-1 == R_DRP_IsDrpaiHwStatusActive(drp_shared_exclusion))
+     {
+         /* The DRP-AI is initialised only when DRP-AI is stopped. */
+ #endif
+@@ -2728,9 +2743,12 @@ static int drp_resume_noirq(struct device *dev)
+ 
+     // Update internal state
+ #ifdef ENABLE_DRP_SUPPORT_SHARED_MEMORY
+-    R_DRP_RecordDrpaiActiveStatus(drp_shared_exclusion,
+-                                  &shared_mem_lock,
+-                                  PROCESS_CONTEXT);
++    if(drp_hw_active_at_suspend)
++    {
++        R_DRP_RecordDrpaiActiveStatus(drp_shared_exclusion,
++                                      &shared_mem_lock,
++                                      PROCESS_CONTEXT);
++    }
+ #endif
+     spin_lock_irqsave(&priv->lock, flags);
+     priv->drp_status.status = DRP_STATUS_IDLE;

@@ -21,7 +21,10 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
-from check_i2c_address_uniqueness import find_problems  # noqa: E402
+from check_i2c_address_uniqueness import (  # noqa: E402
+    find_carrier_som_problems,
+    find_problems,
+)
 
 
 def _seed(root: Path, relpath: str, body: str) -> None:
@@ -414,3 +417,54 @@ def test_unassembled_codec_contributes_no_broadcast(tmp_path: Path) -> None:
         """,
     )
     assert find_problems(tmp_path) == []
+
+
+_SOM_WITH_EEPROM = """\
+    family: fake-family
+    on_module:
+      i2c_devices:
+        e1m_i2c0:
+          devices:
+            - { chip: eeprom_24c128, role: eeprom, address_7bit: "0x50" }
+    """
+
+
+def _carrier(bus: str, part: str, extra: str = "", family: str = "fake-family") -> str:
+    return (
+        f"hosts_som_families: [{family}]\n"
+        f"i2c_devices_bus: {bus}\n"
+        "i2c_devices:\n"
+        f'  - {{ macro: FAKE_I2C_ADDR_X, part: {part}, address: "0x50"{extra} }}\n'
+    )
+
+
+def test_carrier_part_on_som_eeprom_address_fails(tmp_path: Path) -> None:
+    """A carrier part strapped onto the module EEPROM's 0x50 on the same
+    physical bus is a collision no single-file check can see (#2990)."""
+    _seed(tmp_path, "metadata/e1m_modules/E1M-FAKE.yaml", _SOM_WITH_EEPROM)
+    _seed(tmp_path, "metadata/boards/fake-evk.yaml", _carrier("E1M_I2C0", "ina236"))
+    assert find_problems(tmp_path) == []
+    problems = find_carrier_som_problems(tmp_path)
+    assert len(problems) == 1
+    assert "0x50" in problems[0] and "E1M-FAKE" in problems[0]
+
+
+def test_carrier_x_bus_maps_to_som_e1m_bus(tmp_path: Path) -> None:
+    _seed(tmp_path, "metadata/e1m_modules/E1M-FAKE.yaml", _SOM_WITH_EEPROM)
+    _seed(tmp_path, "metadata/boards/fake-x-evk.yaml", _carrier("E1M_X_I2C0", "ina236"))
+    assert len(find_carrier_som_problems(tmp_path)) == 1
+
+
+def test_carrier_mirror_of_som_part_is_not_a_collision(tmp_path: Path) -> None:
+    _seed(tmp_path, "metadata/e1m_modules/E1M-FAKE.yaml", _SOM_WITH_EEPROM)
+    _seed(tmp_path, "metadata/boards/fake-evk.yaml", _carrier("E1M_I2C0", "eeprom_24c128"))
+    assert find_carrier_som_problems(tmp_path) == []
+
+
+def test_carrier_other_family_or_unassembled_not_joined(tmp_path: Path) -> None:
+    _seed(tmp_path, "metadata/e1m_modules/E1M-FAKE.yaml", _SOM_WITH_EEPROM)
+    _seed(tmp_path, "metadata/boards/other-evk.yaml",
+          _carrier("E1M_I2C0", "ina236", family="some-other-family"))
+    _seed(tmp_path, "metadata/boards/dnp-evk.yaml",
+          _carrier("E1M_I2C0", "ina236", extra=", assembled: false"))
+    assert find_carrier_som_problems(tmp_path) == []

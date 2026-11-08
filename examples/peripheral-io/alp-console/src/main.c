@@ -42,7 +42,9 @@
  *   - opens the WIFI_EN + nRESET Alif LP-GPIO control pins
  *   - binds them to the cc3501e_t handle
  *   - attaches the GPIO proxy (when CONFIG_ALP_SDK_GPIO_CC3501E_PROXY=y)
- *   - runs the TI SWRU626 power + reset sequence (blocks ~900 ms)
+ *   - resets the chip warm-aware (nRESET only if WIFI_EN is high and PING
+ *     answers, else the TI SWRU626 power sequence, ~900 ms) and returns an
+ *     error if the chip never answers
  *
  * After a successful bring-up, alp_console_companion_set() hands the
  * handle to the console so `alp companion ver` / `alp companion ping`
@@ -81,8 +83,10 @@ static void bind_companion(void)
 	 * cc3501e_bridge_bringup() is silicon-validated on the E1M-AEN801
 	 * (see the aen-cc3501e-bringup bench log).  It opens the inter-chip
 	 * SPI (hardware-SS0, mode 0, 1 MHz) + the WIFI_EN / nRESET LP-GPIO
-	 * pads, then runs the Puya cold-boot hard-reset + TI SWRU626
-	 * power sequence.  The bus_id, pin indices, and SPI frequency are
+	 * pads, then resets the chip warm-aware: nRESET only when WIFI_EN
+	 * is already high and the chip answers a PING, the Puya cold-boot
+	 * + TI SWRU626 power sequence only from WIFI_EN low or a silent
+	 * chip.  A chip that never answers returns an error.  The bus_id, pin indices, and SPI frequency are
 	 * the E1M-AEN SoM defaults from cc3501e_bridge.h -- override them
 	 * per board variant without touching this file.
 	 */

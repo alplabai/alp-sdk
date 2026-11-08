@@ -186,6 +186,10 @@ static int rz_spi_b_configure(const struct device *dev, const struct spi_config 
 	return 0;
 }
 
+/* Bound on every polled wait: a clock-gated or wedged RSPI must fail the transfer, not hang
+ * the calling thread. */
+#define RZ_SPI_B_POLL_TIMEOUT_US 100000
+
 static bool rz_spi_b_transfer_ongoing(struct rz_spi_b_data *data)
 {
 	return (spi_context_tx_on(&data->ctx) || spi_context_rx_on(&data->ctx));
@@ -258,7 +262,8 @@ static int rz_spi_b_transceive_master(struct rz_spi_b_data *data)
 		tx = 0U;
 	}
 
-	while (!p_spi_reg->SPSR_b.SPTEF) {
+	if (!WAIT_FOR(p_spi_reg->SPSR_b.SPTEF, RZ_SPI_B_POLL_TIMEOUT_US, k_busy_wait(1))) {
+		return -ETIMEDOUT;
 	}
 	p_spi_reg->SPDR = tx;
 
@@ -267,7 +272,8 @@ static int rz_spi_b_transceive_master(struct rz_spi_b_data *data)
 	spi_context_update_tx(&data->ctx, data->dfs, 1);
 
 	if (p_spi_reg->SPCR_b.TXMD == 0x0) {
-		while (!p_spi_reg->SPSR_b.SPRF) {
+		if (!WAIT_FOR(p_spi_reg->SPSR_b.SPRF, RZ_SPI_B_POLL_TIMEOUT_US, k_busy_wait(1))) {
+			return -ETIMEDOUT;
 		}
 		rx = p_spi_reg->SPDR;
 		/* Clear Receive Full flag */
@@ -294,12 +300,10 @@ static int rz_spi_b_transceive_data(struct rz_spi_b_data *data)
 	uint16_t operation = data->ctx.config->operation;
 
 	if (SPI_OP_MODE_GET(operation) == SPI_OP_MODE_MASTER) {
-		rz_spi_b_transceive_master(data);
-	} else {
-		rz_spi_b_transceive_slave(data);
+		return rz_spi_b_transceive_master(data);
 	}
 
-	return 0;
+	return rz_spi_b_transceive_slave(data);
 }
 #endif /* !CONFIG_SPI_RENESAS_RZ_SPI_B_INTERRUPT */
 
@@ -330,12 +334,12 @@ static int transceive(const struct device *dev, const struct spi_config *config,
 	/* Set buffers info */
 	spi_context_buffers_setup(&data->ctx, tx_bufs, rx_bufs, data->dfs);
 
-	spi_context_cs_control(&data->ctx, true);
-
 	if ((!spi_context_tx_buf_on(&data->ctx)) && (!spi_context_rx_buf_on(&data->ctx))) {
-		/* If current buffer has no data, do nothing */
+		/* If current buffer has no data, do nothing (CS was never asserted) */
 		goto end;
 	}
+
+	spi_context_cs_control(&data->ctx, true);
 
 #ifdef CONFIG_SPI_RENESAS_RZ_SPI_B_INTERRUPT
 	spi_bit_width_t spi_width =
@@ -382,11 +386,13 @@ static int transceive(const struct device *dev, const struct spi_config *config,
 	p_spi_reg->SPCMD0 |= (uint32_t)(SPI_WORD_SIZE_GET(data->ctx.config->operation) - 1)
 			     << R_SPI_B0_SPCMD0_SPB_Pos;
 	do {
-		rz_spi_b_transceive_data(data);
-	} while (rz_spi_b_transfer_ongoing(data));
+		ret = rz_spi_b_transceive_data(data);
+	} while (ret == 0 && rz_spi_b_transfer_ongoing(data));
 
 	/* Wait for transmission complete */
-	while (p_spi_reg->SPSR_b.IDLNF) {
+	if (ret == 0 && !WAIT_FOR(!p_spi_reg->SPSR_b.IDLNF, RZ_SPI_B_POLL_TIMEOUT_US,
+				  k_busy_wait(1))) {
+		ret = -ETIMEDOUT;
 	}
 
 	/* Disable the SPI Transfer. */

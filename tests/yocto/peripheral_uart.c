@@ -212,7 +212,7 @@ static void test_read_fd_returns_ok_when_all_bytes_already_available(void)
 	close(sv[1]);
 }
 
-static void test_read_fd_partial_arrival_returns_ok_with_what_arrived(void)
+static void test_read_fd_partial_arrival_returns_timeout(void)
 {
 	int sv[2];
 	ALP_ASSERT_EQ_INT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
@@ -220,13 +220,12 @@ static void test_read_fd_partial_arrival_returns_ok_with_what_arrived(void)
 	const uint8_t tx[2] = { 0xAA, 0xBB };
 	ALP_ASSERT_EQ_INT(write(sv[1], tx, sizeof(tx)), (ssize_t)sizeof(tx));
 
-	/* Ask for 4, only 2 ever arrive -- must time out with the partial
-     * bytes delivered rather than block waiting for the rest. */
+	/* Ask for 4, only 2 ever arrive -- must time out (ALP_OK means all
+     * len bytes, issue #2934) rather than block waiting for the rest. */
 	uint8_t      rx[4] = { 0 };
 	alp_status_t rc    = alp_uart_read_fd_bounded(sv[0], rx, sizeof(rx), 60u);
 
-	ALP_ASSERT_EQ_INT(rc, ALP_OK);
-	ALP_ASSERT_TRUE(memcmp(rx, tx, sizeof(tx)) == 0);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_TIMEOUT);
 
 	close(sv[0]);
 	close(sv[1]);
@@ -275,8 +274,7 @@ static void test_read_fd_deadline_covers_whole_call_not_just_inter_byte_gap(void
 	alp_status_t rc      = alp_uart_read_fd_bounded(sv[0], rx, sizeof(rx), 120u);
 	int64_t      elapsed = now_ms() - t0;
 
-	ALP_ASSERT_EQ_INT(rc, ALP_OK); /* one byte collected before the deadline */
-	ALP_ASSERT_EQ_INT(rx[0], first);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_TIMEOUT); /* one of two bytes by the deadline */
 	/* Bounded near the requested 120 ms, nowhere near the 300 ms it
      * would take for the old per-byte-timer scheme to give up. */
 	ALP_ASSERT_TRUE(elapsed >= 90 && elapsed < 250);
@@ -350,7 +348,7 @@ int main(void)
 	test_read_fd_no_data_times_out_instead_of_blocking_forever();
 	test_read_fd_zero_timeout_is_a_single_nonblocking_poll();
 	test_read_fd_returns_ok_when_all_bytes_already_available();
-	test_read_fd_partial_arrival_returns_ok_with_what_arrived();
+	test_read_fd_partial_arrival_returns_timeout();
 	test_read_fd_deadline_covers_whole_call_not_just_inter_byte_gap();
 	test_read_fd_eintr_does_not_reset_or_extend_the_deadline();
 

@@ -37,9 +37,8 @@ declarative blocks. The relevant fragments of `board.yaml`:
 ```yaml
 boot:
   method: mcuboot
-  signing:
-    algorithm: ecdsa_p256
-    key_file:  keys/mcuboot_shared_dev_ecdsa_p256.pem
+  # signing: intentionally omitted -- the SDK-anchored default dev key
+  # `keys/mcuboot_shared_dev_ecdsa_p256.pem` applies (ECDSA-P256).
   # swap_algorithm: intentionally omitted -- E1M-AEN801's disjoint-slot0
   # `memory_map:` (#1069, #1413) has no slot1/scratch partition, so the
   # per-target default resolves to single-app boot.  Setting
@@ -95,12 +94,14 @@ Four pieces fit together:
   access to a provisioned OPTIGA no attacker can produce a signature this
   device will accept. **OPTIGA is DNP on E1M-AEN801** (`assembled: false`
   in `metadata/e1m_modules/E1M-AEN801.yaml`), the SKU this example
-  builds for, so here the key is the development PEM file named in
-  `boot.signing.key_file:`. See [`docs/secure-boot.md`](../../../docs/secure-boot.md).
+  builds for, so here the key is the SDK's shared development PEM,
+  `keys/mcuboot_shared_dev_ecdsa_p256.pem`, applied by default because
+  `boot.signing` is not set. See [`docs/secure-boot.md`](../../../docs/secure-boot.md).
 - **ECDSA-P256** -- the signing algorithm. On an OPTIGA-fitted SKU the
   public half is read out of the OPTIGA once at provisioning, signed by the
   manufacturing CA, and compiled into the MCUboot bootloader
-  (driven by `boot.signing.key_file:`). Same key gates both
+  (the SDK-anchored default dev key applies; `boot.signing.key_file:`
+  would override it). Same key gates both
   secure boot and OTA acceptance -- one trust root, fewer
   surfaces.
 - **MCUboot boot chain** -- on this SKU (E1M-AEN801), MCUboot boots

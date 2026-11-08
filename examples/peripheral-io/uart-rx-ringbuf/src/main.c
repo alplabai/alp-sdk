@@ -5,8 +5,8 @@
  * uart-rx-ringbuf — exercise the opt-in LwRB-backed RX path on
  * the console UART (EVK_UART_PORT_DEBUG).
  *
- * The classic alp_uart_read() blocks the calling thread until at
- * least one byte arrives.  That's fine for command-line prompts but
+ * The classic alp_uart_read() blocks the calling thread until all len
+ * bytes arrive (or the timeout expires with ALP_ERR_TIMEOUT).  That's fine for command-line prompts but
  * wrong for any task that needs to do other work while bytes trickle
  * in -- a chatty sensor talking at 9600 baud, a debug shell
  * multiplexed with a CAN bus drain, a GPS NMEA stream parsed once
@@ -120,6 +120,16 @@ int main(void)
 	       (int)s,
 	       got,
 	       alp_uart_rx_ringbuf_count(rb));
+
+	/* ALP_ERR_IO means the RX interrupt lost bytes (ring full, or the
+     * hardware FIFO overran before the ISR ran) since the last pop.  The
+     * `got` bytes it still delivered are valid, but the stream has a gap
+     * right after them -- resynchronise (e.g. drop the partial frame)
+     * instead of splicing the next bytes onto them.  To avoid the gap,
+     * pop more often or give the ring a bigger backing store. */
+	if (s == ALP_ERR_IO) {
+		printf("[ringbuf] data lost: %zu valid bytes, then a gap\n", got);
+	}
 
 	/* Detach when the ringbuf is no longer needed.  Disables the
      * IRQ-driven RX path so the underlying alp_uart_t reverts to

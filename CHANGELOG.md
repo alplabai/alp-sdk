@@ -5,7 +5,173 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.18.0 candidate
+## [Unreleased] - v0.19.0 candidate
+
+## [v0.18.0] - 2026-11-05
+
+### Added — E1M EVK 2641-R3 on-board RP2040 debug probe docs (Refs #405)
+
+- `docs/aen-rp2040-debug-probe.md`: the RP2040 (`U55`) CMSIS-DAP probe as the primary AEN debugger with J-Link optional, the USB identity and dual-CDC channel roles (VID/PID TBD, `alplabai/alp-studio#52`), and the open flash-backend/`tan` work. Not bench-verified; OpenOCD/pyOCD steps are TBD. Linked from `debugging-aen.md`, `bring-up-aen.md`, `soms/aen.md` and the docs index.
+
+### Documentation — E1M-X EVK microSD: SDR104 write failure root cause, mux enable
+
+- `docs/boards/e1m-x-evk.md`: at SDR104 200 MHz the SDHI host mis-frames the card's write CRC-status token on DAT0 (`SD_ERR_STS1` reports `100`/`001`/`101` instead of `010`). The data does reach the card. Only one SCC sampling tap frames the token correctly, and it is not the tuned read tap, so `&sdhi1` stays capped at SDR50. The same page now explains that with GD32 bridge firmware running, `IO29` (`SD_MUX_EN`) must be driven low or the slot reports no card, while card detect still reads present.
+
+### Added — AEN STOP wake from the RV-3028 EVI pin (#2811)
+
+`ALP_POWER_WAKE_EXT_EVENT` (0x00000100u) wakes the E8 from STOP on the RV-3028 external-event input, served through the existing INT to P15_0 path. The backend sets EIE for the cycle, reports EVF as its own wake source, and stops EVI state on the next sleep entry. `examples/aen/aen-power-stop` gains variant E (EVI cycle). Bench-pending: not yet run on silicon.
+
+### Changed — sibling Yocto recipes track the SDK release, per-machine arch, and CMake rejects a different 0.x minor (#2850)
+
+The eight sibling `meta-alp-sdk` recipes that build from `alplabai/alp-sdk.git` (`alp-chips`, `alp-drpai-inference`, `alp-edgeai`, `alp-gpu2d-compose`, `alp-lvgl-dashboard`, `alp-two-models-inference`, and the ROS recipes `alp-perception` and `alp-ros2-temperature`) now `require recipes-core/alp-sdk/alp-sdk-version.inc` instead of carrying `PV = "0.6.0"`, so their `PV` moves from `0.6.0` to the release (`0.17.0`) together with the `alp-sdk` recipe, and they set `PACKAGE_ARCH = "${MACHINE_ARCH}"` (a new per-machine feed lane, like `alp-sdk`). `scripts/bump_version.py` rewrites the one shared include and `scripts/check_version_doc_sync.py` fails on a recipe that does not require it or that sets its own `PV`. The `alp-sdk` recipe file is renamed `alp-sdk_0.6.bb` to `alp-sdk_git.bb` (nothing pinned the file name). The CMake package version file now uses `SameMinorVersion` while the major version is 0 (the same condition as the SONAME), so `find_package(alp-sdk 0.x)` rejects a different minor; from 1.0 it is `SameMajorVersion`.
+
+Deferred: a release-time gate rejecting `SRCREV = "${AUTOREV}"` (issue item 7) is not part of this change.
+
+### Changed — the dev-kit opkg feed is edge-only and the packager publishes an allowlist (#2854)
+
+`alp-devkit-feed-config` and `package-management` are now applied only in `alp-image-edge`; `alp-image-prod` fails its rootfs build if `ALP_DEVKIT_FEED = "1"`. `scripts/package_devkit_feed.sh` publishes an allowlist of Alp packages instead of every `all`/machine-arch ipk, fails on ipk names outside `[A-Za-z0-9._-]` or more than 1000 assets, verifies the signature against the committed public key, and refuses a non-empty `--out`, and fails on a missing allowlisted package or a stanza without `SHA256sum`. The feed config package now trusts only the feed signing key (not every key in the opkg keyring) and depends on `gnupg`. opkg is built with `sha256`. The docs now state that the feed only upgrades packages already in the image (no tune-arch closure).
+
+### Added — microSD + FatFs on the E1M-EVK for the E1M-AEN SoMs (#2856, #2857, #2858, #2860; Refs #2855)
+
+- `zephyr/dts/alif/ensemble_e4_peripherals.dtsi`: `gpio2`, `i2c2`, `dma0`, `evtrtr0` and `sdhc0` for the E1M-AEN401 (Ensemble E4) M55-HP, values checked against the AE402 DFP `soc.h` (all disabled by default) (#2856).
+- `e1m_evk_microsd` shield: enables `sdhc0` on the SD "B" pads (4-bit, 25 MHz, 3.3 V) with the `zephyr,sdmmc-disk` `"SD"` for E1M-AEN401/801/803. The app still drives the SDIO mux enable (E1M `IO20`, a CC3501E GPIO) low after the CC3501E bridge is up; only for carriers with the reworked 74LV3257 mux (#2857).
+- `sdhc_dwc`: the ADMA engine cannot reach the M55 ITCM/DTCM, so `CONFIG_SDHC_DWC_BOUNCE_BUFFER` (default on for Ensemble) copies TCM buffers through an 8 KB per-instance buffer in SRAM0 and splits larger block transfers; the ADMA descriptor table now defaults to SRAM0 as well. DTCM-linked apps no longer need `zephyr,sram = &sram0` (#2858).
+- `examples/aen/aen-sdcard-file`: bridge up, mux on, mount, write/sync/read back, list, free space, with `libraries: [fatfs]` (#2860).
+
+Silicon, 2026-10-13, E1M-AEN803 2026W36-0002 on an EVK with the reworked mux, 128 GB exFAT card: the example passes on the M55-HE with the data cache on (4 KB and 48 KB files; a 96-sector multi-block read matches 96 single reads), and the M55-HP mounts and lists the card. The E4 nodes were bench-verified on 2026-10-12 from an app overlay with identical values; the bounce buffer is not yet run on an E4.
+
+### Added — `libraries: [fatfs]` selects ELM FatFs
+
+`metadata/libraries/fatfs.yaml` (tier B, FatFs 0.16, BSD-1-Clause) makes the Zephyr ELM FatFs module selectable from `board.yaml` the same way `littlefs` is: it emits `CONFIG_FILE_SYSTEM=y` and `CONFIG_FAT_FILESYSTEM_ELM=y`. exFAT cards (most SDXC above 32 GB) still need `CONFIG_FS_FATFS_EXFAT=y` and `CONFIG_FS_FATFS_LFN=y` in the app's `prj.conf`; the manifest header says so.
+
+### Added — `<alp/storage.h>` `ALP_STORAGE_KIND_SD_MMC` backend on Zephyr over `disk_access` (#2859)
+
+New `zephyr_disk` storage backend (`src/backends/storage/zephyr_disk.c`, `CONFIG_ALP_SDK_STORAGE_ZEPHYR_DISK`, default on with `CONFIG_DISK_ACCESS`) serves SD/MMC through `<zephyr/storage/disk_access.h>`: byte-addressed read/write with read-modify-write on ragged sector edges, `get_info` from the disk's sector geometry, `sync` as `DISK_IOCTL_CTRL_SYNC`. The disk is `CONFIG_ALP_SDK_STORAGE_ZEPHYR_DISK_NAME` (default `"SD"`). `erase` and `configure_inline_aes` return `ALP_ERR_NOSUPPORT`. `alp_storage_open` now falls through to the next-ranked backend when one declines with `ALP_ERR_NOSUPPORT` (via `alp_backend_select_next`), so `zephyr_flash`/`zephyr_littlefs` still win their kinds and decline SD_MMC. When every backend declines, `sw_fallback` (native_sim only by default) now takes the handle, so open can succeed into a handle whose ops return `ALP_ERR_NOSUPPORT`.
+
+### Changed — `aen-sdcard-file` builds for every E1M-AEN board tree (#2860)
+
+The microSD example now has overlays and twister scenarios for the AEN801 and AEN803 M55-HP and the AEN401 M55-HP, beside the AEN801/803 M55-HE. From the M55-HP (E8 and E4) the CC3501E bridge runs in PIO mode (`CONFIG_DMA=n`, as on the 2026-10-12 E4 bench run): `dma_alif_boot_latch.c` resets the HE-local DMA2 and the shared DMA0, which is only safe from the HE. The HP and AEN401 twister scenarios correct the banner and select the E4 capability profile; a tan build with `sku: E1M-AEN401` and an `m55_hp` core in `board.yaml` emits them itself (built 2026-10-14). `prj.conf` no longer forces `CONFIG_FLASH_LOAD_OFFSET=0x10000` (the HE slot0); every board's code partition gives the link address, so an HP image links in its own slot. The AEN401 HP build (PIO bridge, 25 MHz) passed on an E8 M55-HP as a proxy (E1M-AEN803 2026W36-0002, `RESULT PASS: file`); not run on E4 silicon.
+
+### Fixed — `diagnostics.link: itcm` console wording and the generated PM wake-source hint (#2871, #2889)
+
+The `board.schema.json` description of `diagnostics.link` now states the planner's actual rule: `console: auto` is promoted to `ram` and `ram` use the RAM console, an explicit `uart` (alias `alp`) RAM-runs with the board UART console and gets neither `CONFIG_DCACHE=n` nor the RAM-console buffer, and `linux`/`none` are refused. The `# wakeup source:` hint written into the generated `alp.conf` now says `pm_device_wakeup_enable() not implemented` instead of promising it for v0.7.
+
+### Added — Alif SE STOP backend on the E4 M55-HP (E1M-AEN401) (#2876)
+
+`CONFIG_ALP_SDK_POWER_ALIF_SE` now also builds for `SOC_AE402FA0E5597LE0_RTSS_HP`, and the backend registers for `alif:ensemble:e4` as well as `alif:ensemble:e8`. On the E4 HP it writes the HP's own `RTSS_HP_CTRL` / `RTSS_HP_RESET` pair (AON 0x1A604000 / 0x1A604004); before, only the E8 HP symbol selected that pair. The AE402FA0E5597 DFP gives the same register bases as the E8 for everything else the backend touches. An E4 build now defaults to the `ALP_SOC_ALIF_ENSEMBLE_E4` capability profile (`SOC_SERIES_E4`), as an E8 build defaults to E8, so the E4 registration is the one selected. `examples/aen/aen-power-stop` builds for the AEN401 HP with its own overlay (se_service, lptimer0, rtc0, lpgpio) and config (E4 capability profile, clock restore off). The AEN401 board gains what the E8 boards already had: the `alp,som-power` node (the SoM domains quiesced around STOP: CC3501E, Ethernet PHY, OSPI flash and RAM, TMP112, backlight) and the BRD_I2C bus with the RV-3028 and TMP112 (`alp_e1m_aen401_m55_hp-on-module.dtsi`, the generator's output for the SKU, pinned by a test), plus E4 `gpio5`, `gpio11`, `i2c0` (DFP-checked) and `bkram` nodes. As on the E8 boards, every AEN401 app now gets `i2c0` and `lpgpio` enabled and, with `CONFIG_ALP_SDK_POWER`, `CONFIG_GPIO` and `CONFIG_PINCTRL`, the SoM power layer (`CONFIG_ALP_SDK_SOM_POWER`, its boot-time restore SYS_INITs) by default. The E4 `bkram` address is inferred from the E3 / E5 / E7 SVDs and the E8; no E4 source names it. Not run on E4 silicon by Alp Lab (no E4 on the bench); the AEN401 HP build of `aen-power-stop` was run on an E8 M55-HP (E1M-AEN801 2026W36-0008, same register map) as a proxy: 3/3 cycles (LPTIMER, RV-3028 countdown, alarm), all seven SoM domains quiesced and restored, BKRAM counter kept (`SUMMARY cycles=3 pass=5 fail=0`).
+
+### Added — CMSDK watchdog node on the E4 / E8 boards (#2877)
+
+Every E1M-AEN401, AEN801 and AEN803 board devicetree now carries the core's own watchdog, `wdog0@40100000` (`arm,cmsdk-watchdog`, upstream `wdt_cmsdk_apb.c`), disabled, with its clock: `zephyr/dts/alif/ensemble_rtss_he_wdog.dtsi` (160 MHz, measured 160009 kHz on an AEN803) and `ensemble_rtss_hp_wdog.dtsi` (400 MHz, measured on an AEN801 M55-HP: a 10 s timeout resets the core on time). An app enables it with `&wdog0 { status = "okay"; };` and `CONFIG_WATCHDOG=y`, `CONFIG_RUNTIME_NMI=y`. The board generator emits the include for E4 and E8 parts. `examples/aen/aen-wdt-feed` drops its private copy of the node and adds the AEN401 M55-HP target.
+
+### Added — CSI-2 error events counted per cause (#2880)
+
+`zephyr/drivers/video/video_csi_dw.c` counts every CSI-2 error interrupt by cause in `csi2_dw_err_events[]` (payload CRC, frame CRC, corrected header ECC, data ID, line, PHY, packet, PHY fatal, frame sequence, frame boundary, IPI fatal), since boot and whether or not logging is on. Before, the driver only logged them, so a bright frame with hundreds of payload-CRC events could not be counted. Read the array with `extern volatile uint32_t csi2_dw_err_events[];` or over SWD; the difference across N frames gives the per-frame rate.
+
+### Fixed — IMX296 gain had no effect and the sensor ran at half rate (#2881)
+
+`zephyr/drivers/video/imx296.c` now writes Sony's initial register settings in STANDBY at init (40 undocumented addresses, the values the mainline Linux imx296 driver writes). Without them `VIDEO_CID_ANALOGUE_GAIN` set GAIN 0x3204 (it read back correctly) but the image did not change, and the sensor delivered ~30 frame/s instead of 60.3. Bench 2026-10-14, E1M-AEN803 2026W36-0001 with the Raspberry Pi Global Shutter camera: 24 dB now raises a dim scene's mean from 117 to 506 (of 1023), 48 dB to 1015, at ~59 frame/s, with 0 CSI-2 errors over 210 frames.
+
+### Changed — Trace Runner audio is louder on the 8 ohm 5 W speakers (#2883)
+
+The Trace Runner sound backend now runs at unity volume and a new amp-level option sets the TAS2563 playback level, default 0x10 (4.97 W full scale into 8 ohm, the 5 W speaker rating). Demo runs no longer leave the live wire humming. Bench 2026-10-15, E1M-AEN803 2026W36-0002: PB_CFG1 reads back 0x20 on both amps, and a 5-minute soak at 100 % backlight plus 100 % volume shows 0 SN65DSI83 bridge losses, no TAS2563 OC/OT/brown-out/limiter latches, 0 audio underruns, DPS input peak 0.990 A at 16 V.
+
+### Fixed — E1M-X EVK microSD card-detect over-voltage on PA1
+
+- `e1m-x-evk.dtsi`: `&sdhi1` `cd-gpios` now requests the SoC's internal pull-up (`GPIO_PULL_UP`). On the E1M-X EVK V2 the card-detect pull-up `R53` goes to the 3.3 V card rail, while `PA1` is a 1.8 V pad on the V2N SoMs, so an empty slot over-drives it. With the internal pull-up in place, `R53` can be removed as a board rework. `docs/boards/e1m-x-evk.md` describes it.
+
+### Fixed — hand plain-CMake builds the SoM's SoC capability profile (#2912)
+
+<alp/soc_caps.h> keys on CONFIG_ALP_SOC_*, which only Zephyr's Kconfig
+defined. Yocto (A55) and baremetal builds therefore always took the
+permissive "unknown" branch: ALP_SOC_REF_STR was "unknown", so backends
+registered for an exact silicon_ref (the V2N UIO/MHU rpc backend,
+renesas:rzv2n:n44) never matched, and every ALP_HAS() was true at once
+(ALP_HAS(HELIUM_MVE) on a Cortex-A55).
+
+The top-level CMakeLists.txt gains an ALP_SOC cache variable that
+defines CONFIG_<ALP_SOC>=1 on the public alp_sdk_headers target (so apps
+and the installed .pc see the same profile), rejecting a malformed
+value. alp_project.py --emit cmake-args emits -DALP_SOC=<symbol> and
+--emit yocto-conf emits ALP_SDK_SOC, which the alp-sdk recipe forwards.
+The symbol comes from the same silicon-kconfig.json registry as the
+Zephyr fragment. Emit snapshots, generator docs and soc_caps.h header
+comment regenerated; tests prove the define reaches a plain-CMake
+configure.
+
+### Fixed — metadata: mark AEN OPTIGA DNP, route GD32-owned V2N pads, tighten preset I2C address schema, join SoM and carrier I2C buses (#2958, #2959, #2990)
+
+E1M-AEN301/401/501/601/701 listed optiga_trust_m with no assembled key, so
+it counted as fitted although every AEN SKU shares one SoM PCB on which IC1
+is DNP (AEN801/803 already said so). All AEN SKUs now carry assembled:
+false and capabilities.optiga_trust_m: false, so the capability follows
+population and an attestation root on OPTIGA is refused on every AEN SKU.
+
+V2N/V2M pad_routes omitted the GD32-owned E1M_X_I2C3 (PC8/PC9) and
+E1M_CAN_STBY (PB13) pads, which defaulted to direct. Both are now routed
+through gd32_bridge in all six V2N/V2M presets.
+
+V2N hw-revisions r2 gets min_sdk_version 0.17.0 and a changes record, and
+v2n/CHANGELOG.md no longer lists r2 as reserved.
+
+som-preset-v2: i2c_device.address_7bit is required and its pattern is
+limited to 0x00-0x7F.
+
+check_i2c_address_uniqueness now joins a carrier's i2c_devices with the
+SoM e1m_i2c bus of every hosted family, so a carrier part on the module
+EEPROM address fails.
+
+### Fixed — metadata: point E1M-V2M101 gd32_bridge comments at the external firmware repo (#2987)
+
+the E1M-V2M101 SoM manifest's gd32_bridge helper_firmware comments no longer point at the removed in-tree firmware/gd32-bridge/ tree. They now name the external alplabai/gd32-bridge-firmware repository (ADR 0031). This is a comment-only change.
+
+### Fixed — provision: verify legacy bundle components, never ledger pass without an EEPROM write (#2989)
+
+The legacy (non-V2N) provision flow flashed bundle_dir/<file> after only a schema check, so a truncated, swapped or escaping component reached the flash backend. It now checks each component stays inside the bundle and matches size_bytes and sha256 before anything is flashed. The same flow never programs the EEPROM, yet recorded ledger result pass after a passing smoke test. A passing test now records pending-hw; fail is unchanged.
+
+### Fixed — ci: join related pad tables in check_pin_conflicts (#2990)
+
+The gate checked each TSV alone, so a pad claimed by two different AEN
+Alif tables (from-alif, inter-chip, alif-ospi, alif-ethernet-phy) or by
+the V2N base map and v2n-m1/m1-additions passed. Join those tables and
+report cross-table claims. The six documented SD/CC3501E-SDIO mux pads
+(P13_0..P13_3, P14_0, P14_1) are allowlisted with a pointer to
+docs/cc3501e-bridge.md. Adds tests with injected cross-table conflicts.
+
+### Changed — raise CMake floor to 3.28, add hal_alif pin site to the bootstrap gate (#2995)
+
+Zephyr 4.5 requires CMake >= 3.28, but the documented floor was 3.20 and
+bootstrap.json carried no CMake floor at all. Add
+prerequisites.cmakeMinVersion (3.28) and have check_bootstrap_manifest.py
+police the getting-started.md CMake row. The Ubuntu 22.04 docs (apt CMake
+3.22) now say how to get a newer one.
+
+hal_alif (v2.3.0) was pinned in west.yml with no gate site, so it could
+drift from docs/zephyr-version-policy.md unnoticed. Add halAlif.version to
+bootstrap.json and its schema, a west.yml revision check and a --fix
+rewrite site, with tests. Policy step 2 now requires hal_alif to build and
+bench-pass against the pinned Zephyr rather than merely target it.
+
+### Changed — canopennode no longer relies on Zephyr optional.yaml (#2995)
+
+Zephyr 4.5 removes canopennode from submanifests/optional.yaml and makes
+CANopenNode an external module. The manifest already carries a
+self-contained integration.zephyr.west pin (url, SHA, path) emitted via
+west-libraries; reword the header, README and tests so the premise is that
+own pin, not Zephyr's optional group. Still valid on v4.4.1. Grounding
+provenance comments are unchanged.
+
+### Fixed — `alp_test_peripheral_gpio_self_close` flaked about 5% of runs because the test closed the line fd while the dispatcher could already sit in an infinite `poll()` on it (#3048)
+
+`test_torn_down_line_fd_disables_slot_instead_of_spinning` closed the pipe read end right after `alp_gpio_irq_enable()` with nothing to wake the dispatcher. On Linux `close()` of an fd another thread is polling does not wake that `poll()` while the write end stays open, so when the dispatcher had already re-entered `poll(fds, nfds, -1)` the POLLNVAL path (#1962) never ran, `irq_enabled` stayed true and the 5 s wait expired, failing the `alp_test_can_gpio_tsan` ctest on PRs that touch no C. The test now pokes the dispatcher's wake eventfd after the close, so its next snapshot-and-poll always sees the closed fd. Test-only: `src/yocto/peripheral_gpio.c` is unchanged, since a real gpiochip removal wakes the line fd's pollers in the kernel. Before: 11 of 200 TSan-binary runs failed, 5 of 100 pinned to one CPU.
+
+### Added — `alp.lock` records the pinned Alp Platform release (#3053)
+
+When the workspace carries an Alp Platform pin (`<west topdir>/.alp/platform.yaml`, written by tan's platform command, tan 0.8.0 and later; fallback `<sdk root>/.alp/platform.yaml`), `build_lock` emits an optional `platform: {version, manifestSha256}` key and `alp-lock-v1.schema.json` accepts it additively. With no pin the key is absent and the lock is byte-identical to before. `verify_lock` reports a pin that was added, removed or changed, and a `platform.components.alp-sdk` drift entry when the pinned `alp-sdk` version differs from `sdk.version`. A malformed pin (invalid YAML, wrong `schema`, or a zero-padded month such as `27.02.0`) raises `LockError`.
+
+### Removed — community forum links
+
+**The community forum (`community.alplab.ai`) was shut down on 2026-11-02, so every link to it is gone.** README, CONTRIBUTING, getting-started, troubleshooting, bring-up-aen and the issue-template chooser now point to GitHub Issues or contact@alplab.ai.
 
 ### Fixed — abidiff gate honesty (#2851)
 

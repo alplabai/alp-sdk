@@ -1,0 +1,17 @@
+/*
+ * hp_sound_he.overlay -- TR_HP_SOUND builds: GPIO5 belongs to the HP.
+ *
+ * The HP drives the amp SD_N (P5_2) and IRQZ (P5_0) by read-modify-write of GPIO5 DR/DDR, and its
+ * GPIO5 driver init masks that port's interrupts, so this image must not instantiate the GPIO5
+ * driver (src/platform/bus2_he.c BUILD_ASSERT). The AEN board trees enable &gpio5 for the SoM
+ * backlight power pad (P5_5); this overlay hands the port back to the HP. The SoM power layer then
+ * reports that pad as unusable, which is the intended outcome here: the Riverdi RVT121 backlight is
+ * PWM on P10_7 and does not need it.
+ *
+ * CMakeLists.txt adds this overlay only for a shield that leaves GPIO5 alone. The RK055 shield
+ * (backlight enable P5_5) is not given it, so its TR_HP_SOUND build still stops at the BUILD_ASSERT.
+ */
+
+&gpio5 {
+	status = "disabled";
+};

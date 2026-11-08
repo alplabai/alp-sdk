@@ -108,15 +108,22 @@
 /* sysfs paths this backend writes.  Explicit constants -- never
  * resolved via $PATH or any other runtime lookup -- overridable at
  * compile time (-DALP_YOCTO_POWER_STATE_PATH=... /
- * -DALP_YOCTO_POWER_WAKEALARM_PATH=...) so a host test can point them
- * at a temp file instead of the real kernel nodes.  Same override
- * pattern as ALP_YOCTO_PWM_CHIP in the sibling PWM backend. */
+ * -DALP_YOCTO_POWER_RTC_ROOT=...) so a host test can point them at a
+ * temp tree instead of the real kernel nodes.  Same override pattern
+ * as ALP_YOCTO_PWM_CHIP in the sibling PWM backend.
+ *
+ * The wakealarm attribute is NOT hard-wired to rtc0: on V2N/V2M rtc0 is
+ * the RV-3028 (no wakealarm) and the SoC RTC that has one is rtc1
+ * (#3077).  _wakealarm_path() scans <RTC_ROOT>/rtc<N>/wakealarm and
+ * uses the first that exists.  -DALP_YOCTO_POWER_WAKEALARM_PATH=...
+ * pins one explicit file and skips the scan. */
 #ifndef ALP_YOCTO_POWER_STATE_PATH
 #define ALP_YOCTO_POWER_STATE_PATH "/sys/power/state"
 #endif
-#ifndef ALP_YOCTO_POWER_WAKEALARM_PATH
-#define ALP_YOCTO_POWER_WAKEALARM_PATH "/sys/class/rtc/rtc0/wakealarm"
+#ifndef ALP_YOCTO_POWER_RTC_ROOT
+#define ALP_YOCTO_POWER_RTC_ROOT "/sys/class/rtc"
 #endif
+#define ALP_YOCTO_POWER_RTC_SCAN_MAX 16
 
 /* Test-only sysfs-write interception (default NULL: real file I/O via
  * open()+write()+close()).  Both attribute writes this backend
@@ -203,6 +210,27 @@ static time_t _now(void)
 }
 
 /**
+ * @brief Resolve the sysfs wakealarm attribute of the first RTC that has one.
+ *
+ * @return ALP_OK with @p out filled, ALP_ERR_NOSUPPORT if no RTC
+ *         exposes a wakealarm (timed wake cannot be armed).
+ */
+static alp_status_t _wakealarm_path(char *out, size_t out_len)
+{
+#ifdef ALP_YOCTO_POWER_WAKEALARM_PATH
+	int n = snprintf(out, out_len, "%s", ALP_YOCTO_POWER_WAKEALARM_PATH);
+	return (n < 0 || (size_t)n >= out_len) ? ALP_ERR_INVAL : ALP_OK;
+#else
+	for (int i = 0; i < ALP_YOCTO_POWER_RTC_SCAN_MAX; ++i) {
+		int n = snprintf(out, out_len, "%s/rtc%d/wakealarm", ALP_YOCTO_POWER_RTC_ROOT, i);
+		if (n < 0 || (size_t)n >= out_len) return ALP_ERR_INVAL;
+		if (access(out, F_OK) == 0) return ALP_OK;
+	}
+	return ALP_ERR_NOSUPPORT;
+#endif
+}
+
+/**
  * @brief Program the RTC wakealarm for wake_after_ms from now.
  *
  * Writes "0" first to clear any stale alarm -- the kernel wakealarm
@@ -215,7 +243,11 @@ static time_t _now(void)
  */
 static alp_status_t _program_wakealarm(uint32_t wake_after_ms)
 {
-	alp_status_t rc = _sysfs_write(ALP_YOCTO_POWER_WAKEALARM_PATH, "0");
+	char         path[96];
+	alp_status_t rc = _wakealarm_path(path, sizeof(path));
+	if (rc != ALP_OK) return rc;
+
+	rc = _sysfs_write(path, "0");
 	if (rc != ALP_OK) return rc;
 
 	time_t target = _now() + (time_t)(((uint64_t)wake_after_ms + 999u) / 1000u);
@@ -223,7 +255,7 @@ static alp_status_t _program_wakealarm(uint32_t wake_after_ms)
 	int    n = snprintf(buf, sizeof(buf), "%lld", (long long)target);
 	if (n < 0 || (size_t)n >= sizeof(buf)) return ALP_ERR_INVAL;
 
-	return _sysfs_write(ALP_YOCTO_POWER_WAKEALARM_PATH, buf);
+	return _sysfs_write(path, buf);
 }
 
 static alp_status_t
@@ -271,11 +303,13 @@ static alp_status_t y_request_sleep(alp_power_backend_state_t *state,
 	}
 
 	/* The /sys/power/state write blocks until resume -- time the
-     * write itself for slept_ms rather than estimating. */
+     * write itself for slept_ms rather than estimating.  CLOCK_BOOTTIME, not
+     * CLOCK_MONOTONIC: the latter stops during system suspend, so it would
+     * report only the entry/exit overhead. */
 	struct timespec before, after;
-	clock_gettime(CLOCK_MONOTONIC, &before);
+	clock_gettime(CLOCK_BOOTTIME, &before);
 	alp_status_t rc = _sysfs_write(ALP_YOCTO_POWER_STATE_PATH, _state_token(mode));
-	clock_gettime(CLOCK_MONOTONIC, &after);
+	clock_gettime(CLOCK_BOOTTIME, &after);
 
 	if (info != NULL) {
 		/* On a failed state write no sleep happened -- report RUN, not the

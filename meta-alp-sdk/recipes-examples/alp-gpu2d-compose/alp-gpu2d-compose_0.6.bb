@@ -14,10 +14,9 @@ LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=787726818c896f394f6627ab59d98d69
 
 DEPENDS = "alp-sdk"
 
-# Staged on the dev integration branch (see alp-drpai-inference_0.6.bb for the
-# EXTERNALSRC override and the branch=dev -> main flip).
-SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=dev"
-SRCREV  = "${AUTOREV}"
+# SRCREV comes from alp-sdk-version.inc (see alp-drpai-inference_0.6.bb for the
+# EXTERNALSRC override).
+SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
 require recipes-core/alp-sdk/alp-sdk-version.inc
 # Links the per-machine libalp_sdk.so, so must not be shared across machines (#2850).
 PACKAGE_ARCH = "${MACHINE_ARCH}"
