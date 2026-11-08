@@ -147,3 +147,11 @@ ZTEST(alp_storage_littlefs_select, test_partition_is_raw_again_once_unmounted)
 	zassert_equal(info.total_bytes, PARTITION_SIZE(storage_partition));
 	alp_storage_close(s);
 }
+
+ZTEST(alp_storage_littlefs_select, test_instance_id_above_uint8_is_rejected_not_wrapped)
+{
+	/* 256 + RAW_ID would wrap to flash_area RAW_ID and open it raw. */
+	alp_storage_config_t cfg = ALP_STORAGE_CONFIG_DEFAULT(ALP_STORAGE_KIND_INTERNAL_FLASH);
+	cfg.instance_id          = 256u + RAW_ID;
+	zassert_is_null(alp_storage_open(&cfg));
+}

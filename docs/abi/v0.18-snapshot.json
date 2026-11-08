@@ -14629,36 +14629,36 @@
       "functions": {},
       "macros": {
         "ALP_CAP_CAU": {
-          "hash": "9f4302620b16b573",
-          "value": "(ALP_SOC_CAU)"
+          "hash": "e0cf94eb92893ff1",
+          "value": "(ALP_SOC_CAU > 0)"
         },
         "ALP_CAP_CRYPTOCELL": {
-          "hash": "d9e5836873835e81",
-          "value": "(ALP_SOC_CRYPTOCELL)"
+          "hash": "09fd2326eb389f50",
+          "value": "(ALP_SOC_CRYPTOCELL > 0)"
         },
         "ALP_CAP_DAVE2D": {
-          "hash": "7c287d35d490bd93",
-          "value": "(ALP_SOC_DAVE2D)"
+          "hash": "b25fba53725ac644",
+          "value": "(ALP_SOC_DAVE2D > 0)"
         },
         "ALP_CAP_DMA2D": {
-          "hash": "bd1b8ac6ea2c47d4",
-          "value": "(ALP_SOC_DMA2D)"
+          "hash": "2c4b7cc1a8c0162f",
+          "value": "(ALP_SOC_DMA2D > 0)"
         },
         "ALP_CAP_EMMC_DMA": {
-          "hash": "7aea83817767d724",
-          "value": "(ALP_SOC_EMMC_DMA)"
+          "hash": "f0d068e5eb1059c5",
+          "value": "(ALP_SOC_EMMC_DMA > 0)"
         },
         "ALP_CAP_GPU2D": {
-          "hash": "ba53a01d7fbf30fc",
-          "value": "(ALP_SOC_GPU2D)"
+          "hash": "029d03a4a594f3bb",
+          "value": "(ALP_SOC_GPU2D > 0)"
         },
         "ALP_CAP_HELIUM_MVE": {
-          "hash": "5581405c3d20ae89",
-          "value": "(ALP_SOC_HELIUM_MVE)"
+          "hash": "5d9e21907e10076c",
+          "value": "(ALP_SOC_HELIUM_MVE > 0)"
         },
         "ALP_CAP_HEXSPI_DMA": {
-          "hash": "9a3251edaaf99f62",
-          "value": "(ALP_SOC_HEXSPI_DMA)"
+          "hash": "aabbb2cda31075eb",
+          "value": "(ALP_SOC_HEXSPI_DMA > 0)"
         },
         "ALP_CAP_HW_ADC": {
           "hash": "1f872a36d423604e",
@@ -14669,8 +14669,8 @@
           "value": "(ALP_SOC_CAN_COUNT > 0)"
         },
         "ALP_CAP_HW_CAN_FD": {
-          "hash": "cc3adbe7dd495ed3",
-          "value": "(ALP_SOC_CAN_FD_SUPPORTED)"
+          "hash": "c81120d0e43526bf",
+          "value": "(ALP_SOC_CAN_FD_SUPPORTED > 0)"
         },
         "ALP_CAP_HW_DAC": {
           "hash": "0f8836815d0d9436",
@@ -14737,24 +14737,24 @@
           "value": "(ALP_SOC_WDT_COUNT > 0)"
         },
         "ALP_CAP_INLINE_AES": {
-          "hash": "2485d38c457f2cc6",
-          "value": "(ALP_SOC_INLINE_AES)"
+          "hash": "7c369bdab180b0e1",
+          "value": "(ALP_SOC_INLINE_AES > 0)"
         },
         "ALP_CAP_NEON": {
-          "hash": "4294b4b5e2159a7f",
-          "value": "(ALP_SOC_NEON)"
+          "hash": "5722f00be3502d50",
+          "value": "(ALP_SOC_NEON > 0)"
         },
         "ALP_CAP_NPU_DRPAI": {
-          "hash": "7093de00f8a12ca4",
-          "value": "(ALP_SOC_DRP_AI)"
+          "hash": "5411c934de1b4c36",
+          "value": "(ALP_SOC_DRP_AI > 0)"
         },
         "ALP_CAP_QUADSPI_DMA": {
-          "hash": "776bb6d8731c2a11",
-          "value": "(ALP_SOC_QUADSPI_DMA)"
+          "hash": "7d7b5d84a726b21c",
+          "value": "(ALP_SOC_QUADSPI_DMA > 0)"
         },
         "ALP_CAP_XSPI_DMA": {
-          "hash": "dd0012dcc15f11e9",
-          "value": "(ALP_SOC_XSPI_DMA)"
+          "hash": "7a8fe6b823e15d0b",
+          "value": "(ALP_SOC_XSPI_DMA > 0)"
         },
         "ALP_HAS": {
           "hash": "14d66ec4232ed62c",
