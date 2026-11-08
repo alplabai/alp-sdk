@@ -306,12 +306,12 @@ above: `MACHINE = "e1m-v2n101-a55"` (or `e1m-v2m101-a55`), then
 `alp-perception` (`dynamic-layers/ros2-humble-layer/recipes-core/packagegroups/packagegroup-alp-ros.bb`).
 Host build 2026-11-08 (MACHINE `e1m-v2n101-a55`): `bitbake alp-perception`
 and `bitbake alp-image-edge` both exit 0, and the image's `.rootfs.manifest`
-lists `rclcpp` 16.0.19+1 and `alp-perception` 0.18.0. `e1m-v2m103-a55` was not
+lists `rclcpp` 16.0.19+1 and `alp-perception` 0.18.0. `e1m-v2m101-a55` was not
 built. meta-ros revision: the tree used (`meta-ros`, `meta-ros2-humble`,
 `LAYERSERIES_COMPAT` `scarthgap`) is a plain directory copy with no `.git`, so
-no commit SHA can be recovered; the build is not reproducible from a pin
-until one is recorded. Pin a `scarthgap` meta-ros commit (`git -C meta-ros log -1
---format="%H %d"`) before repeating it.
+no commit SHA can be recovered; its superflore stamp is
+`ROS_SUPERFLORE_GENERATION_DATETIME = "20260328170608"`. To repeat the build
+reproducibly, use a git clone of meta-ros on `scarthgap` and record its commit.
 `tests/scripts/test_library_layer.py`
 (`test_ros2_edge_image_pulls_rclcpp_and_alp_perception`) pins the dependency
 chain so it cannot silently drift. `ros2.yaml` stays Tier B: ADR 0018 Tier A
