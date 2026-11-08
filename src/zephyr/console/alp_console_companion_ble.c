@@ -297,7 +297,7 @@ static int cmd_companion_ble_gatt_read(const struct shell *sh, size_t argc, char
 	uint8_t      val[ALP_COMPANION_BLE_GATT_MAX];
 	size_t       got = 0;
 	alp_status_t s   = cc3501e_ble_gatt_read(
-	    companion_cc3501e, (uint16_t)handle, val, sizeof(val), &got, ALP_COMPANION_BLE_MS);
+	    companion_cc3501e, (uint16_t)handle, val, sizeof(val), &got, ALP_COMPANION_BLE_MS, NULL);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble gatt read failed (%d)", (int)s);
 		return -EIO;
@@ -334,11 +334,11 @@ static int companion_ble_gatt_send(const struct shell *sh, char **argv, bool not
 		            notify ? "notify" : "write");
 		return -EINVAL;
 	}
-	alp_status_t s = notify
-	                     ? cc3501e_ble_gatt_notify(
-	                           companion_cc3501e, (uint16_t)handle, val, len, ALP_COMPANION_BLE_MS)
-	                     : cc3501e_ble_gatt_write(
-	                           companion_cc3501e, (uint16_t)handle, val, len, ALP_COMPANION_BLE_MS);
+	alp_status_t s =
+	    notify ? cc3501e_ble_gatt_notify(
+	                 companion_cc3501e, (uint16_t)handle, val, len, ALP_COMPANION_BLE_MS)
+	           : cc3501e_ble_gatt_write(
+	                 companion_cc3501e, (uint16_t)handle, val, len, ALP_COMPANION_BLE_MS, NULL);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble gatt %s failed (%d)", notify ? "notify" : "write", (int)s);
 		return -EIO;

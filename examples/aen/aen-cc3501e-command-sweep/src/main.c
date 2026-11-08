@@ -1089,7 +1089,8 @@ int main(void)
 		uint8_t read_buf[8];
 		size_t  read_len = 0u;
 		t0               = k_uptime_get();
-		r = cc3501e_ble_gatt_read(&fw, use_handle, read_buf, sizeof(read_buf), &read_len, 2000u);
+		r                = cc3501e_ble_gatt_read(
+		    &fw, use_handle, read_buf, sizeof(read_buf), &read_len, 2000u, NULL);
 		sweep_report(ALP_CC3501E_CMD_BLE_GATT_READ,
 		             "BLE_GATT_READ",
 		             r,
@@ -1099,7 +1100,7 @@ int main(void)
 
 		static const uint8_t k_write_val[1] = { 0x01 };
 		t0                                  = k_uptime_get();
-		r = cc3501e_ble_gatt_write(&fw, use_handle, k_write_val, sizeof(k_write_val), 2000u);
+		r = cc3501e_ble_gatt_write(&fw, use_handle, k_write_val, sizeof(k_write_val), 2000u, NULL);
 		sweep_report(ALP_CC3501E_CMD_BLE_GATT_WRITE,
 		             "BLE_GATT_WRITE",
 		             r,
