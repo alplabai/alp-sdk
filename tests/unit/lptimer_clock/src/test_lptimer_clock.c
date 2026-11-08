@@ -153,3 +153,22 @@ ZTEST(lptimer_clock, test_ticks_one_alarm_period)
 }
 
 ZTEST_SUITE(lptimer_clock, NULL, NULL, NULL, NULL, NULL);
+
+/* E8 silicon (E1M-AEN803): right after LOADCOUNT is reprogrammed, CURRENTVAL
+ * still shows the previous segment's count for a timer clock.  The value must
+ * not jump ahead by the new period in that window. */
+ZTEST(lptimer_clock, test_stale_currentval_after_reload_does_not_jump)
+{
+	struct lptimer_clock c;
+
+	lptimer_clock_reset(&c);
+	uint32_t before = lptimer_clock_value(&c, 0xFFFFFE00U, false);
+
+	lptimer_clock_fold(&c, 0xFFFFFE00U, false, 199U);
+	/* Stale read: still the old free-run count, far above the new load. */
+	uint32_t stale = lptimer_clock_value(&c, 0xFFFFFE00U, false);
+
+	zassert_equal(stale, before, "value jumped on a stale CURRENTVAL");
+	/* First real tick of the new segment. */
+	zassert_equal(lptimer_clock_value(&c, 198U, false), before - 1U);
+}

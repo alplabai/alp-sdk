@@ -43,11 +43,20 @@ static inline void lptimer_clock_reset(struct lptimer_clock *c)
 }
 
 /* Clocks since the current load took effect.  `underflowed`: the counter has
- * hit zero and reloaded once since (alarm pending / ISR not yet run). */
+ * hit zero and reloaded once since (alarm pending / ISR not yet run).
+ *
+ * CURRENTVAL can read above `load` for a clock or so after LOADCOUNT is
+ * reprogrammed: the new value only lands on the next timer clock, so the
+ * register still shows the previous segment's count.  Measured on E8 silicon
+ * (E1M-AEN803): without this clamp the value jumped ahead by load + 1 right
+ * after set_alarm and then stood still until the alarm fired.  A reading above
+ * `load` means the new segment has not started yet, i.e. 0 clocks elapsed. */
 static inline uint32_t
 lptimer_clock_seg_elapsed(const struct lptimer_clock *c, uint32_t cur, bool underflowed)
 {
-	return (underflowed ? c->load + 1U : 0U) + (c->load - cur);
+	uint32_t in_seg = (cur > c->load) ? 0U : (c->load - cur);
+
+	return (underflowed ? c->load + 1U : 0U) + in_seg;
 }
 
 /* Virtual free-running down-counter value. */
