@@ -15,7 +15,7 @@ flash_method: ssh-run
 ssh_command: >-
   test -c /dev/mali0 && echo HIL_MALI_DEV_OK;
   lsmod | grep -q '^mali_kbase' && echo HIL_MALI_KBASE_OK;
-  ls /usr/lib/libEGL.so* >/dev/null 2>&1 && ls /usr/lib/libGLESv2.so* >/dev/null 2>&1 && echo HIL_GLES_LIBS_OK
+  ls /usr/lib/libEGL.so* >/dev/null 2>&1 && ls /usr/lib/libGLESv2.so* >/dev/null 2>&1 && echo HIL_GLES_LIBS_OK || true
 
 serial:
   duration_s: 10

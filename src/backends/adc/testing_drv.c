@@ -90,12 +90,26 @@ typedef struct {
 	int32_t      last_raw; /* latched value once the FIFO drains */
 	bool         fail_pending;
 	alp_status_t fail_err;
+	/* Handle state that opened this slot; cleared on close and by
+	 * alp_testing_reset_all() so stale handles are detected. */
+	const void *owner;
 } alp_testing_adc_slot_t;
 
 static alp_testing_adc_slot_t       g_slots[ALP_TESTING_ADC_MAX_CHANNELS];
 static alp_testing_slot_hdr_t       g_hdrs[ALP_TESTING_ADC_MAX_CHANNELS];
 static alp_testing_instance_table_t g_table;
 static bool                         g_table_ready;
+
+/* Resolve the slot a handle may touch.  alp_testing_reset_all() wipes
+ * the slot (owner included), so a handle left open across a reset, or
+ * whose slot a newer handle has since taken, no longer matches and its
+ * ops fail instead of touching the next occupant. */
+static alp_testing_adc_slot_t *live_slot(alp_adc_backend_state_t *st)
+{
+	alp_testing_adc_slot_t *slot = (alp_testing_adc_slot_t *)st->be_data;
+	if (slot == NULL || slot->owner != (const void *)st) return NULL;
+	return slot;
+}
 
 /* Every field's zero value IS the correct "never touched" state
  * (empty FIFO, 0 latched raw, no pending fault) -- the instance
@@ -174,6 +188,7 @@ t_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabilitie
 	if (slot == NULL) return ALP_ERR_NOMEM;
 
 	st->be_data = slot;
+	slot->owner = st;
 	/* ADC-specific must (see file header): a real reference_uv +
 	 * resolution_bits, not zero, so the dispatcher's raw -> uV
 	 * conversion (src/adc_dispatch.c) has a non-zero full-scale
@@ -188,7 +203,7 @@ t_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabilitie
 
 static alp_status_t t_read_raw(alp_adc_backend_state_t *st, int32_t *raw_out)
 {
-	alp_testing_adc_slot_t *slot = (alp_testing_adc_slot_t *)st->be_data;
+	alp_testing_adc_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 
 	if (slot->fail_pending) {
@@ -207,6 +222,8 @@ static alp_status_t t_read_raw(alp_adc_backend_state_t *st, int32_t *raw_out)
 
 static void t_close(alp_adc_backend_state_t *st)
 {
+	alp_testing_adc_slot_t *slot = live_slot(st);
+	if (slot != NULL) slot->owner = NULL;
 	st->be_data = NULL;
 }
 

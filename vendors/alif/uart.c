@@ -125,8 +125,28 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len)
 alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms)
 {
     if (port == NULL) return ALP_ERR_NOT_READY;
-    (void)timeout_ms; /* CMSIS-Driver USART is async; v0.2.x adds a poll-with-timeout helper. */
-    return alif_to_alp(((ARM_DRIVER_USART *)port)->Receive(data, (uint32_t)len));
+    if (len == 0) return ALP_OK;
+    ARM_DRIVER_USART *d = (ARM_DRIVER_USART *)port;
+    /* CMSIS-Driver USART Receive() is asynchronous: it only STARTS the
+     * transfer.  Wait on GetRxCount() against one deadline so ALP_OK means
+     * all len bytes arrived (issue #2934); on timeout or a line error abort
+     * the transfer and report it. */
+    int32_t st = d->Receive(data, (uint32_t)len);
+    if (st != ARM_DRIVER_OK) return alif_to_alp(st);
+    const uint64_t deadline = alp_uptime_ms() + timeout_ms;
+    while (d->GetRxCount() < (uint32_t)len) {
+        ARM_USART_STATUS us = d->GetStatus();
+        if (us.rx_overflow || us.rx_framing_error || us.rx_parity_error) {
+            (void)d->Control(ARM_USART_ABORT_RECEIVE, 0);
+            return ALP_ERR_IO;
+        }
+        if (alp_uptime_ms() >= deadline) {
+            (void)d->Control(ARM_USART_ABORT_RECEIVE, 0);
+            return ALP_ERR_TIMEOUT;
+        }
+        alp_delay_ms(1);
+    }
+    return ALP_OK;
 }
 
 void alp_uart_close(alp_uart_t *port)

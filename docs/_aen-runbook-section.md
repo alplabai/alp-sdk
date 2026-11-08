@@ -96,7 +96,8 @@ so MCUboot signs your image into slot0:
 # A board.yaml-driven app needs its alp.conf first: prefer `tan build`, or pass
 # -DEXTRA_CONF_FILE=<alp.conf> (docs/board-config-emit.md; #866).
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
-    --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
+    --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf \
+    -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="<abs-alp-sdk>/keys/mcuboot_shared_dev_ecdsa_p256.pem"
 export SETOOLS_DIR=<...>/app-release-exec-linux   # license-gated; not shipped
 export SE_UART=<your-serial-device>               # the SE-UART (host-specific)
 west flash      # -> alif_flash runner -> SETOOLS over the SE-UART

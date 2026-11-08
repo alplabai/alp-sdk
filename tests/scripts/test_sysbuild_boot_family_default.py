@@ -190,3 +190,68 @@ def test_a_project_with_no_boot_block_is_unchanged(tmp_path):
           m55_hp: {os: zephyr, app: ./src}
     """)
     assert emit_sysbuild_conf(project) == ""
+
+
+# --------------------------------------------------------------------------
+# #2950: the curated AEN base ships no (relative) signing key
+# --------------------------------------------------------------------------
+
+# board.schema.json requires `key_file` whenever `signing:` is present, so
+# "no key" means a `boot:` block with no `signing:` at all.
+AEN_NO_KEY_FILE = """
+    som: {sku: E1M-AEN801, hw_rev: r2}
+    preset: e1m-evk
+    cores:
+      m55_hp: {os: zephyr, app: ./src}
+    boot:
+      method: mcuboot
+"""
+
+
+def test_curated_aen_base_has_no_relative_key_file():
+    """A conf file cannot name an absolute path; a relative one resolves
+    against MCUBOOT_DIR / WEST_TOPDIR, never the SDK checkout."""
+    base = (REPO / "zephyr" / "sysbuild" / "aen" / "sysbuild.conf").read_text(
+        encoding="utf-8")
+    live = [ln for ln in base.splitlines()
+            if ln.strip().startswith("SB_CONFIG_BOOT_SIGNATURE_KEY_FILE")]
+    assert not live, live
+
+
+def test_plan_passes_the_dev_key_as_an_absolute_sdk_anchored_define(tmp_path):
+    board_yaml, project = _project(tmp_path, AEN_NO_KEY_FILE)
+    plan = _plan(tmp_path, board_yaml, project)
+    want = ('-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE='
+            '"${SDK_ROOT}/keys/mcuboot_shared_dev_ecdsa_p256.pem"')
+    assert any(want in json.dumps(s["command"]).replace('\\"', '"')
+               for s in plan["slices"]), plan["slices"]
+
+
+def test_an_explicit_key_file_replaces_the_default_define_with_an_anchored_one(
+        tmp_path):
+    """board.schema.json: key_file is relative to the project root.  It must
+    reach sysbuild as a ${PROJECT_ROOT}-anchored -D, never bare-relative
+    (MCUboot and the signer would resolve it elsewhere), and the SDK dev key
+    must not also be passed."""
+    board_yaml, project = _project(tmp_path, AEN_METHOD_OMITTED)
+    (tmp_path / "keys").mkdir()
+    (tmp_path / "keys" / "dev_ecdsa_p256.pem").write_text("pem", encoding="utf-8")
+    assert "SB_CONFIG_BOOT_SIGNATURE_KEY_FILE" not in emit_sysbuild_conf(project)
+    plan = _plan(tmp_path, board_yaml, project)
+    cmds = json.dumps(plan["slices"]).replace('\\"', '"')
+    assert ('-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE='
+            '"${PROJECT_ROOT}/keys/dev_ecdsa_p256.pem"') in cmds
+    assert "mcuboot_shared_dev_ecdsa_p256" not in cmds
+
+
+def test_a_missing_explicit_key_file_is_refused_naming_the_resolved_path(
+        tmp_path):
+    """key_file is resolved against the board.yaml directory.  A key that is
+    not there must fail the plan emit, not surface later as an imgtool or
+    CMake error."""
+    board_yaml, project = _project(tmp_path, AEN_METHOD_OMITTED)
+    with pytest.raises(OrchestratorError) as exc:
+        _plan(tmp_path, board_yaml, project)
+    msg = str(exc.value)
+    assert "keys/dev_ecdsa_p256.pem" in msg
+    assert "not a file" in msg

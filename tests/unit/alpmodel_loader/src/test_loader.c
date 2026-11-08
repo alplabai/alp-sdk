@@ -75,3 +75,19 @@ ZTEST(alpmodel_loader, test_version_mismatch_returns_version)
 	zassert_is_null(alp_inference_open_alpmodel(&o));
 	zassert_equal(alp_last_error(), ALP_ERR_VERSION);
 }
+
+ZTEST(alpmodel_loader, test_caller_arena_without_size_inval)
+{
+	/* A caller-owned arena with arena_bytes == 0 must not be sized from the
+     * (untrusted) manifest: rejected before any parse/select. */
+	static uint8_t        buf[16];
+	alp_model_open_opts_t o = {
+		.data        = alp_model_fixture,
+		.size        = alp_model_fixture_len,
+		.backend     = ALP_INFERENCE_BACKEND_AUTO,
+		.arena       = buf,
+		.arena_bytes = 0u,
+	};
+	zassert_is_null(alp_inference_open_alpmodel(&o));
+	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}

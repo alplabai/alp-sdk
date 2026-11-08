@@ -91,6 +91,11 @@ alp_status_t alp_testing_clock_advance_ms(uint64_t ms)
 		alp_testing_clock_event_fn fn  = g_events[best].fn;
 		void                      *ctx = g_events[best].ctx;
 		g_events[best].pending         = false;
+		/* The callback runs AT its own timestamp: now() returns the
+		 * event time, so work it schedules relative to now() lands
+		 * after it.  An event armed in the past fires at the
+		 * current time (the clock never moves backwards). */
+		if (best_at > g_now_ms) g_now_ms = best_at;
 		if (fn != NULL) fn(ctx);
 	}
 

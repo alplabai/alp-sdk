@@ -13,8 +13,19 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/linux-renesas:"
 # the vendor driver patches and 0018 would hit a tree with no drivers/drpai/.
 # The anonymous python runs at parse finalisation, after every bbappend, so the
 # patch is appended last.
+#
+# 0034 / 0035 (s2idle resume, #3078): drp_resume_noirq() and
+# drpai_resume_noirq() re-initialised a DRP / DRP-AI block that was never
+# opened, so its CPG was still off and the first register write raised an
+# asynchronous SError that panicked the resume.  drivers/drp/ comes from
+# meta-rz-codecs or meta-rz-opencva, drivers/drpai/ from meta-rz-drpai; each
+# patch goes in only with the layer that adds its driver, for the same
+# ordering reason as 0018.
 python () {
-    uri = 'file://0018-drpai-require-CAP_SYS_RAWIO-for-the-register-ioctls.patch'
+    collections = (d.getVar('BBFILE_COLLECTIONS') or '').split()
     if d.getVar('ALP_DRPAI_LAYER') == '1':
-        d.appendVar('SRC_URI', ' ' + uri)
+        d.appendVar('SRC_URI', ' file://0018-drpai-require-CAP_SYS_RAWIO-for-the-register-ioctls.patch')
+        d.appendVar('SRC_URI', ' file://0035-drpai-re-initialise-on-resume-only-when-the-hardware.patch')
+    if 'meta-rz-codecs' in collections or 'rz-opencva' in collections:
+        d.appendVar('SRC_URI', ' file://0034-drp-re-initialise-on-resume-only-when-the-hardware-w.patch')
 }

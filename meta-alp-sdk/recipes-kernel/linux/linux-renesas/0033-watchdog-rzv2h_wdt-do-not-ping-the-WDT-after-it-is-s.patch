@@ -1,0 +1,150 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Sun, 8 Nov 2026 13:32:31 +0000
+Subject: [PATCH] watchdog: rzv2h_wdt: do not ping the WDT after it is
+ suspended
+
+rzv2h_wdt_suspend() asserts the WDT reset and drops the runtime-PM
+reference, but the watchdog core keeps its keep-alive worker running.
+When userspace asks for a timeout above max_hw_heartbeat_ms (systemd
+RuntimeWatchdogSec=30s against a ~175 ms hardware timeout), the core
+pings on its behalf, and the next ping after the WDT suspend writes
+WDTRR on a block held in reset: an asynchronous SError panics the
+system in watchdogd during s2idle entry.
+
+watchdog_stop_ping_on_suspend() is not an option here: it cancels the
+worker at PM_SUSPEND_PREPARE, and with a 175 ms timeout the WDT bites
+while tasks are still being frozen.  Gate the ping in the driver
+instead: rzv2h_wdt_suspend() sets a flag under a spinlock before it
+stops the WDT, rzv2h_wdt_ping() skips the register write while the
+flag is set, and rzv2h_wdt_start() clears it only after the WDT is
+configured and counting, so a failed restart on resume leaves the
+gate closed instead of letting a ping hit a block in reset.
+rzv2h_wdt_resume() now returns start()'s error.  start() and restart()
+refresh the counter directly.
+
+Upstream-Status: Pending
+---
+ drivers/watchdog/rzv2h_wdt.c | 48 ++++++++++++++++++++++++++++++------
+ 1 file changed, 40 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/watchdog/rzv2h_wdt.c b/drivers/watchdog/rzv2h_wdt.c
+index 9cdefb7..4a9811d 100644
+--- a/drivers/watchdog/rzv2h_wdt.c
++++ b/drivers/watchdog/rzv2h_wdt.c
+@@ -16,6 +16,7 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/regmap.h>
+ #include <linux/reset.h>
++#include <linux/spinlock.h>
+ #include <linux/units.h>
+ #include <linux/watchdog.h>
+ 
+@@ -61,18 +62,35 @@ struct rzv2h_wdt_priv {
+ 	struct clk *oscclk;
+ 	struct reset_control *rstc;
+ 	struct watchdog_device wdev;
++	/*
++	 * Serialises the keep-alive ping against rzv2h_wdt_suspend().  The
++	 * hardware timeout is only ~175 ms (16384 x 256 / 24 MHz), so the
++	 * watchdog core must keep pinging until this device suspends; after
++	 * that the block is held in reset and a ping would raise an SError.
++	 */
++	spinlock_t lock;
++	bool suspended;
+ };
+ 
+-static int rzv2h_wdt_ping(struct watchdog_device *wdev)
++static void rzv2h_wdt_refresh(struct rzv2h_wdt_priv *priv)
+ {
+-	struct rzv2h_wdt_priv *priv = watchdog_get_drvdata(wdev);
+-
+ 	/*
+ 	 * The down-counter is refreshed and starts counting operation on
+ 	 * a write of the values 00h and FFh to the WDTRR register.
+ 	 */
+ 	writeb(0x0, priv->base + WDTRR);
+ 	writeb(0xFF, priv->base + WDTRR);
++}
++
++static int rzv2h_wdt_ping(struct watchdog_device *wdev)
++{
++	struct rzv2h_wdt_priv *priv = watchdog_get_drvdata(wdev);
++	unsigned long flags;
++
++	spin_lock_irqsave(&priv->lock, flags);
++	if (!priv->suspended)
++		rzv2h_wdt_refresh(priv);
++	spin_unlock_irqrestore(&priv->lock, flags);
+ 
+ 	return 0;
+ }
+@@ -94,6 +112,7 @@ static void rzv2h_wdt_setup(struct watchdog_device *wdev, u16 wdtcr)
+ static int rzv2h_wdt_start(struct watchdog_device *wdev)
+ {
+ 	struct rzv2h_wdt_priv *priv = watchdog_get_drvdata(wdev);
++	unsigned long flags;
+ 	int ret;
+ 
+ 	ret = pm_runtime_resume_and_get(wdev->parent);
+@@ -121,9 +140,14 @@ static int rzv2h_wdt_start(struct watchdog_device *wdev)
+ 
+ 	/*
+ 	 * Down counting starts after writing the sequence 00h -> FFh to the
+-	 * WDTRR register. Hence, call the ping operation after loading the counter.
++	 * WDTRR register. Hence, refresh after loading the counter.
+ 	 */
+-	rzv2h_wdt_ping(wdev);
++	rzv2h_wdt_refresh(priv);
++
++	/* Configured and counting: let the core's keep-alive pings through. */
++	spin_lock_irqsave(&priv->lock, flags);
++	priv->suspended = false;
++	spin_unlock_irqrestore(&priv->lock, flags);
+ 
+ 	return 0;
+ }
+@@ -197,7 +221,7 @@ static int rzv2h_wdt_restart(struct watchdog_device *wdev,
+ 	rzv2h_wdt_setup(wdev, WDTCR_CKS_CLK_1 | WDTCR_RPSS_25 |
+ 			WDTCR_RPES_75 | WDTCR_TOPS_1024);
+ 
+-	rzv2h_wdt_ping(wdev);
++	rzv2h_wdt_refresh(priv);
+ 
+ 	/* wait for underflow to trigger... */
+ 	udelay(5);
+@@ -296,6 +320,7 @@ static int rzv2h_wdt_probe(struct platform_device *pdev)
+ 	priv->wdev.info = &rzv2h_wdt_ident;
+ 	priv->wdev.ops = &rzv2h_wdt_ops;
+ 	priv->wdev.parent = dev;
++	spin_lock_init(&priv->lock);
+ 	priv->wdev.bootstatus = bootstatus;
+ 	watchdog_set_drvdata(&priv->wdev, priv);
+ 	dev_set_drvdata(dev, priv);
+@@ -312,9 +337,15 @@ static int rzv2h_wdt_probe(struct platform_device *pdev)
+ static int __maybe_unused rzv2h_wdt_suspend(struct device *dev)
+ {
+ 	struct rzv2h_wdt_priv *priv = dev_get_drvdata(dev);
++	unsigned long flags;
+ 
+-	if (watchdog_active(&priv->wdev))
++	if (watchdog_active(&priv->wdev)) {
++		/* No keep-alive ping may reach the block once its reset is asserted. */
++		spin_lock_irqsave(&priv->lock, flags);
++		priv->suspended = true;
++		spin_unlock_irqrestore(&priv->lock, flags);
+ 		rzv2h_wdt_stop(&priv->wdev);
++	}
+ 
+ 	return 0;
+ }
+@@ -335,7 +366,8 @@ static int __maybe_unused rzv2h_wdt_resume(struct device *dev)
+ 		if (ret)
+ 			return ret;
+ 
+-		rzv2h_wdt_start(&priv->wdev);
++		/* start() reopens the ping gate only once the WDT is counting. */
++		return rzv2h_wdt_start(&priv->wdev);
+ 	}
+ 
+ 	return 0;

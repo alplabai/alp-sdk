@@ -237,15 +237,15 @@ documented here so the path is review-ready, not so it is run casually.
 Sets the run power/clock profile (DCDC voltage 750–850 mV, clock sources, CPU
 frequency, power domains, memory retention, IO-flex 3V3).
 
-> **Gen1/gen2 mask hazard.** hal_alif's `aipm.h` selects its `memory_block_t`
-> and `*_MASK` layout with `CONFIG_ENSEMBLE_GEN2`, which no alp-sdk build
-> defines, so the `memory_blocks` masks it exposes are the gen1 layout even on
-> E8 (a gen2 part). Gen1 `BACKUP4K_MASK` is bit20, which is gen2 `FWRAM_MASK`;
-> gen2 `BACKUP4K_MASK` is bit21. Do not build `memory_blocks` from the hal_alif
-> `*_MASK` macros; use `ALP_AIPM_GEN2_*` from
-> `src/backends/power/alif_aipm_gen2.h`. Defining `CONFIG_ENSEMBLE_GEN2`
-> globally is a separate OSPI-affecting change tracked in
-> [#2785](https://github.com/alplabai/alp-sdk/issues/2785).
+> **Gen1/gen2 mask layout.** hal_alif's `aipm.h` selects its `memory_block_t`
+> and `*_MASK` layout with `CONFIG_ENSEMBLE_GEN2`. Since
+> [#2785](https://github.com/alplabai/alp-sdk/issues/2785) alp-sdk sets it for
+> `SOC_SERIES_E8` and `SOC_SERIES_E4` (gen2 parts), so the hal masks are the
+> gen2 layout there; before that they were gen1, where `BACKUP4K_MASK` is bit20
+> (gen2 `FWRAM_MASK`) instead of bit21. The power backend still builds
+> `memory_blocks` from `ALP_AIPM_GEN2_*` in
+> `src/backends/power/alif_aipm_gen2.h`, and `alif_se_power.c` fails the build
+> if the hal masks ever disagree with it; new code should do the same.
 
 ```c
 run_profile_t p;

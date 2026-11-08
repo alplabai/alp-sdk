@@ -1,0 +1,3 @@
+### Fixed — `aen-power-stop` SUMMARY totals every STOP cycle, not just the last boot (#2965)
+
+**`POWER_STOP: SUMMARY` now sums the verdicts of all cycles, so a failed cycle 1 can no longer hide behind a clean cycle 3.** Every STOP wake is a cold boot, so the pass/fail statics restarted at 0 and the line described only the last boot. The totals are packed into one byte (`examples/aen/aen-power-stop/src/tally.h`, pass saturates at 31, fail at 7) and ride in the cell that already holds the cycle counter: the BKRAM bench cell in the bench build, RV-3028 User RAM 2 (`0x20`) in the product build. The line ends `scope=run` (was `scope=last_boot`). Host-tested; not bench-verified on E1M-AEN801.

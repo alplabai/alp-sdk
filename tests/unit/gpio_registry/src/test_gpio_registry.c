@@ -30,6 +30,7 @@
 #include <alp/peripheral.h>
 
 #include "../../../../src/backends/gpio/gpio_ops.h"
+#include "../../../../src/common/alp_slot_claim.h"
 
 ZTEST_SUITE(alp_gpio_registry, NULL, NULL, NULL, NULL, NULL);
 
@@ -155,4 +156,45 @@ ZTEST(alp_gpio_registry, test_sw_fallback_round_trip)
 	/* close is a no-op; calling twice is safe */
 	ops->close(st);
 	ops->close(st);
+}
+
+/* ---------- irq_disable keeps state when the backend fails ---------------- */
+
+static int g_disable_calls;
+
+static alp_status_t _fake_disable_fail(alp_gpio_backend_state_t *st)
+{
+	ARG_UNUSED(st);
+	g_disable_calls++;
+	return (g_disable_calls == 1) ? ALP_ERR_IO : ALP_OK;
+}
+
+static void _fake_cb(alp_gpio_t *pin, void *user)
+{
+	ARG_UNUSED(pin);
+	ARG_UNUSED(user);
+}
+
+ZTEST(alp_gpio_registry, test_irq_disable_failure_then_retry)
+{
+	static const alp_gpio_ops_t fake_ops = { .disable_irq = _fake_disable_fail };
+	struct alp_gpio             h;
+	memset(&h, 0, sizeof(h));
+	h.state.ops     = &fake_ops;
+	h.edge          = ALP_GPIO_EDGE_RISING;
+	h.cb            = _fake_cb;
+	h.in_use        = true;
+	h.lifecycle     = ALP_HANDLE_LC_OPEN;
+	g_disable_calls = 0;
+
+	/* First attempt fails: the pin must stay marked armed. */
+	zassert_equal(alp_gpio_irq_disable(&h), ALP_ERR_IO);
+	zassert_equal(h.edge, ALP_GPIO_EDGE_RISING);
+	zassert_not_null(h.cb);
+
+	/* Retry reaches the backend again and now clears the state. */
+	zassert_equal(alp_gpio_irq_disable(&h), ALP_OK);
+	zassert_equal(g_disable_calls, 2);
+	zassert_equal(h.edge, ALP_GPIO_EDGE_NONE);
+	zassert_is_null(h.cb);
 }
