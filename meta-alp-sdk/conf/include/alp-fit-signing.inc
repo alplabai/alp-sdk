@@ -1,25 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Build-side scaffolding for V2N kernel FIT signing (2026-06-12 boot-log
-# audit). When enabled, the kernel is built as a SIGNED fitImage
-# (RSA-2048 / SHA-256) instead of a raw Image.
+# Verified kernel boot for V2N / V2M. When enabled, the kernel is built as a
+# SIGNED fitImage (RSA-2048 / SHA-256) instead of a raw Image, U-Boot is built
+# to boot it, and U-Boot enforces the signature:
+#   - u-boot_%.bbappend adds fit-signed.cfg (CONFIG_ALP_E1M_FIT,
+#     CONFIG_FIT_SIGNATURE, CONFIG_RSA); Yocto's uboot-sign.bbclass (active
+#     through UBOOT_SIGN_ENABLE below) puts the public half of the signing key
+#     into the control dtb of the u-boot.bin that goes into the FIP, marked
+#     required = "conf";
+#   - CONFIG_BOOTCOMMAND (U-Boot patch 0018) loads /boot/fitImage from the
+#     eMMC and runs `bootm <addr>#conf-<board dtb basename>`; a configuration
+#     that does not verify is not booted, and there is no fallback to an
+#     unsigned Image (a FIT build does not package one), nor to the microSD.
+# The bootloader (FIP) must be rebuilt and reflashed together with the image:
+# an old FIP still booti's /boot/Image and finds none.
 #
-# This is PHASE 1 ONLY -- it builds + signs the fitImage with a GENERATED
-# DEV key; it does NOT modify U-Boot or the boot flow, so nothing it
-# produces is yet enforced. Verified-boot enforcement (U-Boot
-# CONFIG_FIT_SIGNATURE + the production public key embedded in the FIP's
-# U-Boot control dtb + bootcmd -> `bootm`) is the deferred, brick-class
-# phase 2, and the production key custody / TF-A-trusted-boot chaining are
-# owner decisions tracked outside the public build scaffold.
+# This is NOT a complete secure-boot chain.  The key is a GENERATED DEV key
+# under ${TOPDIR}/alp-fit-keys (gitignored, build dir): anyone who can build
+# can sign.  TF-A does not verify the FIP, and there is no anti-rollback: an
+# older, validly signed FIT (or, with Mender, the other slot) still boots.
+# Trusted boot, the production key custody and anti-rollback are owner
+# decisions tracked outside the public build scaffold.  BENCH-UNVERIFIED: a
+# unit has never booted this way, and a failed boot is a reset loop (no
+# U-Boot shell) that only an external eMMC / FIP reflash recovers.
 #
 # OPT-IN (default OFF -- a normal build is byte-for-byte unchanged). In
 # conf/local.conf:
 #     ALP_FIT_SIGNED = "1"
 #     require conf/include/alp-fit-signing.inc
-#
-# The dev key is generated under ${TOPDIR}/alp-fit-keys (gitignored, build
-# dir) -- it has signing power equal to "anyone who can build"; never ship
-# it. The real key is a release-pipeline concern (phase 2).
 #
 # Copyright (C) 2026 Alp Lab AB
 
@@ -42,3 +50,10 @@ FIT_GENERATE_KEYS:alpfitsign = "1"
 FIT_HASH_ALG:alpfitsign = "sha256"
 FIT_SIGN_ALG:alpfitsign = "rsa2048"
 FIT_SIGN_INDIVIDUAL:alpfitsign = "0"
+# The kernel entry/load address inside the FIT: U-Boot's default (0x20008000)
+# is not in this SoC's DRAM (starts at 0x48000000); 0x48080000 is where the
+# unsigned boot path booti's Image.  Stored uncompressed so a kernel larger
+# than CONFIG_SYS_BOOTM_LEN cannot fail to decompress.
+UBOOT_LOADADDRESS:alpfitsign = "0x48080000"
+UBOOT_ENTRYPOINT:alpfitsign = "0x48080000"
+FIT_KERNEL_COMP_ALG:alpfitsign = "none"

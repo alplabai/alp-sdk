@@ -38,7 +38,14 @@ rationale) are held outside this tree.
     on the Renesas side (PWM5 moved entirely to GD32 with the rest
     of the PWMs).
 
-## r2..r8 -- reserved
+## r2 -- production (board `2625-R2`)
+
+Provisioned from the 2026-W38 V2M103 batch onward; `min_sdk_version`
+is `0.17.0`.  No r1 -> r2 pin or chip delta is recorded in this tree
+yet; it is added here and as `pad_route_overrides` in
+[`hw-revisions.yaml`](hw-revisions.yaml) once confirmed.
+
+## r3..r8 -- reserved
 
 Future revs land here as the SoM respins.  Each rev's section
 documents:
@@ -58,7 +65,7 @@ build-time enforced: the SDK refuses an out-of-window build
 (`SdkRevisionUnsupported`) and, separately, refuses a `reserved` /
 `tbd` / statusless revision (`SdkRevisionNotBuildable`) -- see
 [#1025](https://github.com/alplabai/alp-sdk/issues/1025). Every
-`r2..r8 -- reserved` rev above is refused at build time today for
+`r3..r8 -- reserved` rev above is refused at build time today for
 that reason.
 
 This file is the **human-readable explanation** of what each rev

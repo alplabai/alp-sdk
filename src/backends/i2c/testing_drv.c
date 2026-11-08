@@ -114,12 +114,26 @@ typedef struct {
 
 typedef struct {
 	alp_testing_i2c_addr_t addrs[ALP_TESTING_I2C_MAX_ADDRS];
+	/* Handle state that opened this slot; cleared on close and by
+	 * alp_testing_reset_all() so stale handles are detected. */
+	const void *owner;
 } alp_testing_i2c_slot_t;
 
 static alp_testing_i2c_slot_t       g_slots[ALP_TESTING_I2C_MAX_BUSES];
 static alp_testing_slot_hdr_t       g_hdrs[ALP_TESTING_I2C_MAX_BUSES];
 static alp_testing_instance_table_t g_table;
 static bool                         g_table_ready;
+
+/* Resolve the slot a handle may touch.  alp_testing_reset_all() wipes
+ * the slot (owner included), so a handle left open across a reset, or
+ * whose slot a newer handle has since taken, no longer matches and its
+ * ops fail instead of touching the next occupant. */
+static alp_testing_i2c_slot_t *live_slot(alp_i2c_backend_state_t *st)
+{
+	alp_testing_i2c_slot_t *slot = (alp_testing_i2c_slot_t *)st->be_data;
+	if (slot == NULL || slot->owner != (const void *)st) return NULL;
+	return slot;
+}
 
 /* Every field's zero value IS the correct "never touched" state
  * (no devices bound, empty responses, no armed faults) -- the
@@ -251,13 +265,14 @@ t_open(const alp_i2c_config_t *cfg, alp_i2c_backend_state_t *st, alp_capabilitie
 	st->dev     = NULL;
 	st->bus_id  = cfg->bus_id;
 	st->be_data = slot;
+	slot->owner = st;
 	return ALP_OK;
 }
 
 static alp_status_t
 t_write(alp_i2c_backend_state_t *st, uint8_t addr, const uint8_t *data, size_t len)
 {
-	alp_testing_i2c_slot_t *slot = (alp_testing_i2c_slot_t *)st->be_data;
+	alp_testing_i2c_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 	alp_testing_i2c_addr_t *dev = addr_touch(slot, addr);
 	if (dev == NULL) return ALP_ERR_NOMEM;
@@ -284,7 +299,7 @@ t_write(alp_i2c_backend_state_t *st, uint8_t addr, const uint8_t *data, size_t l
 
 static alp_status_t t_read(alp_i2c_backend_state_t *st, uint8_t addr, uint8_t *data, size_t len)
 {
-	alp_testing_i2c_slot_t *slot = (alp_testing_i2c_slot_t *)st->be_data;
+	alp_testing_i2c_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 	alp_testing_i2c_addr_t *dev = addr_touch(slot, addr);
 	if (dev == NULL) return ALP_ERR_NOMEM;
@@ -318,7 +333,7 @@ static alp_status_t t_write_read(alp_i2c_backend_state_t *st,
                                  uint8_t                 *rdata,
                                  size_t                   rlen)
 {
-	alp_testing_i2c_slot_t *slot = (alp_testing_i2c_slot_t *)st->be_data;
+	alp_testing_i2c_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 	alp_testing_i2c_addr_t *dev = addr_touch(slot, addr);
 	if (dev == NULL) return ALP_ERR_NOMEM;
@@ -357,6 +372,8 @@ static alp_status_t t_write_read(alp_i2c_backend_state_t *st,
 
 static void t_close(alp_i2c_backend_state_t *st)
 {
+	alp_testing_i2c_slot_t *slot = live_slot(st);
+	if (slot != NULL) slot->owner = NULL;
 	st->be_data = NULL;
 }
 

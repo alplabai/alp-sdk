@@ -80,6 +80,9 @@ alp_status_t ulog_entry_encode(const alp_update_log_entry_t *e,
 	if (e == NULL || prev_hash == NULL || out == NULL) return ALP_ERR_INVAL;
 	size_t vlen = bounded_len(e->fw_version, ALP_UPDATE_LOG_FWVER_MAX + 1);
 	if (vlen > ALP_UPDATE_LOG_FWVER_MAX) return ALP_ERR_INVAL;
+	/* status is stored in one byte: an out-of-range value would truncate to a
+	 * different, valid outcome (256 -> CONFIRMED) and be hashed into the chain. */
+	if ((unsigned)e->status > (unsigned)ALP_UPDATE_STATUS_PENDING_CONFIRM) return ALP_ERR_INVAL;
 	memset(out, 0, ULOG_ENTRY_WIRE_LEN);
 	put_u16(out + 0, (uint16_t)ULOG_VERSION);
 	put_u64(out + 2, e->seq);

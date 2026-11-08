@@ -1,0 +1,391 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Workflow gates must be reached, point at real inputs, and not splice secrets.
+
+Pins four review findings against `.github/workflows/`:
+
+* pr-metadata-validate.yml hosts `check_vendor_ext_tags.py` and
+  `check_public_header_purity.py`; its `paths:` filter must cover
+  `include/alp/ext/**` and the root `include/alp/*.h`, or a header-only PR never
+  runs either gate.
+* pr-alp-build.yml matrix cells must name examples that exist, and every cell
+  must carry its own `som` so each leg builds its own SoM.
+* coverity.yml must not splice `secrets.*` into `run:` shell source.
+* pr-static-analysis.yml cppcheck must be able to fail the job.
+"""
+
+from __future__ import annotations
+
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+import yaml
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_WF = _REPO_ROOT / ".github" / "workflows"
+
+
+def _load(name: str) -> dict:
+    return yaml.safe_load((_WF / name).read_text(encoding="utf-8"))
+
+
+def _paths(name: str, trigger: str) -> list[str]:
+    data = _load(name)
+    triggers = data.get("on", data.get(True))
+    if name == "pr-metadata-validate.yml":
+        # Unfiltered trigger + `detect` job's paths-filter (#2972).
+        step = next(
+            s
+            for s in data["jobs"]["detect"]["steps"]
+            if s.get("uses", "").startswith("dorny/paths-filter@")
+        )
+        return list(yaml.safe_load(step["with"]["filters"])["relevant"])
+    return list(triggers[trigger]["paths"])
+
+
+def _pattern_to_regex(pattern: str) -> re.Pattern[str]:
+    """GitHub Actions path glob -> regex. `**` crosses `/`; `*` does not."""
+    out = ""
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**", i):
+            out += ".*"
+            i += 2
+        elif pattern[i] == "*":
+            out += "[^/]*"
+            i += 1
+        else:
+            out += re.escape(pattern[i])
+            i += 1
+    return re.compile(rf"^{out}$")
+
+
+def _covered(probe: str, patterns: list[str]) -> bool:
+    return any(
+        _pattern_to_regex(p).match(probe) for p in patterns if not p.startswith("!")
+    )
+
+
+def test_metadata_validate_triggers_on_public_headers() -> None:
+    probes = [
+        "include/alp/ext/renesas/drpai.h",
+        "include/alp/gpio.h",
+        "scripts/check_vendor_ext_tags.py",
+        "scripts/check_public_header_purity.py",
+    ]
+    for trigger in ("pull_request", "push"):
+        patterns = _paths("pr-metadata-validate.yml", trigger)
+        for probe in probes:
+            assert _covered(probe, patterns), f"{trigger} paths do not cover {probe}"
+
+
+def test_alp_build_matrix_cells_use_existing_examples_and_distinct_soms() -> None:
+    job = _load("pr-alp-build.yml")["jobs"]["alp-build"]
+    cells = job["strategy"]["matrix"]["include"]
+    assert cells, "matrix has no cells"
+    seen = set()
+    for cell in cells:
+        board = _REPO_ROOT / cell["example"] / "board.yaml"
+        assert board.is_file(), f"{cell} points at a missing example"
+        assert re.fullmatch(r"E1M-[A-Z0-9]+", cell["som"])
+        key = (cell["som"], cell["scenario"])
+        assert key not in seen, f"duplicate matrix cell {key}"
+        seen.add(key)
+    # The SoM must actually reach the orchestrator input.
+    pick = next(s for s in job["steps"] if s.get("id") == "pick")
+    assert pick["env"]["SOM"] == "${{ matrix.som }}"
+    assert "E1M-AEN701" in {c["som"] for c in cells}
+
+
+def test_alp_build_has_no_silent_skip_gate() -> None:
+    text = (_WF / "pr-alp-build.yml").read_text(encoding="utf-8")
+    assert "present=false" not in text
+    assert "steps.gate.outputs.present" not in text
+
+
+def test_coverity_does_not_splice_secrets_into_shell() -> None:
+    jobs = _load("coverity.yml")["jobs"]
+    assert jobs
+    for name, job in jobs.items():
+        for step in job["steps"]:
+            run = step.get("run")
+            if run:
+                assert "${{ secrets." not in run, (
+                    f"{name}: step {step.get('name')!r} splices a secret into run:"
+                )
+
+
+def _cppcheck_gate_tail() -> str:
+    job = _load("pr-static-analysis.yml")["jobs"]["cppcheck"]
+    run = next(s["run"] for s in job["steps"] if s.get("name") == "Run cppcheck")
+    marker = "|| true\n"
+    assert marker in run, "cppcheck invocation no longer ends in '|| true'"
+    return run.split(marker, 1)[1]
+
+
+def test_cppcheck_step_fails_on_error_severity(tmp_path: Path) -> None:
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash not available")
+    tail = _cppcheck_gate_tail()
+    head = '<?xml version="1.0"?><results><errors>'
+    bad = head + '<error id="nullPointer" severity="error" msg="x"/></errors></results>'
+    ok = (
+        head
+        + '<error id="unusedVariable" severity="style" msg="x"/></errors></results>'
+    )
+
+    def run(xml: str) -> int:
+        (tmp_path / "cppcheck.xml").write_text(xml, encoding="utf-8")
+        return subprocess.run(
+            [bash, "-c", tail],
+            cwd=tmp_path,
+            capture_output=True,
+            check=False,
+        ).returncode
+
+    assert run(bad) != 0
+    assert run(ok) == 0
+    # A crashed cppcheck leaves an empty (or no) report: that must fail too.
+    assert run("") != 0
+    (tmp_path / "cppcheck.xml").unlink()
+    assert (
+        subprocess.run(
+            [bash, "-c", tail], cwd=tmp_path, capture_output=True, check=False
+        ).returncode
+        != 0
+    )
+
+
+def test_cppcheck_baseline_suppressions_are_scoped() -> None:
+    job = _load("pr-static-analysis.yml")["jobs"]["cppcheck"]
+    run = next(s["run"] for s in job["steps"] if s.get("name") == "Run cppcheck")
+    for needed in (
+        "syntaxError",
+        "unknownMacro",
+        "ctuOneDefinitionRuleViolation",
+        "comparePointers",
+    ):
+        assert f"--suppress={needed}" in run, needed
+
+
+def test_test_coverage_audit_uses_fail_on_gaps() -> None:
+    jobs = _load("pr-metadata-validate.yml")["jobs"]
+    hits = []
+    for job in jobs.values():
+        for step in job["steps"]:
+            r = step.get("run", "")
+            if "check_test_coverage.py" in r:
+                hits.append(r)
+    assert hits and all("--fail-on-gaps" in r for r in hits)
+
+
+def test_metadata_validate_summary_is_requireable() -> None:
+    """#2972: `metadata-validate · all` must report on pull_request, push and
+    merge_group, so branch protection can require it without hanging the queue
+    (#1415) or blocking PRs that touch no filtered path (#1474)."""
+    data = _load("pr-metadata-validate.yml")
+    triggers = data.get("on", data.get(True))
+    assert "merge_group" in triggers
+    for t in ("pull_request", "push"):
+        assert "paths" not in triggers[t], f"{t} must be unfiltered; use detect"
+
+    jobs = data["jobs"]
+    summary = jobs["summary"]
+    assert summary["name"] == "metadata-validate · all"
+    assert "${{" not in summary["name"], "required context name must be static"
+    assert summary["if"].replace(" ", "") == "always()"
+    gate_jobs = set(jobs) - {"summary", "detect"}
+    assert gate_jobs, "no gate jobs found"
+    assert set(summary["needs"]) == gate_jobs | {"detect"}
+
+    verdict = next(s for s in summary["steps"] if "VALIDATE_RESULT" in s.get("env", {}))
+    run = verdict["run"]
+    assert "exit 1" in run
+    assert "failure|cancelled" in run  # detect failed/cancelled -> fail
+    # a gate job result other than success/legit-skip falls through to exit 1
+    assert re.search(r"\*\)\s+echo \"::error::validate concluded", run)
+    # validate re-runs the cross-file parity gates on EVERY queue entry (cheap;
+    # a neighbour's merge can break parity); path filter is PR/push only.
+    for name in gate_jobs:
+        assert "github.event_name == 'merge_group'" in jobs[name]["if"]
+
+
+def test_doc_drift_summary_is_requireable() -> None:
+    """#2972: `doc-drift · all` must report on pull_request, push and
+    merge_group so branch protection can require it."""
+    data = _load("pr-doc-drift.yml")
+    triggers = data.get("on", data.get(True))
+    assert "merge_group" in triggers
+    for t in ("pull_request", "push"):
+        assert "paths" not in triggers[t]
+
+    jobs = data["jobs"]
+    summary = jobs["summary"]
+    assert summary["name"] == "doc-drift · all"
+    assert "${{" not in summary["name"]
+    assert summary["if"].replace(" ", "") == "always()"
+    assert set(summary["needs"]) == {"doc-drift"}
+    # the gate job must not be skipped on merge_group
+    assert "if" not in jobs["doc-drift"]
+    run = summary["steps"][0]["run"]
+    assert "exit 1" in run
+    assert re.search(r"\*\)\s+echo \"::error::doc-drift concluded", run)
+
+
+
+def test_python_smoke_runs_in_the_merge_queue() -> None:
+    """`python-smoke · all` is required on dev (#2972): the queue runs the
+    ubuntu pytest leg on the rebased content, and the summary fails a
+    merge_group skip instead of passing it."""
+    jobs = _load("cross-platform-zephyr.yml")["jobs"]
+    smoke = jobs["python-smoke"]
+    assert "!= 'merge_group'" not in smoke["if"]
+    assert "needs.detect.outputs.relevant == 'true'" in smoke["if"]
+    # The queue leg is capped to ubuntu-latest.
+    os_expr = smoke["strategy"]["matrix"]["os"]
+    assert "github.event_name == 'merge_group'" in os_expr
+    assert 'fromJSON(\'["ubuntu-latest"]\')' in os_expr
+    verdict = " ".join(str(st.get("run", "")) for st in jobs["summary"]["steps"])
+    skipped_branch = verdict[verdict.index("skipped)"):verdict.index("*)")]
+    # A skip is legitimate only when detect succeeded and found nothing,
+    # on pull_request / push / merge_group; anything else reaches `exit 1`.
+    assert '= "merge_group"' in skipped_branch
+    assert '"${DETECT_RESULT}" = "success"' in skipped_branch
+    assert "exit 1" in skipped_branch
+
+
+def _assert_requireable(
+    name: str,
+    ctx: str,
+    *,
+    not_in_needs: frozenset[str] = frozenset(),
+    skip_on_merge_group: frozenset[str] = frozenset(),
+    detect_on_merge_group: bool = True,
+) -> tuple[dict, str]:
+    """Shared #2972 shape check; returns (jobs, concatenated verdict script)."""
+    data = _load(name)
+    triggers = data.get("on", data.get(True))
+    assert "merge_group" in triggers, f"{name}: no merge_group trigger (#1415)"
+    for t in ("pull_request", "push"):
+        if t in triggers:
+            assert "paths" not in (triggers[t] or {}), f"{name}: {t} must be unfiltered"
+    assert data["concurrency"]["group"].endswith("${{ github.ref }}")
+
+    jobs = data["jobs"]
+    summary = jobs["summary"]
+    assert summary["name"] == ctx
+    assert "${{" not in summary["name"], "required context name must be static"
+    assert summary["if"].replace(" ", "") == "always()"
+    gate_jobs = set(jobs) - {"summary", "detect"}
+    assert set(summary["needs"]) == (gate_jobs - not_in_needs) | {"detect"}
+    # detect carries the path list; real jobs run on merge_group.
+    assert any(
+        s.get("uses", "").startswith("dorny/paths-filter@")
+        for s in jobs["detect"]["steps"]
+    )
+    for job in gate_jobs - skip_on_merge_group:
+        cond = jobs[job]["if"]
+        assert "== 'merge_group'" not in cond, f"{name}:{job} must be path-filtered in the queue"
+        assert "needs.detect.outputs.relevant == 'true'" in cond
+    if detect_on_merge_group:
+        assert "merge_group" not in jobs["detect"]["if"].replace("!=", "")
+        assert "merge_group.base_sha" in str(jobs["detect"]["steps"])
+    run = " ".join(str(s.get("run", "")) for s in summary["steps"])
+    assert "exit 1" in run and "failure|cancelled" in run
+    return jobs, run
+
+
+def test_generated_files_summary_is_requireable() -> None:
+    _, run = _assert_requireable("pr-generated-files.yml", "generated-files · all")
+    assert '= "merge_group"' in run and '"${DETECT_RESULT}" = "success"' in run
+
+
+def test_doxygen_summary_is_requireable() -> None:
+    _, run = _assert_requireable("pr-doxygen.yml", "doxygen · all")
+    assert '= "merge_group"' in run and '"${DETECT_RESULT}" = "success"' in run
+
+
+def test_tan_build_summary_is_requireable() -> None:
+    _, run = _assert_requireable("pr-tan-build.yml", "tan-build · all")
+    assert '= "merge_group"' in run and '"${DETECT_RESULT}" = "success"' in run
+
+
+def test_plain_cmake_summary_is_requireable() -> None:
+    jobs, run = _assert_requireable(
+        "pr-plain-cmake.yml",
+        "plain-cmake · all",
+        # abidiff is advisory (docs/ci/README.md) and skipped in the queue.
+        not_in_needs=frozenset({"abidiff"}),
+        skip_on_merge_group=frozenset({"abidiff"}),
+    )
+    # a merge_group skip passes only when detect succeeded and found nothing
+    assert '"merge_group"' in run and 'DETECT_RESULT"] == "success"' in run
+    assert "!= 'merge_group'" in jobs["abidiff"]["if"]
+    # queue cost cap: the add_subdirectory consumer runs only its `none` leg
+    assert "merge_group" in jobs["consumer-add-subdirectory"]["strategy"]["matrix"]["som"]
+
+
+def test_abi_snapshot_summary_is_requireable() -> None:
+    jobs, run = _assert_requireable(
+        "pr-abi-snapshot.yml",
+        "abi-snapshot · all",
+        skip_on_merge_group=frozenset({"snapshot-diff"}),
+        detect_on_merge_group=False,  # PR-to-main diff only; see below
+    )
+    data = _load("pr-abi-snapshot.yml")
+    triggers = data.get("on", data.get(True))
+    # PR trigger keeps its main/release/** branch semantics.
+    assert triggers["pull_request"]["branches"] == ["main", "release/**"]
+    # The diff is PR-only; on merge_group the summary passes explicitly
+    # ("not applicable") rather than hanging or silently skipping.
+    assert "github.event_name == 'pull_request'" in jobs["snapshot-diff"]["if"]
+    assert "not applicable on merge_group" in run
+
+
+def test_every_push_or_queue_detect_checks_out_before_dorny() -> None:
+    """dorny/paths-filter diffs with git on push/merge_group; with no checkout
+    it dies with `not a git repository` (exit 128) and the required summary
+    goes red on every push. Every `detect` that can run on those events must
+    check out (full history) BEFORE the filter step; merge_group must also
+    pass the queue's base_sha."""
+    checked = 0
+    for wf in sorted(_WF.glob("*.yml")):
+        data = yaml.safe_load(wf.read_text(encoding="utf-8"))
+        job = (data.get("jobs") or {}).get("detect")
+        if not job:
+            continue
+        steps = job["steps"]
+        idx = [
+            i for i, s in enumerate(steps)
+            if s.get("uses", "").startswith("dorny/paths-filter@")
+        ]
+        if not idx:
+            continue
+        triggers = data.get("on", data.get(True))
+        cond = str(job.get("if", ""))
+        runs_on_push = "push" in triggers
+        # detect runs on the queue unless its `if:` excludes it (`== 'pull_request'`
+        # only, or `!= 'merge_group'`).
+        runs_on_queue = "merge_group" in triggers and (
+            not cond or ("!=" in cond and "!= 'merge_group'" not in cond)
+        )
+        if not (runs_on_push or runs_on_queue):
+            continue
+        checked += 1
+        co = [
+            s for s in steps[: idx[0]]
+            if s.get("uses", "").startswith("actions/checkout@")
+        ]
+        assert co, f"{wf.name}: detect runs on push/merge_group without a checkout"
+        assert co[0].get("with", {}).get("fetch-depth") == 0, wf.name
+        assert "'pull_request'" not in co[0].get("if", "").replace("!= 'pull_request'", ""), wf.name
+        with_ = steps[idx[0]]["with"]
+        if runs_on_queue:
+            assert "merge_group.base_sha" in str(with_), wf.name
+        if runs_on_push:
+            # an empty base on push diffs the default branch, false-passing main
+            assert "github.event.before" in str(with_.get("base", "")), wf.name
+    assert checked >= 6, "expected the six push/merge_group detect jobs"

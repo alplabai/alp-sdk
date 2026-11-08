@@ -155,6 +155,38 @@ def sysbuild_family_base_conf(project: BoardProject) -> Optional[Path]:
     return base if base.is_file() else None
 
 
+_AEN_DEV_SIGNING_KEY = "mcuboot_shared_dev_ecdsa_p256.pem"
+
+
+def sysbuild_default_signing_key(project: BoardProject) -> Optional[Path]:
+    """Absolute path of the shared dev key the curated AEN base relies on,
+    or None when no default applies (#2950).
+
+    A sysbuild conf file cannot carry an absolute path, and a relative
+    `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` resolves against
+    `${MCUBOOT_DIR}` in the MCUboot child and against
+    `APPLICATION_CONFIG_DIR`/`${WEST_TOPDIR}` in the app signer --
+    never the alp-sdk checkout.  So the curated
+    `zephyr/sysbuild/aen/sysbuild.conf` ships no key; the orchestrator
+    passes this path as an absolute `-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE`.
+
+    Applies only when an MCUboot overlay is emitted for a family with a
+    curated base, `boot.signing.key_file` is unset (an explicit key wins)
+    and the algorithm is the base's ECDSA-P256 (the dev key is P-256).
+    """
+    if sysbuild_family_base_conf(project) is None:
+        return None
+    if "SB_CONFIG_BOOTLOADER_MCUBOOT=y" not in emit_sysbuild_conf(project):
+        return None
+    sign = (project.boot or {}).get("signing") or {}
+    if sign.get("key_file"):
+        return None
+    if (sign.get("algorithm") or "ecdsa_p256").lower() != "ecdsa_p256":
+        return None
+    key = REPO / "keys" / _AEN_DEV_SIGNING_KEY
+    return key if key.is_file() else None
+
+
 def emit_sysbuild_conf(project: BoardProject) -> str:
     """Emit the sysbuild.conf overlay for the project's `boot:` block.
 
@@ -231,8 +263,9 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
     }.get(algo)
     if algo_kc:
         lines.append(algo_kc)
-    if sign.get("key_file"):
-        lines.append(f'SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="{sign["key_file"]}"')
+    # `signing.key_file` is NOT written here: a conf file cannot anchor a
+    # path (see sysbuild_default_signing_key).  The orchestrator resolves it
+    # against the board.yaml directory and passes an absolute -D instead.
     swap_explicit = boot.get("swap_algorithm")
     swap = (swap_explicit or "").lower()
     single_slot = _boot_target_is_single_slot(project)
