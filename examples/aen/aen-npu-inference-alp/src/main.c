@@ -97,6 +97,21 @@ int main(void)
 	printk(
 	    "input      : %u bytes @ %p (%s)\n", (unsigned)in.size_bytes, in.data, alp_status_name(s));
 
+	/* Clear the OUTPUT tensor before invoking.  The arena lives in SRAM0, which
+	 * gets no load-copy and holds power-on garbage (or the previous run's result)
+	 * at boot, so "output is non-zero" proves nothing unless the output starts at
+	 * a known value.  The descriptor is valid before invoke; zero it here so any
+	 * non-zero byte afterwards was written by the NPU during this invoke. */
+	alp_inference_tensor_t out = { 0 };
+	s                          = alp_inference_get_output(inf, 0, &out);
+	if (s != ALP_OK || out.data == NULL) {
+		printk("RESULT FAIL: alp_inference_get_output -> %s\n", alp_status_name(s));
+		alp_inference_close(inf);
+		return 0;
+	}
+	memset(out.data, 0, out.size_bytes);
+	g_out_bytes = (uint32_t)out.size_bytes;
+
 	/* Run inference -- the fused Ethos-U custom op dispatches onto the NPU. */
 	s               = alp_inference_invoke(inf);
 	g_invoke_status = (int)s;
@@ -106,17 +121,8 @@ int main(void)
 		return 0;
 	}
 
-	alp_inference_tensor_t out = { 0 };
-	s                          = alp_inference_get_output(inf, 0, &out);
-	if (s != ALP_OK || out.data == NULL) {
-		printk("RESULT FAIL: alp_inference_get_output -> %s\n", alp_status_name(s));
-		alp_inference_close(inf);
-		return 0;
-	}
-	g_out_bytes = (uint32_t)out.size_bytes;
-
-	/* Scan the output: PASS requires a non-zero tensor (an all-zero output
-	 * despite invoke OK would mean the NPU never actually wrote it). */
+	/* Scan the output: PASS requires a non-zero tensor.  Because the output was
+	 * zeroed before invoke, an all-zero result means the NPU never wrote it. */
 	const uint8_t *ob          = (const uint8_t *)out.data;
 	uint32_t       n           = out.size_bytes < 16u ? (uint32_t)out.size_bytes : 16u;
 	bool           any_nonzero = false;

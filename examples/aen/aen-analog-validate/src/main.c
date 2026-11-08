@@ -169,35 +169,43 @@ int main(void)
 	printk("error       : %d uV (|err| %u, tol +/-%d uV)\n", err_uv, abs_err_uv, TOLERANCE_UV);
 
 	/*
-	 * PASS gate = the VERIFIABLE software contract: the portable
-	 * <alp/dac.h>/<alp/adc.h> API works on silicon (open + program + read all
-	 * succeed).  The loopback TRACK (ADC reading == DAC setpoint) ADDITIONALLY
-	 * needs the DAC0 pad to physically reach the ADC channel being read -- which
-	 * adc12 instance+channel the DAC0 pad (A16/P2_2) lands on is a TRM/jumper
-	 * value (BENCH-TBD, NOT invented; this example reads adc12_0 ch0, a plausible
-	 * default).  So PASS gates on the API contract; the track result is reported
-	 * as a separate, pad-route-gated line (no absolute-accuracy assertion --
-	 * buffer/load/trim + the unknown pad route shift the reading).
+	 * PASS gate = the whole loop works: every call succeeded (DAC readback AND
+	 * ADC read -- a failed alp_dac_read_mv leaves dac_mv at 0, which would turn
+	 * the setpoint into 0 uV and make the comparison meaningless) AND the ADC
+	 * reading lands within +/-TOLERANCE_UV of the DAC setpoint.  An open jumper,
+	 * a wrong ADC channel or a dead DAC leaves the ADC on a floating pad, so the
+	 * track check is what makes this a real analog test.
+	 *
+	 * Which adc12 instance+channel the DAC0 pad (A16/P2_2) lands on is a
+	 * TRM/jumper value (BENCH-TBD, NOT invented; this example reads adc12_0 ch0,
+	 * a plausible default), so an OUT-OF-TOL FAIL names the route as the first
+	 * thing to check.  No absolute-accuracy claim: the tolerance is generous.
 	 */
-	bool calls_ok = (s_adc == ALP_OK);
+	bool calls_ok = (s_rd == ALP_OK) && (s_adc == ALP_OK);
 	bool track_ok = (abs_err_uv <= (uint32_t)TOLERANCE_UV);
 
-	if (calls_ok) {
-		printk("RESULT PASS: portable <alp/*> analog API works on E8 -- "
-		       "alp_dac programmed %d uV + alp_adc read %d uV (both status=0). "
-		       "loopback track: %s (|err|=%u, tol +/-%d uV)%s\n",
+	if (calls_ok && track_ok) {
+		printk("RESULT PASS: portable <alp/*> analog loopback tracks on E8 -- "
+		       "alp_dac programmed %d uV + alp_adc read %d uV "
+		       "(|err|=%u, tol +/-%d uV)\n",
 		       setpoint_uv,
 		       adc_uv,
-		       track_ok ? "IN-TOL" : "OUT-OF-TOL",
 		       abs_err_uv,
-		       TOLERANCE_UV,
-		       track_ok ? "" : " -- DAC0->ADC pad/channel route is BENCH-TBD");
-	} else {
+		       TOLERANCE_UV);
+	} else if (!calls_ok) {
 		printk("RESULT FAIL: portable analog API call did not succeed "
-		       "(adc_read=%d read=%d uV setpoint=%d uV)\n",
+		       "(dac_read=%d adc_read=%d setpoint=%d uV)\n",
+		       (int)s_rd,
 		       (int)s_adc,
-		       adc_uv,
 		       setpoint_uv);
+	} else {
+		printk("RESULT FAIL: loopback OUT-OF-TOL -- alp_dac programmed %d uV, alp_adc read "
+		       "%d uV (|err|=%u, tol +/-%d uV); check the DAC0->ADC pad/channel route "
+		       "(BENCH-TBD) and the jumper\n",
+		       setpoint_uv,
+		       adc_uv,
+		       abs_err_uv,
+		       TOLERANCE_UV);
 	}
 
 	alp_adc_close(adc);
