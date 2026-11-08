@@ -15,7 +15,7 @@
  *     overwriting the region with 0xFF.  `instance_id` is the flash-area
  *     ID of the partition.  The mount is found by its BACKING partition,
  *     not its name: the generated `alp_storage_mounts[]` entry whose
- *     `storage_dev == FIXED_PARTITION_ID(<name>_partition)` and whose
+ *     `storage_dev == PARTITION_ID(<name>_partition)` and whose
  *     `mnt_point` is currently mounted (any board.yaml `mount:` such as
  *     `/lfs/settings`).  It accepts an open only for a FS_LITTLEFS
  *     mount; otherwise it declines with ALP_ERR_NOSUPPORT and

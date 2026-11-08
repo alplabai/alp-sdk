@@ -1433,6 +1433,9 @@ static int transceive(const struct device *dev,
 		reg_data = DW_SPI_IMR_MASK; /* no interrupts -- we drive it ourselves */
 	}
 
+#ifdef CONFIG_SPI_DW_ALIF_USE_DMA
+	spi->xfer_uses_dma = use_dma; /* read by spi_dw_isr() */
+#endif
 	write_imr(dev, reg_data);
 
 	if (!spi_dw_is_slave(spi)) {
@@ -1562,10 +1565,9 @@ void spi_dw_isr(const struct device *dev)
 	if (int_status & DW_SPI_ISR_ERRORS_MASK) {
 		error = -EIO;
 #ifdef CONFIG_SPI_DW_ALIF_USE_DMA
-		const struct spi_dw_config *info = dev->config;
 		struct spi_dw_data *spi = dev->data;
 
-		if (info->dma_rx.enabled || info->dma_tx.enabled) {
+		if (spi->xfer_uses_dma) {
 			/* Only set sync_status and signal thread context,
 			 * do not call dma_stop here
 			 */

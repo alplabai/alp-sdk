@@ -251,8 +251,11 @@ alp_status_t alp_wdt_disable(alp_wdt_t *wdt);
  * @brief Release the handle.  NULL is a no-op.
  *
  * @par What this does NOT do
- * This does **not** disable the watchdog (see docs/abi-markers.md for
- * the v0.17.0 behaviour-change note on why).  Call @ref alp_wdt_disable
+ * On Zephyr this does **not** disable the watchdog (see docs/abi-markers.md
+ * for the v0.17.0 behaviour-change note on why).  The Yocto backend is the
+ * exception: it disarms on close (see the backend list below), so portable
+ * code that hands supervision off by closing its handle is only protected
+ * on Zephyr.  Call @ref alp_wdt_disable
  * explicitly BEFORE close() if a best-effort, SoC-wide disable is
  * genuinely what the caller wants; its documented @ref
  * ALP_ERR_NOSUPPORT return tells you when the hardware can't honour
@@ -287,8 +290,8 @@ alp_status_t alp_wdt_disable(alp_wdt_t *wdt);
  *     that protection is not restored; the failed @ref alp_wdt_open
  *     call's return does not distinguish this from a reclaim attempt
  *     that never touched the device.
- *   - Yocto: closes this handle's own `/dev/watchdogN`, attempting a
- *     best-effort disarm (`WDIOS_DISABLECARD`, plus the magic-close
+ *   - Yocto: **disarms on close** (unlike Zephyr).  Closes this handle's
+ *     own `/dev/watchdogN`, attempting a best-effort disarm (`WDIOS_DISABLECARD`, plus the magic-close
  *     write if the driver advertised it) first -- scoped to this
  *     handle's own device node, never another handle's.
  *

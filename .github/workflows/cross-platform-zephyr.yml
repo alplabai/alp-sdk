@@ -15,18 +15,17 @@
 # ubuntu-latest).  This workflow ADDS Mac + Win coverage; it does
 # not replace any existing gate.
 #
-# `merge_group` (2026-09, merge-queue speed pass): `python-smoke` and
-# `loader-smoke` now SKIP unconditionally on this event instead of
-# force-running the ubuntu-only leg. Neither job is a required context on
-# `dev` (see the NOTE below), and every commit reaching the merge queue
-# already ran this exact job on `pull_request` first -- re-running it here
-# re-validates nothing new and only takes a runner slot from the same
-# shared pool the REQUIRED `twister-shard`/`distro-install` jobs are
-# waiting on (merge-queue-ejection-alarm.yml exists because of a real
-# runner-starvation ejection, alp-sdk#1952/#1887). See each job's own `if:`
-# comment for the mechanics. The `merge_group:` trigger below stays --
-# removing it would reopen #1415 for whichever future PR promotes
-# `python-smoke · all` to required.
+# `merge_group`: `python-smoke` runs its ubuntu-latest leg on this event
+# when `detect` (git diff against the queue's base_sha) finds a watched path
+# (alp-sdk#2972) because `python-smoke · all` is a required context on
+# `dev`, so the queue tests the rebased content, not only the PR head.
+# macOS/Windows legs stay pull_request/push-only to keep the shared runner
+# pool free for the REQUIRED `twister-shard`/`distro-install` jobs
+# (merge-queue-ejection-alarm.yml exists because of a real runner-starvation
+# ejection, alp-sdk#1952/#1887). `loader-smoke` still skips on merge_group;
+# it is not required. See each job's own `if:` comment for the mechanics.
+# The `merge_group:` trigger below stays --
+# removing it would reopen #1415 now that `python-smoke · all` is required.
 #
 # Operating mode:
 #
@@ -47,8 +46,9 @@
 #     30441032872) whose per-STEP conclusions -- not the job
 #     conclusions the override forged -- were 24/24 clean.
 #
-#     NOTE: this workflow's jobs are not in dev's or main's
-#     required-status-check list (verified via
+#     NOTE: `dev` requires ONLY the `python-smoke · all` summary context
+#     from this workflow. The matrix jobs themselves are not in dev's or
+#     main's required-status-check list (verified via
 #     `.../branches/{dev,main}/protection/required_status_checks`,
 #     neither of which lists any of the six real check-run names --
 #     `python-smoke (ubuntu-latest)`, `python-smoke (macos-latest)`,
@@ -172,28 +172,24 @@ on:
     branches: [main, dev]
   push:
     branches: [main]
-  # NOT yet load-bearing -- python-smoke/loader-smoke are not required
-  # contexts on `dev` or `main` today (see the NOTE above, alp-sdk#1528).
-  # Added ahead of that promotion anyway: `dev` runs an active merge-queue
+  # Load-bearing: `python-smoke · all` is a required context on `dev`
+  # (see the NOTE above, alp-sdk#1528). `dev` runs an active merge-queue
   # ruleset, and GitHub raises `merge_group` -- not `push` or
   # `pull_request` -- for a queued entry. pr-twister.yml and
   # pr-static-analysis.yml already needed this for their own required
   # contexts (#1415); a future required-context here would hit the same
-  # AWAITING_CHECKS hang without it. Bare (no `paths:`): `merge_group`
-  # doesn't support the same path-filter semantics `pull_request`/`push`
-  # get above, and the `detect` job below is gated OFF on `merge_group`
-  # rather than trusted to resolve a merge-queue base/head pair correctly
-  # (that isn't something this repo has verified -- same call
-  # `pr-bootstrap-distro-install.yml`'s own `detect` job makes). `merge_group`
+  # AWAITING_CHECKS hang without it. Bare (no `paths:`): the path filter
+  # lives in the `detect` job below, which also runs on `merge_group` (checkout
+  # + `base` = the queue's base_sha, #2972). `merge_group`
   # also can't be scoped by matrix leg at the trigger level, so each
   # matrix job below scopes its own `strategy.matrix.os` (a job-level
   # `if:` can't do this -- `matrix` isn't in the context list
   # `jobs.<job_id>.if` gets, enforced by scripts/check_workflow_expressions.py)
   # to just `ubuntu-latest` on that event -- this PRESUMES the eventual
   # required context ends up ubuntu-latest-only (alp-sdk#1528 leaves that
-  # open) -- since `merge_group` fires unconditionally on every `dev`
-  # merge-queue entry with no `paths:` to narrow it, and the other two
-  # legs would otherwise bill full matrix cost (macOS 10x, Windows 2x) on
+  # open) -- since `merge_group` fires on every `dev`
+  # merge-queue entry (detect only narrows it to relevant ones), and the other
+  # two legs would otherwise bill full matrix cost (macOS 10x, Windows 2x) on
   # every queue entry while gating nothing. If the maintainer instead
   # requires the macOS/Windows contexts, widen this cap to include those
   # legs FIRST -- promoting them as required while they're capped out of
@@ -216,22 +212,40 @@ jobs:
   # Cheap path detector -- NOT a required context itself, same shape as
   # pr-bootstrap-distro-install.yml's own `detect` job (copied, not
   # reinvented -- see that file's comment for the full rationale).
-  # Gated off on `merge_group` (see the trigger comment above); always
-  # runs fast on `pull_request`/`push`/`workflow_dispatch`. Its output
+  # Runs on every event but `workflow_dispatch` (git diff against the
+  # queue's base_sha on `merge_group`, the pre-push SHA on `push`, the API on
+  # `pull_request`). Its output
   # gates the heavy matrix jobs below.
   # ---------------------------------------------------------------
   detect:
-    if: github.event_name != 'merge_group'
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
     steps:
+      # push / merge_group: dorny diffs with git, so it needs a checkout WITH
+      # history (a bare runner has no repo: `fatal: not a git repository`, exit
+      # 128, which reddened the summary on every push). pull_request uses the API.
+      - name: Checkout (history for the git diff)
+        if: github.event_name != 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
       - name: Detect cross-platform-zephyr-relevant changes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         timeout-minutes: 2
         with:
+          # merge_group: the queue's base commit. push: the pre-push SHA, so the
+          # diff is before..after (empty base would diff the default branch
+          # against main and false-pass every post-merge push; an all-zero
+          # `before` on a new branch falls back to the default merge-base).
+          # pull_request: empty, dorny uses the API.
+          base: ${{ github.event.merge_group.base_sha || (github.event_name == 'push' && github.event.before) || '' }}
           filters: |
             relevant:
               - 'metadata/**'
@@ -271,18 +285,13 @@ jobs:
     # succeeded, AND genuinely found no watched path changed. Anything
     # else (workflow_dispatch, a `detect` non-success) runs the real job.
     #
-    # `merge_group` is now an EXPLICIT skip, not a forced run (2026-09,
-    # merge-queue speed pass): this job is not a required context on `dev`
-    # (see the header NOTE), and the content a queue entry carries already
-    # ran this exact job on `pull_request` before it was ever enqueued --
-    # re-running it here only burns a runner slot from the same shared pool
-    # the REQUIRED `twister-shard`/`distro-install` jobs are waiting on
-    # (`merge-queue-ejection-alarm.yml` exists because of a real runner-
-    # starvation ejection, alp-sdk#1952/#1887). The `merge_group` trigger
-    # stays on the workflow (removing it would reopen #1415 for whichever
-    # future PR promotes `python-smoke · all` to required); only this job's
-    # `if:` changes. Re-widen this the day that promotion happens.
-    if: always() && github.event_name != 'merge_group' && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
+    # `merge_group` runs this job when `detect` (diff against the queue's
+    # base_sha) finds a watched path (alp-sdk#2972): `python-smoke · all` is a
+    # required context on `dev`, so the queue tests the rebased content. The
+    # matrix below caps the queue run to the ubuntu-latest leg
+    # (macOS/Windows stay pull_request/push-only) to keep the shared runner
+    # pool free for the required twister shards (alp-sdk#1952/#1887).
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     runs-on: ${{ matrix.os }}
     # #1477: worst observed successful run 1068s/17.8min (windows-latest,
     # across 9 sampled runs) -- driven by the `pytest tests/scripts/`
@@ -623,19 +632,9 @@ jobs:
               exit 0
               ;;
             skipped)
-              # merge_group: python-smoke's own `if:` now skips it
-              # unconditionally (merge-queue speed pass, 2026-09) -- the
-              # content already ran this exact job on `pull_request` before
-              # the entry was enqueued, and re-running it here only takes a
-              # runner slot from the required twister-shard/distro-install
-              # jobs' shared pool. Not conditioned on `detect` at all: unlike
-              # the pull_request/push case below, this skip does not depend
-              # on which paths changed.
-              if [ "${EVENT_NAME}" = "merge_group" ]; then
-                echo "PASS: python-smoke intentionally skipped on merge_group -- already graded on this content via pull_request before the entry was enqueued"
-                exit 0
-              fi
-              if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ]; } \
+              # merge_group is path-filtered like the other events (detect runs
+              # there against base_sha); any other skip is a broken gate.
+              if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ] || [ "${EVENT_NAME}" = "merge_group" ]; } \
                  && [ "${DETECT_RESULT}" = "success" ] && [ "${DETECT_RELEVANT}" != "true" ]; then
                 echo "PASS: python-smoke legitimately skipped -- detect ran, succeeded, and found no watched path changed"
                 exit 0

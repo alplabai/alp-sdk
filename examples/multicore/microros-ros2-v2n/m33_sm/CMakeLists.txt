@@ -75,4 +75,5 @@ set(_rpmsg_v2n_src ${ALP_SDK_ROOT}/zephyr/drivers/ipc)
 
 target_include_directories(app PRIVATE ${LIBMETAL_INCLUDE_DIR} ${OPENAMP_INCLUDE_DIR}
                             ${PLATFORM_DIR} src ${_rpmsg_v2n_src})
-target_sources(app PRIVATE src/main.c src/rpmsg_link.c ${_rpmsg_v2n_src}/resource_table.c)
+target_sources(app PRIVATE src/main.c src/rpmsg_link.c ${_rpmsg_v2n_src}/resource_table.c
+                           ${_rpmsg_v2n_src}/alp_v2n_beacon.c)

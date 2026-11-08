@@ -1,0 +1,3 @@
+### Changed — `pr-doc-drift.yml` is safe to require: `doc-drift · all` summary context, `merge_group` trigger (#2972)
+
+The doc-drift workflow had no `merge_group:` trigger, so requiring it would have hung the merge queue (#1415). It now triggers on `merge_group` (the gate job runs on the queue ref) and a static-named `doc-drift · all` summary job always reports, failing on any non-success result. `docs/ci/README.md` now lists `dev`'s required contexts. The maintainer adds `doc-drift · all` to `dev` branch protection after this merges. `python-smoke` now runs its ubuntu-latest leg in the merge queue too, so the required `python-smoke · all` grades the rebased queue content instead of passing on a skip (macOS/Windows legs stay pull_request/push-only).

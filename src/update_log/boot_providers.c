@@ -227,6 +227,9 @@ alp_status_t ulog_alif_atoc_locate(const uint8_t *mram,
 		}
 		cert += (uint64_t)wl * 4 + CERT_SIG_LEN;
 	}
+	if (c == NULL) {
+		return ALP_ERR_NOSUPPORT;
+	}
 	if (get_u32le(c) != CERT_MAGIC_CONTENT || CERT_FLAGS_NREC(get_u32le(c + 12)) != 1u ||
 	    (uint64_t)wl * 4 < CERT_REC_LEN || (uint64_t)wl * 4 - CERT_REC_LEN != CERT_REC_OFF) {
 		return ALP_ERR_NOSUPPORT;

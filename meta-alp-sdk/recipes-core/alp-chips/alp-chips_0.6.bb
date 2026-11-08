@@ -19,10 +19,8 @@ HOMEPAGE    = "https://github.com/alplabai/alp-sdk"
 LICENSE     = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=787726818c896f394f6627ab59d98d69"
 
-# Pinned to the v0.6 release tag; CI bumps SRCREV when alp-sdk
-# tags a new release.
+# SRCREV (the release-tag commit) comes from alp-sdk-version.inc.
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
-SRCREV  = "${AUTOREV}"
 require recipes-core/alp-sdk/alp-sdk-version.inc
 # Links the per-machine libalp_sdk.so, so must not be shared across machines (#2850).
 PACKAGE_ARCH = "${MACHINE_ARCH}"

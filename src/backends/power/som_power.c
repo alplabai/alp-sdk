@@ -230,6 +230,21 @@ __weak int alp_som_power_pad_read(const struct gpio_dt_spec *s)
 
 static bool _pads_applied;
 
+/* Apply the domains' pinctrl state once.  Shared by pin_assert() and prior_active():
+ * the state enables each pad's input buffer, so a pad read before it is applied
+ * returns 0 whatever the pad carries. */
+static alp_status_t pads_ensure(void)
+{
+	if (_pads_applied) {
+		return ALP_OK;
+	}
+	alp_status_t pa = alp_som_power_pads_apply();
+	if (pa == ALP_OK) {
+		_pads_applied = true;
+	}
+	return pa;
+}
+
 static alp_status_t pin_assert(const struct gpio_dt_spec *s, bool asserted)
 {
 	if (s->port == NULL || !device_is_ready(s->port)) {
@@ -243,12 +258,9 @@ static alp_status_t pin_assert(const struct gpio_dt_spec *s, bool asserted)
 	/* The pads are muxed and pad-configured by the node's pinctrl-0 state, applied
 	 * once before the first drive.  A missing or failing state refuses the drive:
 	 * levels written to an unmuxed pad would be reported as success and do nothing. */
-	if (!_pads_applied) {
-		alp_status_t pa = alp_som_power_pads_apply();
-		if (pa != ALP_OK) {
-			return pa;
-		}
-		_pads_applied = true;
+	alp_status_t pa = pads_ensure();
+	if (pa != ALP_OK) {
+		return pa;
 	}
 	int rc = gpio_pin_configure_dt(s, asserted ? GPIO_OUTPUT_ACTIVE : GPIO_OUTPUT_INACTIVE);
 	if (rc != 0) {
@@ -728,6 +740,13 @@ static bool prior_active(alp_power_domain_t d)
 	const sompd_t *p = &_reg[d];
 	if (p->action == SOMPD_A_ENABLE_LOW && p->enable.port != NULL &&
 	    device_is_ready(p->enable.port)) {
+		/* Read only after the pinctrl state is applied: before that the pad's input
+		 * buffer is off, an output pad reads 0, and a backlight that is on would be
+		 * recorded as "was off" and never restored.  A state that cannot be applied
+		 * counts as "was on", like a read error. */
+		if (pads_ensure() != ALP_OK) {
+			return true;
+		}
 		int v = gpio_pin_get_dt(&p->enable);
 		return v != 0; /* a read error counts as "was on" */
 	}

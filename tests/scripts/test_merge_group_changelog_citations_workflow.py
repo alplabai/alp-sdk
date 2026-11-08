@@ -56,13 +56,16 @@ def test_merge_queue_citation_workflow_is_dedicated_and_requireable() -> None:
     assert job["name"] == "changelog citations · merge queue"
     assert "if" not in job
 
-    # The expensive metadata sweep must remain off merge_group; this small
-    # workflow is what covers the queue instead. Note the job name is stable
+    # This small workflow is what covers the queue's citations. Note the job name is stable
     # but NOT requireable as shaped: the pull_request leg is path-filtered, so
     # an ordinary PR reports no check run and a required context would stall at
     # "Expected -- Waiting for status to be reported". See the workflow's own
     # job comment.
-    assert "merge_group" not in _on_block(_load(METADATA_WORKFLOW))
+    # (#2972 made pr-metadata-validate.yml's `metadata-validate · all` a
+    # requireable context, so it now carries merge_group too -- minus its
+    # pytest sweep. Its citation step skips on merge_group; this workflow
+    # stays the queue's citation verdict.)
+    assert "merge_group" in _on_block(_load(METADATA_WORKFLOW))
 
 
 def test_merge_queue_citation_workflow_uses_the_event_base_sha() -> None:

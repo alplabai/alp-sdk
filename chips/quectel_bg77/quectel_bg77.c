@@ -59,8 +59,22 @@ alp_status_t quectel_bg77_read_response(quectel_bg77_t *dev,
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 	if (buf == NULL || max == 0) return ALP_ERR_INVAL;
-	alp_status_t s = alp_uart_read(dev->port, buf, max, timeout_ms);
-	if (s == ALP_OK && received_out != NULL) *received_out = max;
+	/* AT replies are variable length, and alp_uart_read() returns ALP_OK only
+	 * for a FULL len-byte read: read byte by byte against one deadline and
+	 * count what arrived.  ALP_OK when >= 1 byte arrived, ALP_ERR_TIMEOUT
+	 * when none; another error ends the read and is returned as is. */
+	size_t       n        = 0;
+	uint64_t     deadline = alp_uptime_ms() + timeout_ms;
+	alp_status_t s        = ALP_OK;
+	while (n < max) {
+		uint64_t now  = alp_uptime_ms();
+		uint32_t left = (now < deadline) ? (uint32_t)(deadline - now) : 0u;
+		s             = alp_uart_read(dev->port, &buf[n], 1, left);
+		if (s != ALP_OK) break;
+		n++;
+	}
+	if (received_out != NULL) *received_out = n;
+	if (n == max || (s == ALP_ERR_TIMEOUT && n > 0)) return ALP_OK;
 	return s;
 }
 

@@ -50,8 +50,12 @@
 
 /* Shared global SRAM0 mailbox. Keep clear of the dualcore example beacons and
  * the OpenAMP vring carve-out used by aen-rpc-pingpong. */
-#define AEN_ULOG_REQ ((volatile struct aen_ulog_req *)0x02003000U)
-#define AEN_ULOG_RSP ((volatile struct aen_ulog_rsp *)0x02003100U)
+#ifndef AEN_ULOG_REQ_ADDR /* overridable so the host test can point at a buffer */
+#define AEN_ULOG_REQ_ADDR 0x02003000U
+#define AEN_ULOG_RSP_ADDR 0x02003100U
+#endif
+#define AEN_ULOG_REQ ((volatile struct aen_ulog_req *)(uintptr_t)AEN_ULOG_REQ_ADDR)
+#define AEN_ULOG_RSP ((volatile struct aen_ulog_rsp *)(uintptr_t)AEN_ULOG_RSP_ADDR)
 
 #define AEN_ULOG_MAGIC   0x554C4F47U /* "ULOG" */
 #define AEN_ULOG_VERSION 1U
@@ -59,8 +63,12 @@
 /* Bench proof beacons in global SRAM0, away from the request/reply mailboxes.
  * They are deliberately simple so a J-Link `mem32` read can prove owner/client
  * progress even when the UART capture misses early boot text. */
-#define AEN_ULOG_HP_BEACON       ((volatile uint32_t *)0x02000060U)
-#define AEN_ULOG_HE_BEACON       ((volatile uint32_t *)0x02001060U)
+#ifndef AEN_ULOG_HP_BEACON_ADDR
+#define AEN_ULOG_HP_BEACON_ADDR 0x02000060U
+#define AEN_ULOG_HE_BEACON_ADDR 0x02001060U
+#endif
+#define AEN_ULOG_HP_BEACON       ((volatile uint32_t *)(uintptr_t)AEN_ULOG_HP_BEACON_ADDR)
+#define AEN_ULOG_HE_BEACON       ((volatile uint32_t *)(uintptr_t)AEN_ULOG_HE_BEACON_ADDR)
 #define AEN_ULOG_HP_BEACON_MAGIC 0x554C4F90U
 #define AEN_ULOG_HE_BEACON_MAGIC 0x554C4FE0U
 
@@ -111,7 +119,23 @@ _Static_assert(sizeof(struct aen_ulog_rsp) <= 0x100U, "reply overruns the 0x0200
  * shares a cache line with the other direction's slot. A struct spans
  * several lines and a flush writes them back in no fixed order, so the
  * publisher flushes the payload first, fences, and only then writes and
- * flushes the line that carries seq. */
+ * flushes the line that carries seq.
+ *
+ * Cacheability: zephyr/soc-bridge/alif/mpu_regions_e8.c has no region for
+ * 0x02003000 (SRAM0 is only mapped when the image is linked into it, and then
+ * with the cacheable flash attribute), so the mailbox falls to the ARMv8-M
+ * default map: Normal, cacheable memory. The flush and invalidate above are
+ * therefore real when CONFIG_DCACHE=y and no-ops when it is n (the
+ * firmware-update-log example builds with n).
+ *
+ * Restart safety (either core may reset alone while SRAM0 is retained). The
+ * owner keeps last_seq and the client keeps g_client_seq in RAM; both restart
+ * at 0 while REQ->seq / RSP->seq survive. HP restart: the owner clears both
+ * seq words at start, so nothing stale is replayed. HE restart: the client
+ * seeds g_client_seq from the retained RSP->seq on its first call, so its
+ * seqs continue past the last one the owner served (== the owner's last_seq):
+ * a fresh REQ is never skipped as already seen and never matches the stale
+ * RSP. Each slot keeps a single writer. */
 #if defined(CONFIG_DCACHE) && !defined(CONFIG_CACHE_MANAGEMENT)
 #error "AEN M55 update-log mailbox needs CONFIG_CACHE_MANAGEMENT when CONFIG_DCACHE=y"
 #endif
@@ -192,6 +216,8 @@ static alp_status_t client_call(enum aen_ulog_op              op,
 			client_beacon(op, g_client_seq, rc);
 			return rc;
 		}
+		aen_mbox_invalidate(&AEN_ULOG_RSP->seq, sizeof(AEN_ULOG_RSP->seq));
+		g_client_seq       = AEN_ULOG_RSP->seq;
 		g_client_mhu_ready = true;
 	}
 

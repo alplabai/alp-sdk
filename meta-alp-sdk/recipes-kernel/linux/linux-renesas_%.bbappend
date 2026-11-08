@@ -91,6 +91,7 @@ SRC_URI:append = " \
     file://0030-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch \
     file://0031-gpio-gd32-bridge-gate-IO15-IO26-on-protocol-minor-16.patch \
     file://0032-gpio-gd32-bridge-gate-can-stby-on-protocol-minor-13.patch \
+    file://0033-watchdog-rzv2h_wdt-do-not-ping-the-WDT-after-it-is-s.patch \
     file://uio.cfg \
     file://e1m-v2n-doorbell.dtsi \
     file://panic.cfg \

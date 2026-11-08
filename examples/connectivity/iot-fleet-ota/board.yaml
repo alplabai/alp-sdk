@@ -101,25 +101,20 @@ chips:
 # see docs/secure-boot.md and docs/board-config-features.md
 # §Bootloader.
 #
-# `key_file:` is the SIGNING key, not a verification key: it becomes
-# `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE`, which imgtool signs with and
-# from which MCUboot extracts the public half at build time.  It must
-# therefore be a PRIVATE PEM -- a `.pub.pem` here cannot sign, and the
-# generated overlay layers AFTER the curated defaults, so a bad value
-# silently overrides `zephyr/sysbuild/aen/sysbuild.conf`.
-#
-# This points at the committed shared development key, matching that
-# same sysbuild.conf: the factory MCUboot on pre-provisioned modules
-# trusts it (#2421), and it is public, so it gives no security.
-# Production images are re-signed in the manufacturing CA's HSM, where
-# the private key never leaves the signer -- the build-time key is
-# never the production one (see docs/secure-boot.md "Signing key
-# lifecycle" and keys/README.md).
+# There is deliberately no `signing:` block.  `signing.key_file` is the
+# SIGNING key (it becomes `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE`, which
+# imgtool signs with), and board.schema.json resolves it relative to
+# this directory, where no key lives.  Left unset, the orchestrator
+# passes the committed shared development key
+# `keys/mcuboot_shared_dev_ecdsa_p256.pem` as an absolute, SDK-anchored
+# -D, matching `zephyr/sysbuild/aen/sysbuild.conf`: the factory MCUboot
+# on pre-provisioned modules trusts it (#2421), and it is public, so it
+# gives no security.  Production images are re-signed in the
+# manufacturing CA's HSM, where the private key never leaves the signer
+# -- the build-time key is never the production one (see
+# docs/secure-boot.md "Signing key lifecycle" and keys/README.md).
 boot:
   method: mcuboot
-  signing:
-    algorithm: ecdsa_p256
-    key_file:  keys/mcuboot_shared_dev_ecdsa_p256.pem
 
 # ----------------------------------------------------------------
 # OTA (project-wide, board.yaml v0.6 `ota:` block).

@@ -439,6 +439,29 @@ def test_refuses_tier_and_override_is_recorded(tmp_path):
     assert ctx.facts["dram_tier_check"].startswith("overridden")
 
 
+def test_preflight_tags_a_bundle_without_a_signature_unsigned(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.bundle.pop("signature", None)
+    ev = steps.Preflight().run(ctx).evidence
+    assert ev["rootfs_bundle_version"].startswith("unsigned:")
+    ctx.bundle["signature"] = {"key_id": "test"}
+    ev = steps.Preflight().run(ctx).evidence
+    assert not ev["rootfs_bundle_version"].startswith("unsigned:")
+
+
+def test_eeprom_manifest_refuses_before_writing_when_a_manifest_is_committed(tmp_path):
+    board = Board(xspi_bl2=BL2, xspi_fip=FIP)
+    ctx = _ctx(tmp_path, bench=_bench(), linux=board, execute=True)
+    ctx.unit_dir.mkdir(parents=True, exist_ok=True)
+    (ctx.unit_dir / f"{SERIAL}.manifest.bin").write_bytes(b"\x11" * 128)
+    before = bytes(board.array)
+    res = steps.run_steps(ctx, only=["eeprom_manifest"])
+    assert res[-1].status == "failed" and "--replace-identity" in res[-1].detail
+    assert bytes(board.array) == before                       # the EEPROM was never touched
+    assert not any("@0x50" in c and "|| exit 2" in c for c in board.commands)
+    assert (ctx.unit_dir / f"{SERIAL}.manifest.bin").read_bytes() == b"\x11" * 128
+
+
 def test_uboot_dram_banner_is_bucketed(tmp_path):
     ctx = _ctx(tmp_path)
     ok, _ = steps.tier_gate(ctx, 3994)            # "DRAM:  3.9 GiB" on a 4 GiB unit
@@ -1004,6 +1027,7 @@ def test_lock_refused_when_any_step_failed_in_the_state(tmp_path):
 
 def _record_with_bundle_facts(tmp_path, flash_status):
     ctx = _ctx(tmp_path, execute=True)
+    ctx.bundle["signature"] = {"key_id": "test"}      # a release-signed bundle: no `unsigned:` tag
     cat = dict(CATALOGUE["keys"], **{k: {"group": "firmware", "source": "", "mode": "auto",
                                         "ship_required": False}
                                     for k in ("bl2_sha256", "rootfs_bundle_version")})
@@ -1041,6 +1065,7 @@ def _record_after_supersession(tmp_path, old_sha, version="som-9.9.9", groups=No
     ctx.state = {"bundle_sha256": "cur", "steps": cur_steps or {},
                  "superseded": groups(grp) if groups else [grp(old_sha)]}
     ctx.bundle["release_version"] = version
+    ctx.bundle["signature"] = {"key_id": "test"}      # a release-signed bundle: no `unsigned:` tag
     steps.run_steps(ctx, only=["record"])
     u = ctx.unit_dir / f"{SERIAL}.unit.yaml"
     return u.read_text(encoding="utf-8") if u.exists() else ""
@@ -1123,7 +1148,7 @@ def test_record_superseded_build_dir_provenance_still_blocks_ship(tmp_path):
     f.write_text(text, encoding="utf-8")
     unit = ledger_out.read_unit_yaml(f)
     assert unit["disposition"] == "bench-only"       # record's build-dir default
-    assert any("unsigned --build-dir" in r for r in ledger_out.ship_check({**unit, "disposition": "ship"}, {}))
+    assert any("unsigned bundle" in r for r in ledger_out.ship_check({**unit, "disposition": "ship"}, {}))
 
 
 

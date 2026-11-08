@@ -159,8 +159,9 @@ static alp_status_t (*g_pwm_test_sysfs_read_hook)(const char *path,
  *
  * Opens @p path read-only, reads up to @p buf_sz - 1 bytes, and NUL-
  * terminates.  A missing/unreadable attribute maps errno -> alp via the
- * shared @ref alp_status_from_posix_errno baseline; used only for the
- * `npwm` out-of-range probe in y_open() (#1635) today.
+ * shared @ref alp_status_from_posix_errno baseline; used by y_open() for
+ * the `npwm` out-of-range probe (#1635) and for the polarity read-back
+ * that decides whether a rejected NORMAL polarity write is tolerated.
  *
  * @param buf_sz  Size of @p buf.  Must be >= 1 -- a 0 would underflow to
  *                `(size_t)-1` in the `buf_sz - 1` read length below.
@@ -341,13 +342,30 @@ y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilitie
 	h->flags          = (uint32_t)cfg->polarity;
 
 	/* polarity is write-rejected by some drivers while enabled, so set
-     * it before enabling.  EINVAL/ENOTSUP here is non-fatal: not every
-     * driver allows polarity inversion. */
-	const char *pol = (cfg->polarity == ALP_PWM_POLARITY_INVERTED) ? "inversed" : "normal";
+     * it before enabling.  A rejected write is only tolerable when the
+     * caller asked for NORMAL and the channel already reads back
+     * "normal" (a driver with no polarity support, or a reused channel
+     * that is already normal).  Otherwise open fails: carrying on would
+     * hand back a channel whose 0 % duty drives an active-low load fully
+     * ON and whose every duty is inverted. */
+	const bool  want_inv = (cfg->polarity == ALP_PWM_POLARITY_INVERTED);
+	const char *pol      = want_inv ? "inversed" : "normal";
 	char        pol_path[96];
 	n = snprintf(pol_path, sizeof(pol_path), "%s/polarity", d->dir);
-	if (n > 0 && (size_t)n < sizeof(pol_path)) {
-		(void)_sysfs_write(pol_path, pol); /* best-effort */
+	if (n < 0 || (size_t)n >= sizeof(pol_path)) {
+		_unexport_if_owned(d);
+		free(d);
+		return ALP_ERR_INVAL;
+	}
+	rc = _sysfs_write(pol_path, pol);
+	if (rc != ALP_OK) {
+		char cur[16] = { 0 };
+		if (want_inv || _sysfs_read(pol_path, cur, sizeof(cur)) != ALP_OK ||
+		    strncmp(cur, "normal", 6) != 0) {
+			_unexport_if_owned(d);
+			free(d);
+			return rc;
+		}
 	}
 
 	/* period before duty_cycle (ABI: duty_cycle <= period).  On any
