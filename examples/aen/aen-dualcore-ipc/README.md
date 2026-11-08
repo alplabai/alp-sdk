@@ -51,6 +51,17 @@ Recipe: dual ATOC HP `["load","boot"]` @0x50000000 + HE `["load"]` @0x58000000;
 `app-gen-toc` + `app-write-mram`; read the beacons over SWD; restore canonical
 slot0 after.
 
+## Build
+
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. Build the HP master + responder and the HE requester for the same SoM; use `aen801` or `aen803`:
+
+```sh
+west build -p always -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/aen-dualcore-ipc -d build/hp -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
+west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-dualcore-ipc -d build/he -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
+```
+
+For E1M-AEN803 use `alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp` and `alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`.
+
 ## Verdicts, timeouts, and the HE↔HP boot block on this bench
 
 Both HP and HE hold their verdict to a bounded window rather than looping

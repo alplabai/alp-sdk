@@ -865,3 +865,43 @@ def test_adc_range_is_rejected_on_a_part_other_than_ina228(gen_module):
     # An entry with no part at all, carrying adc_range, is rejected too.
     del doc["i2c_devices"][0]["part"]
     assert [e for e in validator.iter_errors(doc) if "i2c_devices" in list(e.absolute_path)]
+
+
+def _evk_doc() -> dict[str, Any]:
+    import yaml
+    return yaml.safe_load((REPO / "metadata/boards/e1m-evk.yaml").read_text(encoding="utf-8"))
+
+
+def _rev_macros(gbh, rev: str | None) -> dict[str, str]:
+    doc = _evk_doc()
+    routes = doc["e1m_routes"]
+    if rev:
+        routes = gbh.apply_rev_routes(routes, doc["hw_revisions"][rev])
+    return {e["macro"]: e["e1m"] for es in routes.values() for e in es}
+
+
+def test_r3_led_routes_follow_ug_e1m_001(gen_module):
+    m = _rev_macros(gen_module, "r3")
+    assert m["EVK_PIN_LED_RED"] == "E1M_GPIO_PWM3"
+    assert m["EVK_PIN_LED_GREEN"] == "E1M_GPIO_PWM0"
+    assert m["EVK_PIN_LED_BLUE"] == "E1M_GPIO_PWM1"
+    assert (m["EVK_PWM_LED_RED"], m["EVK_PWM_LED_GREEN"], m["EVK_PWM_LED_BLUE"]) == (
+        "E1M_PWM3", "E1M_PWM0", "E1M_PWM1")
+    assert "EVK_PIN_ENCODER_SW" not in m
+
+
+@pytest.mark.parametrize("rev", [None, "r1", "r2"])
+def test_r1_r2_and_default_led_map_unchanged(gen_module, rev):
+    m = _rev_macros(gen_module, rev)
+    assert m["EVK_PIN_LED_RED"] == "E1M_GPIO_PWM0"      # bench-verified 2026-07-28
+    assert m["EVK_PIN_LED_GREEN"] == "E1M_GPIO_PWM3"
+    assert m["EVK_PWM_LED_RED"] == "E1M_PWM0"
+    assert m["EVK_PIN_ENCODER_SW"] == "E1M_GPIO_IO4"
+    assert _evk_doc()["default_hw_rev"] == "r2"
+
+
+def test_header_gates_r3_overrides_behind_selector(gen_module):
+    text = gen_module.emit_board("e1m-evk", _evk_doc())
+    head, _, tail = text.partition("#ifdef ALP_E1M_EVK_HW_REV_R3")
+    assert "#define EVK_PIN_LED_RED        ALP_E1M_GPIO_PWM0" in head
+    assert "#define EVK_PIN_LED_RED ALP_E1M_GPIO_PWM3" in tail

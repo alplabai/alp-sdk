@@ -419,6 +419,11 @@ it sets the real wraparound rather than a display scale.
 
 ## Bring-up
 
+On the E1M EVK 2641-R3 the on-board RP2040 (`U55`, CMSIS-DAP) is the primary
+debugger and a SEGGER J-Link is optional; see
+[`aen-rp2040-debug-probe.md`](../aen-rp2040-debug-probe.md) (not
+bench-verified; VID/PID TBD).
+
 The general bring-up procedure in
 [`docs/getting-started.md`](../getting-started.md) covers AEN as
 the first-class target.  AEN ships at v0.1; most cross-family

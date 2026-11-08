@@ -1,0 +1,3 @@
+### Fixed — Yocto power backend arms the RTC wakealarm on the RTC that has one (#3077)
+
+**A timed `alp_power_request_sleep()` on V2N/V2M no longer writes to a `rtc0/wakealarm` that does not exist.** `src/backends/power/yocto_drv.c` hard-coded `/sys/class/rtc/rtc0/wakealarm`, but on those boards `rtc0` is the RV-3028 (`rtc-rv3028 8-0052`, no `wakealarm` attribute) and the SoC RTC with one is `rtc1` (`rtc-rtca3 11c00800.rtc`). The backend now scans `/sys/class/rtc/rtc0..rtc15/wakealarm`, uses the first that exists, and returns `ALP_ERR_NOSUPPORT` without touching `/sys/power/state` when no RTC offers one. `-DALP_YOCTO_POWER_WAKEALARM_PATH=...` still pins an explicit file and skips the scan; `-DALP_YOCTO_POWER_RTC_ROOT=...` moves the scan root for host tests.

@@ -53,15 +53,14 @@ index 2dc5a63b28f7..90baec979e1f 100644
  /* Peek the cached lines-24..27 status; same contract as the wifi/bt one. */
  static int gd32_bridge_cam_ldo_status(struct gd32_bridge_gpio *gd32)
  {
-@@ -959,6 +978,16 @@ static int gd32_bridge_wifi_bt_poll_once(struct gd32_bridge_gpio *gd32)
+@@ -959,6 +978,15 @@ static int gd32_bridge_wifi_bt_poll_once(struct gd32_bridge_gpio *gd32)
  	} else {
  		gd32->io_ext_status = 0;
  	}
 +	if (ver[0] != 0 || ver[1] < GD32_PROTO_MINOR_CAN_STBY) {
 +		if (gd32->can_stby_status != -ENODEV)
 +			dev_warn(gd32->chip.parent,
-+				 "bridge protocol %u.%u.%u has no can-stby line (need major 0, minor >= %u); line 20 will not be usable on this firmware
-+",
++				 "bridge protocol %u.%u.%u has no can-stby line (need major 0, minor >= %u); line 20 will not be usable on this firmware\n",
 +				 ver[0], ver[1], ver[2], GD32_PROTO_MINOR_CAN_STBY);
 +		gd32->can_stby_status = -ENODEV;
 +	} else {
@@ -70,7 +69,7 @@ index 2dc5a63b28f7..90baec979e1f 100644
  	if (ver[0] != 0 || ver[1] < GD32_PROTO_MINOR_CAM_LDO) {
  		if (gd32->cam_ldo_status != -ENODEV)
  			dev_warn(gd32->chip.parent,
-@@ -1048,11 +1077,11 @@ static int gd32_bridge_gpio_request(struct gpio_chip *chip,
+@@ -1048,11 +1076,11 @@ static int gd32_bridge_gpio_request(struct gpio_chip *chip,
  		return gd32_bridge_defer_or_again(ret);
  	}
  
@@ -86,7 +85,7 @@ index 2dc5a63b28f7..90baec979e1f 100644
  		return gd32_bridge_defer_or_again(ret);
  	}
  
-@@ -1991,6 +2020,7 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+@@ -1991,6 +2019,7 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
  	gd32->i2cm_khz = GD32_I2CM_DEFAULT_KHZ;
  	gd32->wifi_bt_reg_on_status = -EPROBE_DEFER;	/* not yet resolved */
  	gd32->io_ext_status = -EPROBE_DEFER;
@@ -94,7 +93,7 @@ index 2dc5a63b28f7..90baec979e1f 100644
  	gd32->cam_ldo_status = -EPROBE_DEFER;
  
  	gd32->chip.label	  = "gd32-bridge-gpio";
-@@ -2042,6 +2072,10 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+@@ -2042,6 +2071,10 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
  			gd32->io_ext_status = -ENODEV;
  		else
  			gd32->io_ext_status = 0;

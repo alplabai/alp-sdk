@@ -62,6 +62,8 @@ remains useful as a fast, non-destructive check that the pipeline is intact.
 
 ## Build + run — real model, Flow D (the measuring configuration)
 
+This app has no `board.yaml`, so there is no `tan build` path yet; it builds through the SDK-internal bench wrapper `scripts/bench/aen/build.sh`, from an alp-sdk checkout.
+
 ```sh
 export PATH="$ZEPHYR_SDK_INSTALL_DIR/gnu/arm-zephyr-eabi/bin:$PATH"
 export LG_PLACE=<your-bench-place>       # you must already hold this place's reservation

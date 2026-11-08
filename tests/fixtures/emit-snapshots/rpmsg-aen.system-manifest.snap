@@ -110,7 +110,6 @@ memory:
   write_authority: customer_runtime
   accessible_from:
   - m55_he
-  - m55_hp
 - name: atoc
   source: som_preset
   kind: flash
@@ -130,6 +129,16 @@ memory:
   write_authority: composite
   accessible_from:
   - a32_cluster
+  - m55_he
+  - m55_hp
+- name: sram_ipc
+  source: som_preset
+  kind: unclassified
+  status: ok
+  base: 37617664
+  size_bytes: 65536
+  write_authority: customer_runtime
+  accessible_from:
   - m55_he
   - m55_hp
 

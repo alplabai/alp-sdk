@@ -22,12 +22,11 @@ HOMEPAGE = "https://github.com/alplabai/alp-sdk"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=787726818c896f394f6627ab59d98d69"
 
-# Track the alp-sdk default branch; CI repins SRCREV to the release-tag
-# commit when alp-sdk tags a new release (same pattern as the other
-# alp-* recipes in this layer, e.g. alp-chips_0.6.bb).
+# SRCREV (the release-tag commit) comes from alp-sdk-version.inc.
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
-SRCREV  = "${AUTOREV}"
-PV      = "0.6.0"
+require recipes-core/alp-sdk/alp-sdk-version.inc
+# Links the per-machine libalp_sdk.so, so must not be shared across machines (#2850).
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 # Sub-path within the alp-sdk repo where the ROS package lives.
 S = "${WORKDIR}/git/examples/v2n/v2n-m1-ros-perception"

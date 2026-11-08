@@ -34,6 +34,7 @@ class ShellConsole(Console):
         self.corrupt = corrupt_pushes
         self.garble_end = 0     # garble the end marker of the next N printf/md5sum commands
         self.flashed: dict[int, bytes] = {}
+        self.erased: list[tuple[int, int]] = []
         self._out = b""
 
     def _read_raw(self, timeout):
@@ -103,9 +104,11 @@ class ShellConsole(Console):
             return "SWD id=0x0be12477\n", 0
         elif m := re.fullmatch(r"cd (\S+) && python3 gd32_swd_flash.py dump (\S+) (\S+) (\S+)", cmd):
             img = self.flashed.get(int(m[2], 0), bytes(range(256)) * (int(m[3], 0) // 256))
-            self.files[m[4]] = img[:int(m[3], 0)]
+            self.files[m[4]] = img[:int(m[3], 0)].ljust(int(m[3], 0), b"\xff")   # erased flash reads 0xFF
         elif m := re.fullmatch(r"cd (\S+) && python3 gd32_swd_flash.py write (\S+) (\S+)", cmd):
             self.flashed[int(m[2], 0)] = self.files[m[3]]
+        elif m := re.fullmatch(r"cd (\S+) && python3 gd32_swd_flash.py erase (\S+) (\S+)", cmd):
+            self.erased.append((int(m[2], 0), int(m[3], 0)))
         elif "gd32_swd_flash.py" in cmd:
             pass
         else:
@@ -316,6 +319,8 @@ def _console_flash_ctx(tmp_path, monkeypatch, console):
     monkeypatch.setattr(steps.lt, "console_login", lambda c, u: None)
     monkeypatch.setattr(steps.lt, "act88760_gpio4_held", lambda t, bus: False)
     monkeypatch.setattr(steps.lt, "gd32_bridge_version", lambda t, bus, addr: (0, 14, 0))
+    monkeypatch.setattr(steps.lt, "gd32_ota_state", lambda t, bus, addr: {"active": 0})
+    monkeypatch.setattr(steps.lt, "gd32_build_id", lambda t, bus, addr: "0.3.1+d53e3d90a19973")
     return _ctx(tmp_path / "ctx", bench=b, gd32_fw=_gd32_fw(tmp_path), execute=True)
 
 
@@ -332,6 +337,7 @@ def test_gd32_flash_end_to_end_over_the_console(tmp_path, monkeypatch):
     assert r.evidence["gd32_flash_transport"].startswith("console")
     assert r.evidence["gd32_dp_id"] == "0x0be12477" and r.evidence["network_after_gd32"] == "192.0.2.9"
     assert sorted(sh.flashed) == [a for _n, a, _k in steps.GD32_IMAGES]
+    assert sh.erased == [(steps.GD32_META_ADDR, steps.GD32_META_SIZE)]
     assert not any(re.search(r"(^|[ |;&])base64 ", c) for c in sh.ran)
 
 
@@ -675,3 +681,10 @@ def test_swd_flash_write_is_long_running_but_reads_are_not(tmp_path):
     writes = {c: lr for c, lr in calls if "gd32_swd_flash.py" in c}
     assert [lr for c, lr in writes.items() if " write " in c] == [True]
     assert [lr for c, lr in writes.items() if " dump " in c] == [False]
+
+
+def test_swd_probe_erase_runs_the_board_tool_long_running(tmp_path):
+    sh = ShellConsole()
+    p = ct.ConsoleSwdProbe(ct.ConsoleTarget(sh), tmp_path, ())
+    p.erase(0x08008000, 0x2000)
+    assert sh.erased == [(0x08008000, 0x2000)]

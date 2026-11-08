@@ -9,7 +9,7 @@
 #include "../../src/hud/hud.h"
 #include "../../src/ipc/tr_knob.h"
 
-/* A level well inside the range: 60 at the default 80 % ceiling, 20 at -DTR_BL_MAX_PCT=40. */
+/* A level well inside the range: 80 at the default 100 % ceiling, 20 at -DTR_BL_MAX_PCT=40. */
 #define LVL (TR_BL_MAX - 20u)
 
 static volatile tr_bl_t  rec;
@@ -236,7 +236,7 @@ static void test_request(void)
 	 * and junk -- each counted, the same bad word twice counted twice, and the level never moves */
 	const uint32_t bad[] = {
 		TR_BL_TAG | 5u,   TR_BL_TAG | 0u,  TR_BL_TAG | 101u, TR_BL_TAG | (TR_BL_MAX + 5u),
-		TR_BL_TAG | 100u, TR_BL_TAG | 33u, TR_BL_TAG | 11u,  TR_BL_TAG | 79u,
+		TR_BL_TAG | 105u, TR_BL_TAG | 33u, TR_BL_TAG | 11u,  TR_BL_TAG | 79u,
 		0x564F0028u,      0xA5A5A5A5u,     0xFFFFFFFFu
 	};
 	uint32_t n = 0u;
@@ -368,9 +368,11 @@ static void test_warm_restore(void)
 	rec.bl = TR_BL_TAG | 100u;
 	tr_knob_boot(&k, &rec, 30u, true, true);
 	assert(k.bl_pct == TR_BL_MAX && rec.bl == tr_bl_word(TR_BL_MAX));
+#if TR_BL_MAX_PCT < 100 /* at 100, MAX + 5 is no valid percent: the 101 case covers it */
 	rec.bl = TR_BL_TAG | (TR_BL_MAX + 5u);
 	tr_knob_boot(&k, &rec, 30u, true, true);
 	assert(k.bl_pct == TR_BL_MAX);
+#endif
 	rec.bl = TR_BL_TAG | 5u;
 	tr_knob_boot(&k, &rec, 30u, true, true);
 	assert(k.bl_pct == TR_BL_MIN);

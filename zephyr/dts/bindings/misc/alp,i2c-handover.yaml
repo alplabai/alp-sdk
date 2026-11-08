@@ -59,6 +59,14 @@ properties:
     description: |
       Address of the three 32-bit flag words (state, nonce, consumed: 12 bytes),
       in SRAM both cores see and that survives a warm reset.
+      The page MUST be mapped NON-CACHEABLE on every core that touches it
+      (for example a `zephyr,memory-region` / `zephyr,memory-attr =
+      <DT_MEM_ARM(ATTR_MPU_RAM_NOCACHE)>` region over the flag page, as
+      examples/aen/aen-trace-runner does). The handover code only issues
+      dsync barriers while polling these words; it does no cache clean or
+      invalidate, so with the D-cache on and a cacheable mapping the acquiring
+      core polls a stale line forever ("bus NOT released") and the liveness
+      word never appears to move.
 
   alive-address:
     type: int

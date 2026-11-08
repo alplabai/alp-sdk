@@ -585,7 +585,8 @@ def test_ros2_edge_image_pulls_rclcpp_and_alp_perception() -> None:
     """
     meta = REPO / "meta-alp-sdk"
     edge_image = (meta / "recipes-images" / "alp-image-edge.bb").read_text(encoding="utf-8")
-    assert "alp-ros" in edge_image.split('IMAGE_FEATURES += "', 1)[1].split('"', 1)[0]
+    features = " ".join(part.split('"', 1)[0] for part in edge_image.split('IMAGE_FEATURES += "')[1:])
+    assert "alp-ros" in features
 
     common_inc = (meta / "recipes-images" / "alp-image-common.inc").read_text(encoding="utf-8")
     assert 'FEATURE_PACKAGES_alp-ros     = "packagegroup-alp-ros"' in common_inc
@@ -756,7 +757,8 @@ def test_lwm2m_on_non_zephyr_target_errors(tmp_path: Path) -> None:
 #   * CONFIG_MODBUS       $ZEPHYR_BASE/subsys/modbus/Kconfig `menuconfig MODBUS`
 #   * CONFIG_CANOPENNODE  $ZEPHYR_BASE/modules/canopennode/Kconfig
 #                         `config CANOPENNODE`
-#   * canopennode west pin from $ZEPHYR_BASE/submanifests/optional.yaml
+#   * canopennode west pin: v4.4.x optional.yaml SHA, carried as the manifest's
+#     own integration.zephyr.west (Zephyr v4.5 drops it from optional.yaml)
 #   * micropython is not in the pinned workspace; exact source pin lives in
 #     integration.zephyr.west and no CONFIG is invented.
 # ---------------------------------------------------------------------
@@ -780,7 +782,7 @@ def test_modbus_manifest_is_tier_a_in_tree() -> None:
     assert zephyr.get("kconfig") == ["CONFIG_MODBUS=y"]
 
 
-def test_canopennode_manifest_records_optional_west_pin() -> None:
+def test_canopennode_manifest_carries_its_own_west_pin() -> None:
     doc = yaml.safe_load((LIBRARIES_DIR / "canopennode.yaml").read_text(encoding="utf-8"))
     assert doc["tier"] == "B"
     assert doc["license"] == "Apache-2.0"
@@ -791,6 +793,8 @@ def test_canopennode_manifest_records_optional_west_pin() -> None:
     assert zephyr["west"]["name"] == "canopennode"
     assert zephyr["west"]["revision"] == "dec12fa3f0d790cafa8414a4c2930ea71ab72ffd"
     assert zephyr["west"]["path"] == "modules/lib/canopennode"
+    # Self-contained pin: full URL, never a reference to Zephyr's optional group.
+    assert zephyr["west"]["url"] == "https://github.com/zephyrproject-rtos/canopennode"
 
 
 def test_micropython_manifest_is_module_only_source_pin() -> None:

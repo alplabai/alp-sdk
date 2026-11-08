@@ -37,7 +37,7 @@ def test_auto_order_reaches_yocto_local_conf(sku, order):
 
 def test_recipe_forwards_the_variable_to_cmake():
     root = Path(__file__).resolve().parents[2]
-    bb = (root / "meta-alp-sdk/recipes-core/alp-sdk/alp-sdk_0.6.bb").read_text(encoding="utf-8")
+    bb = (root / "meta-alp-sdk/recipes-core/alp-sdk/alp-sdk_git.bb").read_text(encoding="utf-8")
     assert "-DALP_SDK_INFERENCE_AUTO_ORDER=" in bb
     assert 'd.getVar(\'ALP_SDK_INFERENCE_AUTO_ORDER\')' in bb
 

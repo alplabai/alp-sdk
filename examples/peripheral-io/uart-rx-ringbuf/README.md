@@ -14,8 +14,9 @@ interrupt-driven RX ring buffer (`CONFIG_ALP_SDK_UART_RX_RINGBUF`).
 
 ## When to reach for this vs `alp_uart_read`
 
-- **`alp_uart_read`** — synchronous, blocks the caller until bytes
-  arrive or the timeout expires.  Fine for command prompts +
+- **`alp_uart_read`** — synchronous, blocks the caller until all `len`
+  bytes arrive; a timeout with fewer is `ALP_ERR_TIMEOUT` (no count -- use
+  the ring for partial reads).  Fine for command prompts +
   scripted interactions.
 - **`alp_uart_rx_ringbuf_*`** — interrupt-driven, decouples the
   RX byte arrival from any specific thread.  Use when the app
@@ -24,6 +25,19 @@ interrupt-driven RX ring buffer (`CONFIG_ALP_SDK_UART_RX_RINGBUF`).
   streams parsed once per second.
 
 ## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 ```bash
 # writes examples/peripheral-io/uart-rx-ringbuf/generated/alp.conf, which west reads below (#866)

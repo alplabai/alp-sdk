@@ -192,5 +192,4 @@ By contributing, you agree your contributions are licensed under
 ## Getting help
 
 - [Documentation](https://docs.alplab.ai)
-- [Community forum](https://community.alplab.ai)
 - [GitHub Issues](https://github.com/alplabai/alp-sdk/issues)

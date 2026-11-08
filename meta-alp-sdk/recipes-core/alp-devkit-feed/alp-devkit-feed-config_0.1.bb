@@ -23,12 +23,14 @@ DEPENDS += "gnupg-native"
 # The feed URL names the MACHINE.
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-# Set by conf/distro/include/alp-devkit-feed.inc; a build that pulls this recipe
-# without it has no feed URL to write.
+# Set by conf/distro/include/alp-devkit-feed.inc. Bitbake parses every recipe
+# BBFILES matches, so a bb.fatal here would break every build that does not opt
+# in (#2853); skip instead, and an image that installs this without the fragment
+# fails with "nothing provides alp-devkit-feed-config".
 python () {
     if not d.getVar('ALP_DEVKIT_FEED_URL'):
-        bb.fatal('alp-devkit-feed-config: ALP_DEVKIT_FEED_URL unset; add '
-                 '"require conf/distro/include/alp-devkit-feed.inc" to local.conf')
+        raise bb.parse.SkipRecipe('ALP_DEVKIT_FEED_URL unset (dev-kit feed not enabled; '
+                                  'require conf/distro/include/alp-devkit-feed.inc)')
 }
 
 do_install() {
@@ -47,16 +49,16 @@ FILES:${PN} = "${sysconfdir}/opkg/alp-devkit-feed.conf ${datadir}/opkg/keyrings"
 CONFFILES:${PN} = "${sysconfdir}/opkg/alp-devkit-feed.conf"
 
 # opkg-key populate imports every *.gpg under the keyrings dir into opkg's keyring.
-RDEPENDS:${PN} = "opkg"
+RDEPENDS:${PN} = "opkg gnupg"
 
 pkg_postinst_ontarget:${PN} () {
 	if test -x ${bindir}/opkg-key
 	then
 		${bindir}/opkg-key populate
-		# opkg only accepts a signature from a key it fully trusts; every key in
-		# this keyring was put there on purpose, so mark them ultimately trusted.
-		gpg --homedir ${sysconfdir}/opkg/gpg --list-keys --with-colons | \
-			awk -F: '/^fpr:/ {print $10 ":6:"}' | \
+		# opkg only accepts a signature from a key it fully trusts; trust ONLY the
+		# dev-kit feed signing key (keys/alp_devkit_feed_signing.pub.asc), not
+		# whatever else lands in the keyring.
+		echo "2B7807E20B75B471BF88FD7AC9AB032782D3143B:6:" | \
 			gpg --homedir ${sysconfdir}/opkg/gpg --batch --import-ownertrust
 	fi
 }

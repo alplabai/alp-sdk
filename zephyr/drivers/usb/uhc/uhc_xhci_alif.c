@@ -534,8 +534,11 @@ static int uhc_xhci_alif_init(const struct device *dev)
 		link->param_hi = (uint32_t)(g >> 32);
 	}
 	xhci_init_sequence(&data->op_image, 0u, 0u,
-			   data->fl.hcsparams1 & 0xFFu /* real MaxSlots (DCBAAP/CRCR
-			   * are written with global addresses in *_enable) */);
+			   /* MaxSlotsEn is clamped to the slots dcbaa[] has entries for
+			    * (entry 0 is the scratchpad pointer), so the xHC never
+			    * indexes or DMA-reads DCBAA past the array.  DCBAAP/CRCR are
+			    * written with global addresses in *_enable. */
+			   MIN(data->fl.hcsparams1 & 0xFFu, ARRAY_SIZE(data->dcbaa) - 1u));
 
 	/* Scratchpad (§6.6): HCSPARAMS2 says the xHC needs scratchpad pages before it
 	 * can run.  DCBAA[0] -> the scratchpad-pointer array (global); array[0] -> one
@@ -812,7 +815,8 @@ static int uhc_xhci_alif_enable(const struct device *dev)
 
 	en_slot.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_ENABLE_SLOT);
 	data->fl.slot_cc = uhc_xhci_alif_submit_cmd(data, &en_slot, &slot_id);
-	data->fl.slot_id = slot_id;
+	/* A slot ID the xHC hands out beyond dcbaa[] is unusable: report no slot. */
+	data->fl.slot_id = (slot_id < ARRAY_SIZE(data->dcbaa)) ? slot_id : 0u;
 
 	/* 6. Root-hub port: apply power (PORTSC.PP, bit 9) and snapshot the status
 	 *    (CCS bit0 = a device is attached; PLS bits8:5; speed bits13:10). */

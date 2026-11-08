@@ -68,8 +68,12 @@ typedef struct {
 	float out_max;
 	/** Anti-windup limit on the integrator accumulator (in
 	 *  error*time units).  `|integrator|` is clamped to this; pass
-	 *  `<= 0` to auto-select half the output span
-	 *  (`(out_max - out_min) / 2`). */
+	 *  `<= 0` to auto-select the limit at which the integral term
+	 *  `ki * integrator` reaches half the output span
+	 *  (`(out_max - out_min) / (2 * |ki|)`, so a negative `ki` is
+	 *  handled).  With `ki == 0` the limit falls back to half the
+	 *  output span; with clamping disabled (`out_max <= out_min`) the
+	 *  accumulator is unbounded. */
 	float integ_limit;
 	/** When true, the derivative acts on -measurement (avoids the
 	 *  derivative kick from a setpoint step); when false, on the

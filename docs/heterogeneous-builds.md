@@ -551,7 +551,8 @@ don't cascade — `system-manifest.yaml` carries per-slice
 ## 7. Flashing
 
 ```bash
-tan image     # → build/image-bundle/alp-system.zip + .swu (Mender)
+tan image     # → build/image-bundle/: slices/<core_id>-<os>.tar.gz,
+              #   helper-mcus/, bundle-manifest.json
 tan flash     # programs attached hardware
 ```
 

@@ -66,7 +66,7 @@ examples/multicore/microros-ros2-v2n/
 
 The RPMsg bring-up in `m33_sm/src/rpmsg_link.c` is the bench-proven
 sequence from [`../rpmsg-v2n`](../rpmsg-v2n/) (#683/#697/#2374); the
-resource table is compiled straight from `../rpmsg-v2n/m33_sm/src/`.
+resource table is compiled straight from the SDK's `zephyr/drivers/ipc/`.
 
 ## Prerequisites
 
@@ -82,10 +82,16 @@ resource table is compiled straight from `../rpmsg-v2n/m33_sm/src/`.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
-cd alp-workspace/alp-sdk/examples/multicore/microros-ros2-v2n
 tan build            # both slices; same flow as rpmsg-v2n
+tan flash
 ```
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 M33 only, for iteration (needs a west workspace, network access, and the ROS 2
 colcon build prerequisites the module documents):
@@ -173,6 +179,11 @@ State of this change, precisely:
   `../rpmsg-v2n/m33_sm/src/main.c` so the bench-proven example stays
   untouched. Recommended follow-up: factor one shared platform file after
   this example is bench-proven.
+  It also carries the AMP beacon and attach-reset handshake
+  (`<alp/protocol/amp_beacon.h>`, beacon version 2): the A55 bridge's
+  `yocto_uio_drv` backend refuses to open without the beacon and resets the
+  link on every re-attach, so the M33 re-creates its virtio device then.
+  Not yet compiled or exercised on silicon.
 - `metadata/libraries/micro-ros.yaml` stays Tier B: the Tier A bar also
   needs a CI lane and a bench result, neither of which exists yet.
 

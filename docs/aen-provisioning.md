@@ -80,7 +80,10 @@ wiring of your own**.
 **Which key signs your app.** The factory MCUboot trusts the SDK's shared
 development key, [`keys/mcuboot_shared_dev_ecdsa_p256.pem`](../keys/README.md),
 which is committed to this repository. The AEN sysbuild configuration
-(`zephyr/sysbuild/aen/sysbuild.conf`) already signs with it, so an image built
+(`zephyr/sysbuild/aen/sysbuild.conf`) carries no key itself: `tan build` passes
+the key as an absolute `-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE`, and a hand-run
+sysbuild must pass that same -D (below). Leaving it out signs with MCUboot's
+`root-ec-p256.pem`, which the factory MCUboot rejects. With the key, an image built
 from a fresh clone boots on an Alp Lab-provisioned module without any key
 setup. The key is public: it gives **no** security, which matches the DM
 lifecycle the module ships in. For a product, build MCUboot with your own key
@@ -98,7 +101,8 @@ slot0 over the SE-UART via SETOOLS) before that refusal landed:
 # A board.yaml-driven app needs its alp.conf first: prefer `tan build`, or pass
 # -DEXTRA_CONF_FILE=<alp.conf> (docs/board-config-emit.md; #866).
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
-    --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
+    --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf \
+    -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="<abs-alp-sdk>/keys/mcuboot_shared_dev_ecdsa_p256.pem"
 west flash    # REFUSES (alp-sdk#2274) -- see the warning below. Historical
               # intent: alif_flash runner signs + writes your MCUboot-signed
               # image into slot0 via SETOOLS over the SE-UART (not SWD).
@@ -244,7 +248,8 @@ one is always from an earlier run, not this attempt's.
   (`app-release-exec-linux-SE_FW_x.y.z`). Contains `tools-config`,
   `maintenance`, `app-gen-toc`, `app-write-mram`, the stock `m55_blink_*`
   examples, and the user guide PDF.
-* **A 1.8 V-capable USB-UART** for the SE-UART (see §2 — this is the #1 trap).
+* **A 1.8 V-capable USB-UART** for the SE-UART (see §2 — this is the #1 trap). On the 2641-R3 the RP2040
+  CDC port may replace it (not bench-verified; see §2).
 * The board powered (1 A bench supply is plenty; a fresh SoM idles ~80-150 mA).
 * A **SWD/J-Link probe** — for **Flow D** it is the burn path itself (select
   the part-number device profile so the built-in Alif MRAM loader activates),
@@ -261,6 +266,12 @@ one is always from an earlier run, not this attempt's.
 > and how to read the running version.
 
 ## 2. Wire the SE-UART — the part everyone gets wrong
+
+> On the E1M EVK 2641-R3 the RP2040 (`U55`) exposes a CDC port named
+> `Alp SE-UART` on `J5`, so an external adapter may not be needed there. That
+> path is not bench-verified and which RP2040 channel carries the module's
+> SE-UART is TBD; see [`aen-rp2040-debug-probe.md`](aen-rp2040-debug-probe.md).
+> The wiring below is the proven one.
 
 The SES maintenance UART (**SEUART**) is **not** the application console. On
 E1M-AEN modules it is a dedicated, reserved service pair exposed by the carrier

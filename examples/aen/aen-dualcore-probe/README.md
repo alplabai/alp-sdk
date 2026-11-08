@@ -14,6 +14,9 @@ Build BOTH, package into a **dual-entry ATOC** (HE @`0x58000000` + HP @`0x500000
 both `["load","boot"]`, like the SETOOLS `mhu-dual.json`), `app-gen-toc` +
 `app-write-mram`, reset, then read both heartbeats — advancing means that core ran.
 
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. For E1M-AEN803 use
+`alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` and `alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`.
+
 ```sh
 west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-dualcore-probe -d build/he -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
 west build -p always -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/aen-dualcore-probe -d build/hp -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"

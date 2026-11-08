@@ -15,6 +15,19 @@ at `0x48200000` / IRQ 101 from the Alif DFP `soc.h` (AE402FA0E5597).
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `-DEXTRA_ZEPHYR_MODULES=$PWD` points at the SDK root.
+
 ```bash
 # From the alp-sdk root:
 west build \

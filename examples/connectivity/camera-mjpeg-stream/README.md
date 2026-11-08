@@ -11,9 +11,24 @@ through the portable software JPEG encoder instead — the same binary always
 has something to serve; see `src/main.c` for the runtime capability/format
 selection.
 
-## Build + run (E1M-AEN803, ISP-Pico + Hantro)
+## Build
+
+From this directory, or from your own copy of it:
 
 ```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+This build targets E1M-AEN803 (ISP-Pico + Hantro). The camera shield is selected with `-DSHIELD=...`, as the west commands below show; the 1280x960 and sensor variants below use the same SDK-checkout form.
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```
 # writes examples/connectivity/camera-mjpeg-stream/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/connectivity/camera-mjpeg-stream
 west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
@@ -279,7 +294,7 @@ budget — the product build (Flow D/MRAM-XIP, or any customer build that
 doesn't retarget to ITCM) is unaffected, and `prj.conf` was NOT changed to
 work around it.
 
-### Ethernet MAC address changes every boot (investigated, not fixed)
+### Ethernet MAC address changes every boot (known behaviour)
 
 Bench runs 312-314 each logged a DIFFERENT MAC address
 (`02:01:56:95:c4:a8`, then `...:86`, and two earlier boots at `...:62`
@@ -304,8 +319,8 @@ in either). No EEPROM/OTP-sourced fixed-MAC mechanism was found in
 `zephyr/drivers/ethernet/` or the SoC devicetree for this board family —
 if alp-sdk gains one later (e.g. from the SoM's own identity/provisioning
 EEPROM), this example and its two AEN siblings above would all want the
-same change together, not this one alone. Not changed here per your
-instruction (report only).
+same change together, not this one alone. Until then the MAC is random
+per boot.
 
 ## Watch it
 

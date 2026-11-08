@@ -51,6 +51,11 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/counter.h>
+#include <zephyr/sys/sys_io.h>
+
+/* LPTIMER channel block (base + channel * 0x14); LOADCOUNT is at +0x00. */
+#define LPTIMER_CH0_BASE \
+	(DT_REG_ADDR(DT_NODELABEL(lptimer0)) + DT_PROP(DT_NODELABEL(lptimer0), channel) * 0x14U)
 
 /* The counter device is the "alif,lptimer" node (lptimer@42001000, channel 0);
  * the counter_alif_lptimer driver binds it directly. */
@@ -91,6 +96,121 @@ static void alarm_cb(const struct device *dev, uint8_t chan, uint32_t ticks, voi
 #define READ_GAP_US 100000U
 
 static const struct device *const lptimer = DEVICE_DT_GET(COUNTER_NODE);
+
+static volatile uint32_t cb_val;
+static volatile bool     cb_fired;
+static int               continuity_fails;
+
+static uint32_t rd_val(void)
+{
+	uint32_t v = 0U;
+
+	(void)counter_get_value(lptimer, &v);
+	return v;
+}
+
+/* Down-counter: elapsed = prev - cur must be non-negative-looking and small. */
+static void chk_el(const char *tag, uint32_t prev, uint32_t cur, uint32_t max_el)
+{
+	uint32_t el = prev - cur;
+	bool     ok = el <= max_el;
+
+	printk("  %-22s prev=0x%08x cur=0x%08x elapsed=%u (<=%u) %s\n",
+	       tag,
+	       prev,
+	       cur,
+	       el,
+	       max_el,
+	       ok ? "ok" : "FAIL");
+	if (!ok) {
+		continuity_fails++;
+	}
+}
+
+/* Alarm callback that re-arms once from the ISR (second alarm: 50 ticks). */
+static void rearm_cb(const struct device *dev, uint8_t chan, uint32_t ticks, void *user)
+{
+	struct counter_alarm_cfg next = { .callback = alarm_cb, .ticks = 50U };
+
+	cb_val   = ticks;
+	cb_fired = true;
+	if (counter_set_channel_alarm(dev, 0, &next) != 0) {
+		continuity_fails++;
+	}
+}
+
+static void continuity_checks(void)
+{
+	struct counter_alarm_cfg ac = { .callback = rearm_cb, .ticks = 200U /* ~6.1 ms */ };
+	uint32_t                 a, b, c;
+	int                      rc;
+
+	cb_fired    = false;
+	alarm_fired = false;
+	k_busy_wait(10000);
+	a  = rd_val();
+	rc = counter_set_channel_alarm(lptimer, 0, &ac);
+	b  = rd_val();
+	if (rc != 0) {
+		continuity_fails++;
+	}
+	/* A few ticks and the reads, NOT an alarm period. */
+	chk_el("after set_alarm", a, b, 100U);
+	if (counter_set_channel_alarm(lptimer, 0, &ac) != -EBUSY) {
+		printk("  second set_alarm not -EBUSY FAIL\n");
+		continuity_fails++;
+	}
+	if (counter_get_top_value(lptimer) != UINT32_MAX) {
+		printk("  top value changed FAIL\n");
+		continuity_fails++;
+	}
+
+	for (int i = 0; i < 100 && !cb_fired; i++) {
+		k_msleep(1);
+	}
+	c = rd_val();
+	printk("  fired=%d cb ticks=0x%08x now=0x%08x\n", cb_fired, cb_val, c);
+	chk_el("fire vs set_alarm", b, cb_val, 400U); /* ~200 ticks + latency */
+	/* Lower bound: the 200-tick period must be there (a lost period fails). */
+	if (!cb_fired || (b - cb_val) < 190U) {
+		printk("  fire period FAIL\n");
+		continuity_fails++;
+	}
+
+	/* The callback re-armed (50 ticks ~1.5 ms): wait it out, still continuous. */
+	for (int i = 0; i < 100 && !alarm_fired; i++) {
+		k_msleep(1);
+	}
+	a = rd_val();
+	chk_el("after re-arm fire", cb_val, a, 400U);
+	if (!alarm_fired) {
+		printk("  re-armed alarm did not fire FAIL\n");
+		continuity_fails++;
+	}
+
+	/* Cancel a pending alarm: the count must neither jump nor stop. */
+	ac.callback = alarm_cb;
+	ac.ticks    = 100000U; /* ~3 s */
+	a           = rd_val();
+	rc          = counter_set_channel_alarm(lptimer, 0, &ac);
+	b           = rd_val();
+	chk_el("set_alarm (long)", a, b, 100U);
+	k_msleep(20);
+	a = rd_val();
+	rc |= counter_cancel_channel_alarm(lptimer, 0);
+	b = rd_val();
+	if (rc != 0) {
+		continuity_fails++;
+	}
+	chk_el("after cancel", a, b, 100U);
+	k_msleep(20);
+	c = rd_val();
+	chk_el("cancel +20 ms", b, c, 1000U);
+	if (c == b) {
+		printk("  count stopped after cancel FAIL\n");
+		continuity_fails++;
+	}
+}
 
 int main(void)
 {
@@ -206,10 +326,13 @@ int main(void)
 		 * wall-clock number below carries a fixed ~0.7 ms of arm overhead
 		 * (the CONTROLREG/LOADCOUNT writes have to cross into the 32768 Hz
 		 * clock domain), which swamps a single 30.5 us tick at the short end.
+		 * counter_get_top_value() is NOT this witness any more: the driver
+		 * keeps the virtual counter's top at 0xFFFFFFFF (#2944), so read the
+		 * LOADCOUNT register directly.
 		 */
 		printk("  ticks=%-5u LOADCOUNT=%u (expect %u)\n",
 		       alarm_ticks[i],
-		       counter_get_top_value(lptimer),
+		       sys_read32(LPTIMER_CH0_BASE + 0x00U),
 		       alarm_ticks[i] - 1U);
 
 		/* Longest row is 1024/32768 s = 31.25 ms; 200 ms is slack, not a
@@ -229,6 +352,20 @@ int main(void)
 		       (unsigned)k_cyc_to_ns_floor64(alarm_fired_cyc - t0),
 		       (unsigned)(((uint64_t)alarm_ticks[i] * 1000000000ULL) / 32768ULL));
 	}
+
+	/*
+	 * Count continuity (#2944).  One LPTIMER channel has one LOADCOUNT, so an
+	 * alarm reloads it; the driver keeps a software base so get_value() stays
+	 * a continuous free-running down-counter across set_alarm, the alarm
+	 * firing (including a re-arm from the callback) and cancel_alarm.  The
+	 * count falls by the elapsed time only -- a jump of an alarm period, or a
+	 * step backwards, is a failure.
+	 */
+	printk("-- count continuity (#2944) --\n");
+	continuity_checks();
+	printk("RESULT %s (continuity, %d failures)\n",
+	       continuity_fails ? "FAIL" : "PASS",
+	       continuity_fails);
 
 	/* Leave the counter running + park; CURRENTVAL stays live for the J-Link
 	 * read. */

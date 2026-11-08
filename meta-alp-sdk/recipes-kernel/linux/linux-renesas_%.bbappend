@@ -91,6 +91,7 @@ SRC_URI:append = " \
     file://0030-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch \
     file://0031-gpio-gd32-bridge-gate-IO15-IO26-on-protocol-minor-16.patch \
     file://0032-gpio-gd32-bridge-gate-can-stby-on-protocol-minor-13.patch \
+    file://0033-watchdog-rzv2h_wdt-do-not-ping-the-WDT-after-it-is-s.patch \
     file://uio.cfg \
     file://e1m-v2n-doorbell.dtsi \
     file://panic.cfg \
@@ -303,7 +304,7 @@ ALP_DRPAI_LAYER[vardepvalue] = "${ALP_DRPAI_LAYER}"
 # the `??=` here is only the fallback for a consumer that uses this
 # bbappend without one of them.  Turning the SDK backend on
 # (PACKAGECONFIG "drpai") stays a separate switch: it needs a RUHMI
-# checkout, and alp-sdk_0.6.bb auto-enables it only when one is configured.
+# checkout, and alp-sdk_git.bb auto-enables it only when one is configured.
 ALP_ENABLE_DRPAI ??= "${@'1' if 'rz-drpai' in (d.getVar('BBFILE_COLLECTIONS') or '').split() else '0'}"
 ALP_DRPAI_DT_ENABLE = "${@'1' if (d.getVar('ALP_DRPAI_LAYER') == '1' and d.getVar('ALP_ENABLE_DRPAI') == '1') else '0'}"
 ALP_DRPAI_DT_ENABLE[vardepvalue] = "${ALP_DRPAI_DT_ENABLE}"
