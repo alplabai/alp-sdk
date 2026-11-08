@@ -9,17 +9,20 @@
 #     into the control dtb of the u-boot.bin that goes into the FIP, marked
 #     required = "conf";
 #   - CONFIG_BOOTCOMMAND (U-Boot patch 0018) loads /boot/fitImage from the
-#     eMMC and runs `bootm <addr>#conf-renesas_<board dtb>`; a configuration
+#     eMMC and runs `bootm <addr>#conf-<board dtb basename>`; a configuration
 #     that does not verify is not booted, and there is no fallback to an
 #     unsigned Image (a FIT build does not package one), nor to the microSD.
 # The bootloader (FIP) must be rebuilt and reflashed together with the image:
 # an old FIP still booti's /boot/Image and finds none.
 #
-# The key is a GENERATED DEV key under ${TOPDIR}/alp-fit-keys (gitignored,
-# build dir): anyone who can build can sign, and a U-Boot console can still
-# booti an unsigned Image by hand, so this is NOT yet a secure-boot chain
-# (TF-A trusted boot, console lock and the production key custody are owner
-# decisions tracked outside the public build scaffold).
+# This is NOT a complete secure-boot chain.  The key is a GENERATED DEV key
+# under ${TOPDIR}/alp-fit-keys (gitignored, build dir): anyone who can build
+# can sign.  TF-A does not verify the FIP, and there is no anti-rollback: an
+# older, validly signed FIT (or, with Mender, the other slot) still boots.
+# Trusted boot, the production key custody and anti-rollback are owner
+# decisions tracked outside the public build scaffold.  BENCH-UNVERIFIED: a
+# unit has never booted this way, and a failed boot is a reset loop (no
+# U-Boot shell) that only an external eMMC / FIP reflash recovers.
 #
 # OPT-IN (default OFF -- a normal build is byte-for-byte unchanged). In
 # conf/local.conf:

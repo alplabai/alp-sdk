@@ -2,9 +2,10 @@
 #
 # Builds the minimal ROS 2 alp_som_temperature node from
 # alp-sdk/examples/v2n/v2n-ros2-som-temperature/ (portable <alp/temperature.h>
-# only).  NOT in packagegroup-alp-ros until the example is on main
-# (SRCREV comes from alp-sdk-version.inc).  Lives in dynamic-layers/ros2-humble-layer/ -- parsed only when
-# upstream meta-ros2-humble is in bblayers.conf.  BENCH-UNVERIFIED.
+# only).  NOT in packagegroup-alp-ros: BENCH-UNVERIFIED.  SRCREV comes from
+# alp-sdk-version.inc (the release commit on main carries the example).
+# Lives in dynamic-layers/ros2-humble-layer/ -- parsed only when
+# upstream meta-ros2-humble is in bblayers.conf.
 #
 # Copyright (C) 2026 Alp Lab AB
 

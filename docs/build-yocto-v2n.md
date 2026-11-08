@@ -253,6 +253,12 @@ fleet-wide.
 
 ## Verified kernel boot: signed FIT (opt-in)
 
+> **BENCH-UNVERIFIED.** The U-Boot and the signed kernel FIT build, and the
+> FIT, `bootcmd` and control-dtb key were inspected, but a unit has never
+> booted this way. The failure mode is a **reset loop** (no U-Boot shell, a
+> failed boot resets) that only an external eMMC / FIP reflash recovers: try
+> it on a unit you can reflash from outside.
+
 By default U-Boot loads a **raw** `Image` + dtb from `/boot` and boots them
 with no integrity check. The opt-in builds the kernel as a **signed
 `fitImage`** (kernel + dtb in one FIT, **RSA-2048 / SHA-256** over the
@@ -273,7 +279,8 @@ When off (the default) the build is unchanged. When on:
   public key is embedded in the control dtb of the U-Boot in the FIP as a
   `required = "conf"` key, so a FIT that is unsigned or fails verification
   is not booted, and U-Boot halts at start-up if that key is missing;
-- there is no fallback: no `/boot/Image`, no microSD, no `booti`/`bootz`/`go`
+- there is no fallback: no `/boot/Image`, no microSD, no
+  `booti`/`bootz`/`go`/`bootelf`/EFI/network/serial-download/`source`
   commands, no legacy image format, and no way to interrupt autoboot
   (`CONFIG_BOOTDELAY=-2`). A boot that fails ends in `reset`;
 - the OpenCV accelerator and codec firmware blobs (`OpenCV_Bin.bin`,
@@ -286,9 +293,10 @@ none. With no U-Boot shell, an image that does not verify boot-loops; reflash
 the eMMC from outside the unit.
 
 > **Not a complete secure-boot chain.** The key is a dev key (anyone who can
-> build can sign), and TF-A trusted boot, the production key custody and
-> locking the remaining U-Boot surface are separate, owner-decided steps
-> tracked in `alp-sdk-internal`. The §4 "Fast dev iteration" copy-`Image`
+> build can sign), TF-A does not verify the FIP, and there is no
+> anti-rollback: an older, validly signed FIT still boots. TF-A trusted boot,
+> the production key custody and anti-rollback are separate, owner-decided
+> steps tracked in `alp-sdk-internal`. The §4 "Fast dev iteration" copy-`Image`
 > recipe does not apply while the flag is on.
 
 ## Dev-kit package feed (opkg)

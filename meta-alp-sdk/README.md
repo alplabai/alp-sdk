@@ -544,6 +544,10 @@ updates ride the `.mender` artefact through the Mender server.
 
 ### How the A/B boot works with U-Boot
 
+> **BENCH-UNVERIFIED.** The Mender U-Boot builds and its `bootcmd`, env
+> device and `fw_env.config` were inspected; slot switching and rollback have
+> not been run on a unit.
+
 `mender.inc` turns on meta-mender's U-Boot integration (`mender-uboot`) and
 points it at the environment U-Boot actually uses: eMMC boot partition 2
 (`/dev/mmcblk0boot1`, copies at `0x220000` / `0x230000`, 64 KiB each), so
@@ -555,9 +559,12 @@ runs Mender's `altbootcmd` to roll back. The root device and the mmc spec are
 literals in `bootcmd`; only a number (`2` or `3`) is read from the saved
 environment. Without Mender the default boot is unchanged.
 
-Writing `/dev/mmcblk0boot1` from Linux needs
-`echo 0 > /sys/block/mmcblk0boot1/force_ro` first (the kernel exposes boot
-partitions read-only); this layer does not do that for you.
+Writing `/dev/mmcblk0boot1` from Linux needs no extra step: the kernel
+exposes eMMC boot partitions read-only, but the `fw_setenv` meta-mender
+installs on scarthgap comes from libubootenv (`libubootenv_%.bbappend` in
+meta-mender-core), and libubootenv 0.3.5 (`src/uboot_env.c`, `fileprotect()`)
+writes `0` to `/sys/class/block/mmcblk0boot1/force_ro` before it writes the
+environment and `1` afterwards.
 
 ### Mender status + scope
 

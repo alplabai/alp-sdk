@@ -84,9 +84,6 @@ MENDER_UBOOT_CONFIG_SYS_MMC_ENV_PART ?= "2"
 MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_1 ?= "0x220000"
 MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_2 ?= "0x230000"
 BOOTENV_SIZE ?= "0x10000"
-# The environment is outside the rootfs user area (boot partition 2), so no
-# space is reserved in front of the first partition for it.
-MENDER_RESERVED_SPACE_BOOTLOADER_DATA ?= "0"
 IMAGE_INSTALL:remove = "alp-uboot-env"
 
 # U-Boot is the bootloader (the default meta-mender feature set is GRUB/UEFI,

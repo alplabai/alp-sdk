@@ -38,3 +38,20 @@ def test_self_recipes_take_the_pin_and_the_branch_from_one_place():
         assert not re.search(r"^SRCREV", text, re.M), f"{p}: SRCREV belongs in alp-sdk-version.inc"
         uri = re.search(r'^SRC_URI = "git://github.com/alplabai/alp-sdk\.git[^"]*"', text, re.M)
         assert uri and ";branch=main" in uri.group(0), p
+
+
+def test_the_pin_is_the_tag_commit_of_pv():
+    """SRCREV is the commit v<PV> points at; skipped where the tag is not
+    fetched (shallow clones, or PV bumped before the tag exists)."""
+    import subprocess
+
+    import pytest
+
+    text = VERSION_INC.read_text(encoding="utf-8")
+    pv = re.search(r'^PV\s*=\s*"([^"]+)"', text, re.M).group(1).replace("~", "-")
+    pin = re.search(r'^SRCREV\s*=\s*"([0-9a-f]{40})"', text, re.M).group(1)
+    tag = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"v{pv}^{{commit}}"],
+                         cwd=REPO, capture_output=True, text=True)
+    if tag.returncode != 0:
+        pytest.skip(f"tag v{pv} is not in this clone")
+    assert tag.stdout.strip() == pin
