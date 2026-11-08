@@ -41,6 +41,7 @@ class TestHwBackendsLoader(unittest.TestCase):
         "tflite_micro", "lvgl", "mbedtls", "cmsis_dsp",
         "littlefs", "bearssl", "madgwick_ahrs", "u8g2",
         "gfx_compat", "minimp3", "opus",
+        "pid", "modbus", "coap", "libwebsockets",
     ]
 
     _SKU_CORE: dict[str, str] = {
@@ -120,11 +121,15 @@ class TestHwBackendsLoader(unittest.TestCase):
             r"|LITTLEFS_(?:XSPI|EMMC|QSPI)_DMA"
             r"|(?:MINIMP3|OPUS)_(?:HELIUM|NEON|FPU|I2S_DMA)"
             r"|(?:MBEDTLS|BEARSSL)_(?:CRYPTOCELL|INLINE_AES|CAU|OPTIGA)"
-            r"|MADGWICK_(?:FPU|TMU)|U8G2_(?:DMA2D|TMU|BUS_DMA))=y")
+            r"|MADGWICK_(?:FPU|TMU)|U8G2_(?:DMA2D|TMU|BUS_DMA)"
+            r"|PID_(?:FPU|TIMER)|MODBUS_(?:UART|ETH)_DMA"
+            r"|COAP_(?:MBEDTLS|OSCORE)|LWS_(?:MBEDTLS|BEARSSL|TCP_DMA))=y")
         for sku in ("E1M-AEN301", "E1M-AEN401", "E1M-AEN601",
                     "E1M-AEN801", "E1M-V2N101"):
             with self.subTest(sku=sku):
-                self.assertIsNone(declarative.search(self._emit(sku)))
+                out = self._emit(sku)
+                self.assertFalse(out.startswith("FAIL"), msg=out)
+                self.assertIsNone(declarative.search(out))
 
     def test_sw_fallback_always_emitted(self) -> None:
         """Each library's SW-fallback CONFIG_*=y is emitted
