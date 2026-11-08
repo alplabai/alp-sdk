@@ -4,8 +4,8 @@
  * <alp/cloud_transport.h> over plain-TCP loopback: argument checks, the
  * lifecycle, and the receive contract an MQTT process loop depends on
  * (0 = retry, negative = error or peer gone).  The test is its own peer; no
- * host network, no TLS handshake.  The send side is covered only for the
- * success and not-connected cases: a send timeout and a partial send are not
+ * host network, no TLS handshake.  The send side covers success, not
+ * connected and a full send window (returns 0); a partial send is not
  * exercised here.
  */
 
