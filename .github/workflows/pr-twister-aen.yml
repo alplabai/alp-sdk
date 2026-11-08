@@ -150,6 +150,8 @@ on:
       - 'metadata/toolchains.json'
       - '.github/workflows/pr-twister-aen.yml'
       - 'scripts/select_aen_twister.py'
+      - 'tests/zephyr/inference_tflm_dim_bound/**'
+      - 'src/backends/inference/tflm.cpp'
   push:
     branches: [main, dev]
     paths:
@@ -201,6 +203,8 @@ on:
       - 'zephyr/Kconfig.alp-libraries'
       - 'west.yml'
       - 'metadata/toolchains.json'
+      - 'tests/zephyr/inference_tflm_dim_bound/**'
+      - 'src/backends/inference/tflm.cpp'
   workflow_dispatch:
   # #2541: nightly run on the default branch (dev), so the ccache PR runs
   # restore is refreshed regardless of what changed. A dev push saves it
@@ -685,6 +689,25 @@ jobs:
             ${{ matrix.roots }} \
             --inline-logs \
             --no-detailed-test-id
+
+      # #3100: the one host-run scenario of the real TFLM backend (a 65536 tensor
+      # dim must fail alp_inference_open()).  It needs the tflite-micro module,
+      # which only this job's alp-sdk manifest workspace has (pr-twister.yml's
+      # plain upstream workspace skips it), and runs natively, so one shard of
+      # one SKU runs it.  Own -O dir so the reports step below keeps twister-out.
+      - name: twister · native_sim TFLM dim bound (#3100)
+        if: ${{ !cancelled() && matrix.sku == 'aen801' && matrix.subset == 1 }}
+        working-directory: ${{ github.workspace }}
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+          EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
+        timeout-minutes: 10
+        run: |
+          python3 zephyr/scripts/twister \
+            -p native_sim/native/64 \
+            -T alp-sdk/tests/zephyr/inference_tflm_dim_bound \
+            -O twister-out-dim-bound \
+            --inline-logs --no-detailed-test-id
 
       # Hit rate in the log, so a cold or ineffective cache is visible,
       # not guessed (#2541 decides its next step on this number). Its own

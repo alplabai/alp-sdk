@@ -61,7 +61,7 @@ def relu_model(dim: int) -> bytes:
 
 
 def c_array(name: str, data: bytes) -> str:
-    rows = ["\t" + ", ".join(f"0x{x:02x}" for x in data[i:i + 12]) + "," for i in range(0, len(data), 12)]
+    rows = ["\t" + ", ".join(f"0x{x:02x}" for x in data[i:i + 16]) + "," for i in range(0, len(data), 16)]
     return f"static const uint8_t __aligned(16) {name}[] = {{\n" + "\n".join(rows) + "\n};\n"
 
 
