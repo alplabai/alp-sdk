@@ -4,8 +4,10 @@
 # built libalp_sdk.so.  Keys (all required):
 #   symbol  exact name as abidiff reports it: `gone` for a function or
 #           variable, `struct cfg` for a type
-#   kind    function | variable | type  (a type waiver covers every changed
-#           function/variable whose report block mentions that type)
+#   kind    function | variable | type.  A `type` waiver covers a changed
+#           function only when ALL of that function's reported changes are
+#           indirect sub-type changes of waived types (a function that also
+#           gained a parameter needs its own `function` waiver).
 #   reason  non-empty: why the break is acceptable
 #   issue   "#N" -- the tracking issue (quote it: a bare #N is a YAML comment)
 #   until   "X.Y" -- SDK minor at which the waiver expires, i.e. when
@@ -13,7 +15,9 @@
 #
 # The gate FAILS on a malformed entry, a missing reason/issue, or an
 # expired waiver.  Every change in a report must be covered or the gate
-# still fails.  Example:
+# still fails.  Typedef/anonymous types and array variables are not parsed,
+# so they cannot be waived (the gate fails closed).  A waiver that matched
+# nothing prints a warning; remove it.  Example:
 #
 #   - symbol: alp_foo_legacy
 #     kind: function

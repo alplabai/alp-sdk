@@ -147,10 +147,10 @@ def evaluate(rc: int, same_minor: bool) -> tuple[bool, str]:
 
 def load_waivers(path: Path, minor: str) -> tuple[list[dict], list[str]]:
     """(valid waivers, problems).  Any problem fails the gate."""
-    import yaml
-
     if not path.is_file():
         return [], []
+    import yaml  # only needed once a waiver file exists
+
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as e:
@@ -194,8 +194,10 @@ def load_waivers(path: Path, minor: str) -> tuple[list[dict], list[str]]:
 def parse_entries(report: str) -> list[dict]:
     """Top-level `[D]`/`[C]` entries of an abidiff report.
 
-    Each: kind (function|variable), name, types (struct/union/enum names the
-    entry's block mentions).
+    Each: kind (function|variable), name, indirect (the header says every
+    change is an indirect sub-type change), types (struct/union/enum names
+    the entry's block mentions).  Typedef/anonymous types and array
+    variables are not recognised, so they can never be waived.
     """
     entries: list[dict] = []
     for ln in report.splitlines():
@@ -208,6 +210,7 @@ def parse_entries(report: str) -> list[dict]:
                 kind, nm = "variable", re.search(r"(\w+)$", decl)
             sym = re.search(r"\{(\w+)\}", rest)
             entries.append({"kind": kind,
+                            "indirect": "has some indirect sub-type changes" in rest,
                             "name": sym[1] if sym else (nm[1] if nm else decl),
                             "types": set()})
         elif entries and ln.startswith("   "):
@@ -216,10 +219,13 @@ def parse_entries(report: str) -> list[dict]:
 
 
 def apply_waivers(report: str, waivers: list[dict]) -> tuple[bool, list[dict]]:
-    """(everything covered, waivers applied).
+    """(everything covered, waivers that matched an entry).
 
-    True only when every Removed/Changed in the summaries was parsed into an
-    entry and each entry is covered; otherwise the caller keeps abidiff's rc.
+    Covered only when every Removed/Changed in the summaries was parsed into
+    an entry and each entry is covered; otherwise the caller keeps abidiff's
+    rc.  A `type` waiver covers an entry only when ALL its reported changes
+    are indirect sub-type changes and every struct/union/enum it mentions is
+    waived; a function that also gained a parameter stays un-waived.
     """
     entries = parse_entries(report)
     expected = sum(
@@ -228,15 +234,16 @@ def apply_waivers(report: str, waivers: list[dict]) -> tuple[bool, list[dict]]:
     )
     if not entries or len(entries) != expected:
         return False, []
+    twaived = {w["symbol"] for w in waivers if w["kind"] == "type"}
     used: list[dict] = []
+    covered = True
     for e in entries:
-        hit = [w for w in waivers
-               if (w["kind"] == e["kind"] and w["symbol"] == e["name"])
-               or (w["kind"] == "type" and w["symbol"] in e["types"])]
-        if not hit:
-            return False, []
+        hit = [w for w in waivers if w["kind"] == e["kind"] and w["symbol"] == e["name"]]
+        if e["indirect"] and e["types"] and e["types"] <= twaived:
+            hit += [w for w in waivers if w["kind"] == "type" and w["symbol"] in e["types"]]
+        covered &= bool(hit)
         used += [w for w in hit if w not in used]
-    return True, used
+    return covered, used
 
 
 def soname_only(report: str) -> bool:
@@ -359,10 +366,15 @@ def main() -> int:
             rc = 0
         if rc & (ABI_CHANGE | ABI_INCOMPATIBLE) and not rc & (ABI_ERROR | ABI_USAGE) and waivers:
             covered, used = apply_waivers(proc.stdout, waivers)
-            if covered:
-                for w in used:
-                    print(f"waived: {w['kind']} {w['symbol']} ({w['issue']}, until "
-                          f"{w['until']}): {w['reason']}")
+            for w in used:
+                print(f"waived: {w['kind']} {w['symbol']} ({w['issue']}, until "
+                      f"{w['until']}): {w['reason']}")
+            for w in (w for w in waivers if w not in used):
+                print(f"warning: waiver {w['kind']} {w['symbol']} ({w['issue']}) "
+                      "matched nothing; remove it if stale")
+            # A SONAME line is only tolerated like the pre-#2839 case above.
+            soname_ok = "SONAME changed" not in proc.stdout or (same_minor and s1 != s2)
+            if covered and soname_ok:
                 rc = 0
         # same_minor is false only with a --baseline-tag override.
         failed, why = evaluate(rc, same_minor)

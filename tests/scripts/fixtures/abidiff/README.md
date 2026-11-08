@@ -7,6 +7,7 @@ Real output of libabigail `abidiff` 2.9.0 (Ubuntu `abigail-tools 2.9-3`,
 | fixture | pair | exit |
 |---|---|---|
 | `break.txt` | `src/v1` vs `src/v2`: removed function `gone`, `sig` signature change, `struct cfg` size change (seen through `use_cfg`), removed variable `g_level`, changed variable `g_mode` | 12 |
+| `type_plus_param.txt` | `src/typeplus/v1` vs `v2`: `take(struct cfg *)` where the struct grows AND the function gains a parameter | 12 |
 | `soname_only.txt` | `src/v1` built twice, SONAME `libalp_sdk.so.0` vs `libalp_sdk.so.0.17` | 12 |
 
 Regenerate (abidiff exactly as `scripts/check_abidiff.py` calls it):
@@ -21,3 +22,6 @@ abidiff --no-added-syms --headers-dir1 src/v1/include --headers-dir2 src/v1/incl
 
 (Compile each `.so` from a directory where the source file is named `lib.c`;
 the report embeds `lib.c:N:M` locations.)  Do not hand-edit the outputs.
+
+`type_plus_param.txt` uses the same gcc flags with `-Isrc/typeplus/{v1,v2}/include`
+and `src/typeplus/{v1,v2}/lib.c`.

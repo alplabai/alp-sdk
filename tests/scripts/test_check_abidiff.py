@@ -229,7 +229,7 @@ ALL_WAIVERS = "".join([
 def _waive(tmp_path, monkeypatch, yaml_text, rc=12, stdout=BREAK):
     _wire(tmp_path, monkeypatch, rc, stdout)
     d = tmp_path / "docs" / "abi"
-    d.mkdir(parents=True)
+    d.mkdir(parents=True, exist_ok=True)
     (d / "abidiff-waivers.yaml").write_text(yaml_text, encoding="utf-8")
 
 
@@ -309,3 +309,55 @@ def test_error_bit_with_real_soname_text_fails(tmp_path, monkeypatch):
 def test_shipped_waiver_file_is_valid():
     ok, bad = mod.load_waivers(mod.REPO / mod.WAIVER_FILE, mod.sdk_minor(mod.REPO))
     assert bad == []
+
+
+# --- review follow-ups (#2851) ------------------------------------------
+
+TYPE_PLUS_PARAM = (FIX / "type_plus_param.txt").read_text(encoding="utf-8")
+
+
+def test_type_waiver_does_not_cover_function_with_other_changes(tmp_path, monkeypatch):
+    """`take` takes the changed struct AND gained a parameter: waiving the struct is not enough."""
+    _waive(tmp_path, monkeypatch, _entry("struct cfg", "type"), stdout=TYPE_PLUS_PARAM)
+    assert mod.main() == 1
+    covered, _ = mod.apply_waivers(TYPE_PLUS_PARAM, [dict(symbol="struct cfg", kind="type")])
+    assert not covered
+
+
+def test_function_waiver_covers_function_with_struct_and_param_change(tmp_path, monkeypatch):
+    _waive(tmp_path, monkeypatch, _entry("take"), stdout=TYPE_PLUS_PARAM)
+    assert mod.main() == 0
+
+
+def test_unparsed_entry_fails_closed(tmp_path, monkeypatch):
+    """Summary says 2 changes but only 1 parseable entry (e.g. a typedef/array variable)."""
+    rep = BREAK.replace("1 Removed, 2 Changed", "1 Removed, 3 Changed")
+    assert len(mod.parse_entries(rep)) == 5  # 6 expected from the summary
+    _waive(tmp_path, monkeypatch, ALL_WAIVERS, stdout=rep)
+    assert mod.main() == 1
+
+
+def test_unquoted_until_and_issue_fail_through_yaml_loader(tmp_path, monkeypatch):
+    unq_until = "- symbol: gone\n  kind: function\n  reason: r\n  issue: \"#1\"\n  until: 0.19\n"
+    unq_issue = "- symbol: gone\n  kind: function\n  reason: r\n  issue: #12\n  until: \"0.19\"\n"
+    for text in (unq_until, unq_issue):
+        _waive(tmp_path, monkeypatch, text, rc=0, stdout="")
+        assert mod.main() == 1
+
+
+def test_waived_entries_with_unexplained_soname_change_still_fail(tmp_path, monkeypatch):
+    rep = BREAK + "\nSONAME changed from 'libalp_sdk.so.0' to 'libalp_sdk.so.0.17'\n"
+    _waive(tmp_path, monkeypatch, ALL_WAIVERS, stdout=rep)
+    monkeypatch.setattr(mod, "soname_of", lambda lib: "libalp_sdk.so.0.17")  # sonames equal
+    assert mod.main() == 1
+
+
+def test_stale_waiver_warns_but_passes(tmp_path, monkeypatch, capsys):
+    _waive(tmp_path, monkeypatch, ALL_WAIVERS + _entry("never_changed"))
+    assert mod.main() == 0
+    assert "warning: waiver function never_changed" in capsys.readouterr().out
+
+
+def test_missing_waiver_file_needs_no_yaml(tmp_path, monkeypatch):
+    monkeypatch.setitem(__import__("sys").modules, "yaml", None)  # import yaml -> ImportError
+    assert mod.load_waivers(tmp_path / "absent.yaml", "0.18") == ([], [])
