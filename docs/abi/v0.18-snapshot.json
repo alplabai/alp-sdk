@@ -7722,6 +7722,14 @@
           "hash": "2c67b6ffd4fae807",
           "signature": "alp_status_t rv3028c7_dispatch_irq(rv3028c7_t *ctx, uint8_t *status_seen);"
         },
+        "rv3028c7_event_arm": {
+          "hash": "07e0b2731499da40",
+          "signature": "alp_status_t rv3028c7_event_arm(rv3028c7_t *ctx, bool active_high, rv3028c7_evi_filter_t filter);"
+        },
+        "rv3028c7_event_disarm": {
+          "hash": "72647dd87409316b",
+          "signature": "alp_status_t rv3028c7_event_disarm(rv3028c7_t *ctx);"
+        },
         "rv3028c7_get_time": {
           "hash": "63de6081431873a4",
           "signature": "alp_status_t rv3028c7_get_time(rv3028c7_t *ctx, rv3028c7_time_t *out);"
@@ -7826,6 +7834,17 @@
             "RV3028C7_CLKOUT_LOW = 7"
           ],
           "hash": "17e79a83af25706d",
+          "kind": "enum"
+        },
+        "rv3028c7_evi_filter_t": {
+          "definition": "typedef enum { RV3028C7_EVI_FILTER_NONE = 0, RV3028C7_EVI_FILTER_3_9_MS = 1, RV3028C7_EVI_FILTER_15_6_MS = 2, RV3028C7_EVI_FILTER_125_MS = 3, } rv3028c7_evi_filter_t;",
+          "enumerators": [
+            "RV3028C7_EVI_FILTER_NONE = 0",
+            "RV3028C7_EVI_FILTER_3_9_MS = 1",
+            "RV3028C7_EVI_FILTER_15_6_MS = 2",
+            "RV3028C7_EVI_FILTER_125_MS = 3"
+          ],
+          "hash": "30d1b0bf3dd7970e",
           "kind": "enum"
         },
         "rv3028c7_src_handler_t": {
