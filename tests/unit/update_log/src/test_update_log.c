@@ -46,6 +46,22 @@ ZTEST(alp_update_log, test_entry_roundtrip)
 	zassert_mem_equal(got_prev, prev, 32);
 }
 
+ZTEST(alp_update_log, test_encode_rejects_out_of_range_status)
+{
+	alp_update_log_entry_t e = { 0 };
+	strcpy(e.fw_version, "1.0.0");
+	uint8_t prev[32] = { 0 };
+	uint8_t wire[ULOG_ENTRY_WIRE_LEN];
+
+	/* 256 would truncate to 0 == CONFIRMED in the one-byte wire field. */
+	e.status = (alp_update_status_t)256;
+	zassert_equal(ulog_entry_encode(&e, prev, wire), ALP_ERR_INVAL);
+	e.status = (alp_update_status_t)4;
+	zassert_equal(ulog_entry_encode(&e, prev, wire), ALP_ERR_INVAL);
+	e.status = ALP_UPDATE_STATUS_PENDING_CONFIRM;
+	zassert_equal(ulog_entry_encode(&e, prev, wire), ALP_OK);
+}
+
 ZTEST(alp_update_log, test_decode_short_buffer)
 {
 	uint8_t                wire[ULOG_ENTRY_WIRE_LEN - 1] = { 0 };

@@ -17,3 +17,12 @@
 &lpgpio {
 	status = "okay";
 };
+
+/*
+ * The STOP wake timer (the alp,power-wake-timer chosen node, ALP_POWER_WAKE_TIMER)
+ * is lptimer0, which the generated board tree leaves disabled (single-owner timer,
+ * enabled per app, #2984).  Without this the LPTIMER cycle cannot arm.
+ */
+&lptimer0 {
+	status = "okay";
+};

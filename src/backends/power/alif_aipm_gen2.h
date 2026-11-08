@@ -4,15 +4,14 @@
  * Gen2 aiPM bit layout for the Alif Ensemble E8 (and, by inference, E4).
  *
  * hal_alif's aipm.h picks its memory_block_t / MASK layout with
- * CONFIG_ENSEMBLE_GEN2.  Nothing in alp-sdk defines that symbol, so a
- * stock build compiles the gen1 (#else) layout, in which BACKUP4K_MASK
- * is bit20 -- which is FWRAM_MASK on gen2.  The gen2 BACKUP4K block is
- * bit21.  Defining CONFIG_ENSEMBLE_GEN2 globally is NOT an option here:
- * it also changes hal_alif's OSPI behaviour (XIPWR_DFS_HC in
- * drivers/ospi/src/ospi.c, the AES delay layout in ospi.h), which needs
- * its own regression run (alp-sdk#2785).
+ * CONFIG_ENSEMBLE_GEN2.  In the gen1 (#else) layout BACKUP4K_MASK is
+ * bit20 -- which is FWRAM_MASK on gen2; the gen2 BACKUP4K block is bit21.
+ * Until alp-sdk#2785 nothing defined the symbol, so every E8/E4 build
+ * compiled gen1.  zephyr/kconfigs/vendor-alif-peripherals.kconfig now sets
+ * it for SOC_SERIES_E8/E4, and alif_se_power.c asserts that the hal_alif
+ * masks match this header.
  *
- * So the aiPM power backend takes its off_profile_t.memory_blocks,
+ * The aiPM power backend still takes its off_profile_t.memory_blocks,
  * off_profile_t.wakeup_events and EWIC bits from THIS header, never from
  * the hal_alif *_MASK / WE_* / EWIC_* macros.  The names carry the
  * ALP_AIPM_GEN2_ prefix so both can be visible in one translation unit.

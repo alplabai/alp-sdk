@@ -12,11 +12,9 @@ HOMEPAGE = "https://github.com/alplabai/alp-sdk"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=787726818c896f394f6627ab59d98d69"
 
-# Track the alp-sdk default branch; SRCREV is repinned to the release-tag
-# commit at release time (same pattern as the other alp-* recipes in this
-# layer, e.g. alp-chips_0.6.bb), not by this file's PV bump.
+# SRCREV is the release-tag commit, set once in alp-sdk-version.inc for every
+# recipe that builds from this repo (all on branch=main; see the README).
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
-SRCREV  = "${AUTOREV}"
 
 # PV comes from the shared include (rewritten by scripts/bump_version.py).
 require recipes-core/alp-sdk/alp-sdk-version.inc

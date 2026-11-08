@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+description: |
+  Test-only UART whose poll_in() clears the error latch the way ns16550's LSR
+  read does (see src/lsr_uart.c).  Not a real controller.
+
+compatible: "alp,test-lsr-uart"
+
+include: base.yaml

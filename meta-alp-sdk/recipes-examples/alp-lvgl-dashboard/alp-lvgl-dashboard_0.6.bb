@@ -16,11 +16,8 @@ LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=787726818c896f394f6627ab59d98d69
 DEPENDS = "lvgl libdrm"
 RDEPENDS:${PN} = "lvgl"
 
-# Staged on the dev integration branch: the example source is not on
-# `main` until the next promotion -- flip branch=dev to branch=main
-# then (the alp-edgeai recipe shows the end state).
-SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=dev"
-SRCREV  = "${AUTOREV}"
+# SRCREV (the release-tag commit on `main`) comes from alp-sdk-version.inc.
+SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
 require recipes-core/alp-sdk/alp-sdk-version.inc
 # Links the per-machine libalp_sdk.so, so must not be shared across machines (#2850).
 PACKAGE_ARCH = "${MACHINE_ARCH}"

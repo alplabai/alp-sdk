@@ -65,16 +65,25 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
-/* in_use is the LAST member (issue #1115 round-2 dev review, mirrors
- * dsp/sw_fallback.c's struct dsp_be): pool_acquire() below memsets only
- * the bytes ahead of it, so the atomic claim is never transiently
- * undone by the reset. */
+/* pool_acquire() below memsets only the bytes ahead of in_use (issue
+ * #1115 round-2 dev review, mirrors dsp/sw_fallback.c's struct dsp_be),
+ * so the atomic claim is never transiently undone by the reset.
+ * in_use, lifecycle and active_ops sit AFTER that boundary on purpose:
+ * lifecycle and active_ops return to UNOPENED / 0 through the close
+ * protocol, and a late stale-handle op_enter() incrementing active_ops
+ * must not be wiped by a re-claim. */
 struct alp_i2c {
 	int      fd; /* /dev/i2c-N file descriptor */
 	uint32_t bus_id;
 	uint8_t  cached_addr; /* last addr passed to I2C_SLAVE ioctl */
 	bool     addr_cached;
 	bool     in_use;
+	/* Op/close guard (issue #629 pattern).  Deliberately AFTER in_use so
+	 * pool_acquire()'s memset leaves them alone: both return to
+	 * UNOPENED / 0 through the close protocol, and a late stale-handle
+	 * op_enter() incrementing active_ops must not be wiped by a re-claim. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
 };
 
 static struct alp_i2c g_i2c_pool[ALP_SDK_YOCTO_MAX_I2C_HANDLES];
@@ -103,6 +112,7 @@ static void pool_release(struct alp_i2c *h)
 		(void)close(h->fd);
 		h->fd = -1;
 	}
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	alp_slot_release(&h->in_use);
 }
 
@@ -162,6 +172,7 @@ alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg)
 	}
 	h->fd     = fd;
 	h->bus_id = cfg->bus_id;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	alp_internal_set_last_error(ALP_OK);
 	return h;
 }
@@ -173,24 +184,28 @@ alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, si
 	 * #1734's GPIO fix).  A malformed @p data/@p len pairing is a
 	 * separate condition -- ALP_ERR_INVAL, checked only once the
 	 * handle itself is known good. */
-	if (bus == NULL || !bus->in_use) {
+	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	alp_status_t rc;
+	ssize_t      n;
 	if (data == NULL && len > 0) {
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+		goto out;
 	}
-	alp_status_t rc = ensure_slave(bus, addr);
+	rc = ensure_slave(bus, addr);
 	if (rc != ALP_OK) {
-		return rc;
+		goto out;
 	}
-	ssize_t n = write(bus->fd, data, len);
+	n = write(bus->fd, data, len);
 	if (n < 0) {
-		return alp_status_from_posix_errno(errno);
+		rc = alp_status_from_posix_errno(errno);
+	} else if ((size_t)n != len) {
+		rc = ALP_ERR_IO;
 	}
-	if ((size_t)n != len) {
-		return ALP_ERR_IO;
-	}
-	return ALP_OK;
+out:
+	alp_handle_op_leave(&bus->active_ops);
+	return rc;
 }
 
 alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t len)
@@ -199,25 +214,36 @@ alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t le
 	 * matching every Zephyr dispatcher (issue #1834).  A malformed
 	 * @p data/@p len pairing is a separate condition -- ALP_ERR_INVAL,
 	 * checked only once the handle itself is known good. */
-	if (bus == NULL || !bus->in_use) {
+	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	alp_status_t rc;
+	ssize_t      n;
 	if (data == NULL && len > 0) {
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+		goto out;
 	}
-	alp_status_t rc = ensure_slave(bus, addr);
+	rc = ensure_slave(bus, addr);
 	if (rc != ALP_OK) {
-		return rc;
+		goto out;
 	}
-	ssize_t n = read(bus->fd, data, len);
+	n = read(bus->fd, data, len);
 	if (n < 0) {
-		return alp_status_from_posix_errno(errno);
+		rc = alp_status_from_posix_errno(errno);
+	} else if ((size_t)n != len) {
+		rc = ALP_ERR_IO;
 	}
-	if ((size_t)n != len) {
-		return ALP_ERR_IO;
-	}
-	return ALP_OK;
+out:
+	alp_handle_op_leave(&bus->active_ops);
+	return rc;
 }
+
+static alp_status_t write_read_locked(alp_i2c_t     *bus,
+                                      uint8_t        addr,
+                                      const uint8_t *wdata,
+                                      size_t         wlen,
+                                      uint8_t       *rdata,
+                                      size_t         rlen);
 
 alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
                                 uint8_t        addr,
@@ -228,9 +254,22 @@ alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
 {
 	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
 	 * matching every Zephyr dispatcher (issue #1834). */
-	if (bus == NULL || !bus->in_use) {
+	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	alp_status_t rc = write_read_locked(bus, addr, wdata, wlen, rdata, rlen);
+	alp_handle_op_leave(&bus->active_ops);
+	return rc;
+}
+
+/* Body of alp_i2c_write_read(), run inside the op_enter/op_leave pair. */
+static alp_status_t write_read_locked(alp_i2c_t     *bus,
+                                      uint8_t        addr,
+                                      const uint8_t *wdata,
+                                      size_t         wlen,
+                                      uint8_t       *rdata,
+                                      size_t         rlen)
+{
 	if ((wdata == NULL && wlen > 0) || (rdata == NULL && rlen > 0)) {
 		return ALP_ERR_INVAL;
 	}
@@ -277,5 +316,15 @@ alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
 
 void alp_i2c_close(alp_i2c_t *bus)
 {
+	if (bus == NULL) {
+		return;
+	}
+	/* Gate out new ops, then wait for in-flight ones to leave before the
+	 * fd is closed: otherwise an op past its check would read()/write() a
+	 * recycled fd number that now belongs to someone else.  false means
+	 * already closed/closing -- a second close() stays a no-op. */
+	if (!alp_handle_begin_close_blocking(&bus->lifecycle, &bus->active_ops)) {
+		return;
+	}
 	pool_release(bus);
 }
