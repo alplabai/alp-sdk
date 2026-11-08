@@ -46,18 +46,15 @@
 #include "wdt_ops.h"
 #include "common/alp_errno.h"
 
-/* Per-handle backend data: the open watchdog chardev fd plus whether
- * the driver advertised magic-close support (so close() can disarm
- * via the 'V' write when the platform honours it). */
+/* Per-handle backend data: the open watchdog chardev fd. */
 typedef struct {
-	int  fd;
-	bool magic_close;
+	int fd;
 } y_wdt_data_t;
 
 /* Test-only interception of the three syscalls y_open() drives before
  * it has a fully-populated backend handle (open() / malloc() / the
  * WDIOC_SETTIMEOUT ioctl's programmed value), plus observation hooks
- * for the two syscalls _disarm_and_close() uses to actually disarm.
+ * for the WDIOS_DISABLECARD _disarm_and_close() uses to actually disarm.
  * Defaults are NULL/real -- production behaviour is unchanged.  Opening
  * a REAL /dev/watchdogN here would arm a genuine hardware watchdog on
  * whatever host runs the test (there usually isn't one, but on a board
@@ -76,7 +73,6 @@ static int (*g_wdt_test_open_hook)(const char *path)              = NULL;
 static void *(*g_wdt_test_malloc_hook)(size_t size)               = NULL;
 static void (*g_wdt_test_settimeout_observed_hook)(int timeout_s) = NULL;
 static int (*g_wdt_test_setoptions_hook)(int fd, int flags)       = NULL;
-static ssize_t (*g_wdt_test_magic_write_hook)(int fd)             = NULL;
 
 static int _wdt_open(const char *path)
 {
@@ -91,7 +87,7 @@ static void *_wdt_malloc(size_t size)
 }
 
 /* Scoped to the disarm path on purpose: y_open()'s own SETTIMEOUT /
- * GETSUPPORT ioctls must keep reaching the real kernel (or the pipe
+ * ioctls must keep reaching the real kernel (or the pipe
  * fd that stands in for it), so this seam does not wrap ioctl() in
  * general -- only the WDIOS_DISABLECARD that #760 is about. */
 static int _wdt_disarm_setoptions(int fd, int flags)
@@ -100,34 +96,20 @@ static int _wdt_disarm_setoptions(int fd, int flags)
 	return ioctl(fd, WDIOC_SETOPTIONS, &flags);
 }
 
-static ssize_t _wdt_magic_write(int fd)
-{
-	if (g_wdt_test_magic_write_hook != NULL) return g_wdt_test_magic_write_hook(fd);
-	return write(fd, "V", 1);
-}
-
 /**
- * @brief Best-effort disarm (WDIOS_DISABLECARD + magic 'V' close), then
- *        close the chardev.
+ * @brief Best-effort WDIOS_DISABLECARD, then close the chardev.
  *
- * Centralises the disarm-before-release sequence (#760) so EVERY
- * post-open failure in y_open(), not just the ordinary y_close() path,
- * attempts to leave the kernel watchdog disabled before the fd goes
- * away -- opening /dev/watchdogN arms most Linux watchdogs immediately,
- * so a bail-out that only closes the descriptor abandons an armed timer
- * the application now has no handle to feed or disable.
- * @p attempt_magic_close lets early failures (before WDIOC_GETSUPPORT has
- * run) skip the magic-close write when support is still unknown --
- * WDIOS_DISABLECARD is still attempted unconditionally.  Errors are
- * swallowed; this function has no return (matches y_close's contract).
+ * Used ONLY by y_open()'s post-open failure paths (#760): opening
+ * /dev/watchdogN arms most Linux watchdogs immediately, so a bail-out
+ * that only closes the descriptor would abandon an armed timer the
+ * caller has no handle to feed.  Never used by y_close(): a successfully
+ * opened handle's close must not disarm (#2981).  The magic 'V' is never
+ * written anywhere -- without it the kernel keeps the timer running.
  */
-static void _disarm_and_close(int fd, bool attempt_magic_close)
+static void _disarm_and_close(int fd)
 {
 	if (fd < 0) return;
 	(void)_wdt_disarm_setoptions(fd, WDIOS_DISABLECARD);
-	if (attempt_magic_close) {
-		(void)!_wdt_magic_write(fd);
-	}
 	close(fd);
 }
 
@@ -140,8 +122,7 @@ static void _disarm_and_close(int fd, bool attempt_magic_close)
  * overflow-free quotient/remainder ceiling division (#760: the naive
  * `(timeout_ms + 999u) / 1000u` wraps uint32_t for timeout_ms close to
  * UINT32_MAX and silently programs the 1 s floor instead of ~49.7
- * days).  WDIOC_GETSUPPORT tells us whether magic-close is available
- * for the close()-disarm path.  Errors route through the shared @ref
+ * days).  Errors route through the shared @ref
  * alp_status_from_posix_errno baseline (#630) -- a missing
  * /dev/watchdogN (ENOENT/ENODEV) now correctly surfaces as
  * ALP_ERR_NOT_READY instead of falling through to ALP_ERR_IO, which
@@ -180,13 +161,10 @@ y_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilitie
 
 	y_wdt_data_t *d = (y_wdt_data_t *)_wdt_malloc(sizeof(*d));
 	if (d == NULL) {
-		/* magic-close support is unknown this early (GETSUPPORT hasn't
-         * run yet) -- DISABLECARD is still attempted. */
-		_disarm_and_close(fd, false);
+		_disarm_and_close(fd);
 		return ALP_ERR_NOMEM;
 	}
-	d->fd          = fd;
-	d->magic_close = false;
+	d->fd = fd;
 
 	/* Ceiling-divide timeout_ms to whole seconds (min 1 s) without the
      * uint32_t overflow the old `(timeout_ms + 999u) / 1000u` formula
@@ -205,16 +183,10 @@ y_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilitie
          * that is not fatal -- the device is still armed and feedable. */
 		if (errno != EOPNOTSUPP && errno != ENOTTY) {
 			int e = errno; /* save before _disarm_and_close's own ioctl/write/close touch it */
-			_disarm_and_close(fd, false); /* magic-close support still unknown here */
+			_disarm_and_close(fd);
 			free(d);
 			return alp_status_from_posix_errno(e);
 		}
-	}
-
-	struct watchdog_info info;
-	memset(&info, 0, sizeof(info));
-	if (ioctl(fd, WDIOC_GETSUPPORT, &info) == 0) {
-		d->magic_close = (info.options & WDIOF_MAGICCLOSE) != 0u;
 	}
 
 	st->dev        = NULL;
@@ -256,20 +228,17 @@ static alp_status_t y_disable(alp_wdt_backend_state_t *st)
 }
 
 /**
- * @brief Best-effort disarm, then close the chardev and free state.
+ * @brief Release the handle: close the chardev WITHOUT disarming.
  *
- * Matches alp_wdt_close's Yocto-specific contract: best-effort disarm
- * scoped to this handle's own `/dev/watchdogN`, never another
- * handle's.  Tries WDIOS_DISABLECARD first; if the driver advertised
- * magic-close, writes the 'V' character before close() so a
- * non-NOWAYOUT kernel stops the timer instead of letting it keep
- * counting after the fd is gone.
+ * Matches the portable alp_wdt_close contract (#2981): neither
+ * WDIOS_DISABLECARD nor the magic 'V' is issued, so the kernel watchdog
+ * keeps running and resets the board if nobody else feeds it.
  */
 static void y_close(alp_wdt_backend_state_t *st)
 {
 	y_wdt_data_t *d = (y_wdt_data_t *)st->be_data;
 	if (d == NULL) return;
-	_disarm_and_close(d->fd, d->magic_close);
+	if (d->fd >= 0) close(d->fd);
 	free(d);
 	st->be_data = NULL;
 }
