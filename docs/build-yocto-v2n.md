@@ -322,7 +322,8 @@ opkg update && opkg upgrade alp-sdk
 `opkg update` fails if the index signature does not verify; there is no
 unsigned fallback.
 
-**Where it lives.** The feed of release line `0.17` for machine
+**Where it lives.** One feed is built per MACHINE of the image (the
+`e1m-v2n10x-a55` and `e1m-v2m10x-a55` families alike). The feed of release line `0.17` for machine
 `e1m-v2n101-a55` is the GitHub Release tagged `feed-v0.17-e1m-v2n101-a55`
 (`feed-v<major.minor>-<MACHINE>`). opkg needs `<base>/Packages.gz` and every
 `<base>/<ipk>` by name under one base URL, and a release's assets are a flat

@@ -1,0 +1,1 @@
+**Dev-kit feed line fails loudly under a non-alp distro.** `alp-devkit-feed.inc` derives the feed line from `ALP_SDK_VERSION` and aborts instead of silently using another distro's `DISTRO_VERSION`; the signing fragment and docs now say why the per-arch signatures stay and which machines get a feed (#2854).

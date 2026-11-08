@@ -214,3 +214,17 @@ def test_feed_is_applied_only_in_the_edge_image_with_a_prod_guard():
         run("1")
     run(None)
     run("0")
+
+
+def test_feed_line_derives_from_the_alp_distro_version_and_fails_elsewhere():
+    inc = (LAYER / "conf/distro/include/alp-devkit-feed.inc").read_text(encoding="utf-8")
+    expr = re.search(r'^ALP_DEVKIT_FEED_LINE \?= "\$\{@(.*)\}"$', inc, re.M).group(1)
+
+    def line(v):
+        d = type("d", (), {"getVar": staticmethod(lambda n: v if n == "ALP_SDK_VERSION" else "9.9.9")})
+        bb = type("bb", (), {"fatal": staticmethod(lambda m: (_ for _ in ()).throw(_Fatal(m)))})
+        return eval(expr, {"d": d, "bb": bb})
+
+    assert line("0.17.0~rc2") == "0.17"
+    with pytest.raises(_Fatal):
+        line(None)  # non-alp distro: DISTRO_VERSION must not be used

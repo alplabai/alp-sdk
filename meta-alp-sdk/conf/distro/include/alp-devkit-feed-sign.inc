@@ -11,6 +11,9 @@
 #     GPG_PATH = "/path/to/scratch/gnupghome"
 #
 # Signatures are binary (Packages.sig), the name opkg looks for.
+# These per-arch signatures are not what is published: scripts/package_devkit_feed.sh
+# merges the allowlisted stanzas into one index and re-signs it. This fragment stays
+# so `bitbake package-index` can run unattended with the key (the class fails without it).
 
 INHERIT += "sign_package_feed"
 # Fingerprint of keys/alp_devkit_feed_signing.pub.asc.
