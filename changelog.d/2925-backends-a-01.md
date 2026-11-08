@@ -2,7 +2,9 @@
 
 tflm: tensors whose type has no alp dtype (int64, bool, ...) are refused with
 ALP_ERR_NOSUPPORT at open instead of being reported as F32; an explicit
-ALP_INFERENCE_BACKEND_CPU pin no longer registers the Ethos-U op.
+ALP_INFERENCE_BACKEND_CPU pin no longer registers the Ethos-U op, so a CPU
+pin with a Vela-compiled (Ethos-U) model is refused with ALP_ERR_NOSUPPORT at
+open.
 
 yocto_drv: slept_ms is timed with CLOCK_BOOTTIME so suspend time counts.
 
