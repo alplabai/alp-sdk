@@ -69,6 +69,11 @@ lptimer_clock_seg_elapsed(const struct lptimer_clock *c, uint32_t cur, bool unde
 
 static inline bool lptimer_clock_start_seen(const struct lptimer_clock *c, uint32_t cur)
 {
+	/* 0 is also the placeholder before the first LF edge after ENABLE, so it
+	 * only counts as a real reading when the load itself is 0. */
+	if (cur == 0U && c->load != 0U) {
+		return false;
+	}
 	return cur <= c->load && (c->load - cur) <= LPTIMER_CLK_START_WINDOW;
 }
 

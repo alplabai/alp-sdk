@@ -29,6 +29,11 @@
  * the elapsed count into it before reloading, and the alarm ISR folds the
  * period and restores free-run (LOADCOUNT 0xFFFFFFFF), so get_value() is a
  * continuous free-running down-counter and get_top_value() stays 0xFFFFFFFF.
+ * Interrupt-latency cost: every reload (set_alarm, cancel_alarm, the alarm ISR)
+ * polls CURRENTVAL under irq_lock until the new load is visible -- typically
+ * 1-2 LF clocks (~30-60 us), bounded to ~100 us (and logged at debug level when
+ * the bound is hit).
+ *
  * Residual error: the clocks between reading CURRENTVAL and the reload taking
  * effect (a few ticks) are lost per set_alarm()/cancel_alarm().  The ISR folds
  * one period plus the clocks since the reload, so ISR latency must stay below
@@ -243,7 +248,7 @@ static void lptimer_reload(uint32_t cbase, const struct lptimer_clock *clk, bool
 {
 	uint32_t load = clk->load;
 	uint32_t t0;
-	uint32_t bound = (sys_clock_hw_cycles_per_sec() / 1000000U) * 100U;
+	uint32_t bound = (uint32_t)((uint64_t)sys_clock_hw_cycles_per_sec() * 100U / 1000000U);
 
 	uint32_t ctrl = sys_read32(cbase + LPTIMER_CH_CONTROLREG);
 
@@ -264,9 +269,15 @@ static void lptimer_reload(uint32_t cbase, const struct lptimer_clock *clk, bool
 	ctrl |= LPTIMER_CTRL_ENABLE;
 	sys_write32(ctrl, cbase + LPTIMER_CH_CONTROLREG);
 
+	if (bound == 0U) {
+		bound = 1U; /* system timer below 10 kHz: still poll at least once */
+	}
 	t0 = k_cycle_get_32();
-	while (!lptimer_clock_start_seen(clk, sys_read32(cbase + LPTIMER_CH_CURRENTVAL)) &&
-	       (k_cycle_get_32() - t0) < bound) {
+	while (!lptimer_clock_start_seen(clk, sys_read32(cbase + LPTIMER_CH_CURRENTVAL))) {
+		if ((k_cycle_get_32() - t0) >= bound) {
+			LOG_DBG("LPTIMER reload (load 0x%08x) not visible within the poll bound", load);
+			break;
+		}
 	}
 }
 
@@ -429,12 +440,13 @@ static void counter_alif_lptimer_isr(const struct device *dev)
 		/* The free-run segment has just started: no CURRENTVAL read (it
 		 * can still show the previous count). */
 		ticks = lptimer_clock_value(&data->clk, LPTIMER_CLK_FREE_LOAD, false);
-	}
 
-	/* Clear the pending channel interrupt: reading the per-channel EOI
-	 * register clears it (Alif DFP lptimer.h clear_interrupt reads
-	 * LPTIMER_EOI). */
-	(void)sys_read32(cbase + LPTIMER_CH_EOI);
+		/* Clear the pending channel interrupt: reading the per-channel
+		 * EOI register clears it (Alif DFP lptimer.h clear_interrupt
+		 * reads LPTIMER_EOI).  Only when we folded it: an underflow
+		 * that arrives after the pending check must stay latched. */
+		(void)sys_read32(cbase + LPTIMER_CH_EOI);
+	}
 	irq_unlock(key);
 
 	if (cb != NULL) {

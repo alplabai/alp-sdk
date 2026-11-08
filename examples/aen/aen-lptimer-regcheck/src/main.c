@@ -171,6 +171,7 @@ static void continuity_checks(void)
 	c = rd_val();
 	printk("  fired=%d cb ticks=0x%08x now=0x%08x\n", cb_fired, cb_val, c);
 	chk_el("fire vs set_alarm", b, cb_val, 400U); /* ~200 ticks + latency */
+	/* Lower bound: the 200-tick period must be there (a lost period fails). */
 	if (!cb_fired || (b - cb_val) < 190U) {
 		printk("  fire period FAIL\n");
 		continuity_fails++;

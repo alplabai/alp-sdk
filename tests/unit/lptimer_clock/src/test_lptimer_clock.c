@@ -239,6 +239,11 @@ ZTEST(lptimer_clock, test_start_seen_rejects_stale_and_placeholder)
 	zassert_false(lptimer_clock_start_seen(&c, 1234U));
 	zassert_true(lptimer_clock_start_seen(&c, LPTIMER_CLK_FREE_LOAD));
 	zassert_true(lptimer_clock_start_seen(&c, LPTIMER_CLK_FREE_LOAD - 2U));
+	c.load = 2U; /* the 0 placeholder is within the window of a tiny load */
+	zassert_false(lptimer_clock_start_seen(&c, 0U));
+	zassert_true(lptimer_clock_start_seen(&c, 1U));
+	c.load = 0U;
+	zassert_true(lptimer_clock_start_seen(&c, 0U));
 	c.load = 99U;
 	zassert_false(lptimer_clock_start_seen(&c, 5000U)); /* previous free-run count */
 	zassert_true(lptimer_clock_start_seen(&c, 98U));
