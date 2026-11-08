@@ -10,6 +10,7 @@ dir that doesn't exist, so provision() fails at the HiL-spec check -- before
 the flash loop, before _alloc_serial, and before run_smoke.py is ever
 invoked."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -25,19 +26,20 @@ SCRIPT = REPO / "scripts" / "provision_som.py"
 def _make_bundle(tmp_path, status="bootloader-only:image-pending-hw", with_image=False):
     d = tmp_path / "bundle"
     (d / "artifacts").mkdir(parents=True)
-    h = "0" * 64
+    h = hashlib.sha256(b"BL2").hexdigest()
     (d / "artifacts" / "bl2.bin").write_bytes(b"BL2")
     (d / "artifacts" / "fip.bin").write_bytes(b"FIP")
     comps = [
         {"role": "bl2", "file": "artifacts/bl2.bin", "sha256": h, "size_bytes": 3,
          "flash_target": "xspi:mtd0"},
-        {"role": "fip", "file": "artifacts/fip.bin", "sha256": h, "size_bytes": 3,
+        {"role": "fip", "file": "artifacts/fip.bin",
+         "sha256": hashlib.sha256(b"FIP").hexdigest(), "size_bytes": 3,
          "flash_target": "xspi:mtd1"},
     ]
     if with_image:
         (d / "artifacts" / "img.wic.gz").write_bytes(b"IMG")
         comps.append({"role": "system_image", "file": "artifacts/img.wic.gz",
-                      "sha256": h, "size_bytes": 3, "flash_target": "emmc"})
+                      "sha256": hashlib.sha256(b"IMG").hexdigest(), "size_bytes": 3, "flash_target": "emmc"})
     bundle = {
         "schema_version": 1, "sku": "E1M-V2N101", "family": "v2n", "hw_rev": "r1",
         "release_version": "som-1.0.0", "created": "2026-06-08", "status": status,
@@ -270,7 +272,9 @@ def test_relative_hil_spec_resolves_against_alp_sdk_root_not_cwd(tmp_path, monke
     rc = ps.provision(cfg)
     calls = log.read_text(encoding="utf-8") if log.exists() else "<no ledger calls>"
     assert rc == 0, calls
-    assert "--test-result pass" in calls, calls
+    # The legacy flow never writes the EEPROM, so a passing test is not "pass".
+    assert "--test-result pass" not in calls, calls
+    assert "--test-result pending-hw" in calls, calls
 
 
 def test_eeprom_message_does_not_claim_execute_performed_the_write(tmp_path, monkeypatch, capsys):
@@ -290,3 +294,34 @@ def test_eeprom_message_does_not_claim_execute_performed_the_write(tmp_path, mon
     out = capsys.readouterr().out
     assert "(execute)" not in out
     assert "HW-gated" in out
+
+
+def _rewrite_bundle(d, fn):
+    bj = d / "bundle.json"
+    doc = json.loads(bj.read_text(encoding="utf-8"))
+    fn(doc)
+    bj.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_tampered_component_fails_validation_before_any_flash(tmp_path, monkeypatch):
+    d = _make_bundle(tmp_path)
+    (d / "artifacts" / "fip.bin").write_bytes(b"XYZ")   # same size, wrong sha256
+    flashed = []
+    monkeypatch.setattr(ps, "_flash", lambda cfg, comp: flashed.append(comp) or ps.Step("f", True, ""))
+    rc = ps.provision(ps.Cfg(bundle_dir=d, execute=True, serial="2026W24-0001"))
+    assert rc == 1 and not flashed
+
+
+def test_wrong_size_component_fails_validation(tmp_path):
+    d = _make_bundle(tmp_path)
+    _rewrite_bundle(d, lambda doc: doc["components"][0].update(size_bytes=99))
+    _doc, step = ps._validate_bundle(ps.Cfg(bundle_dir=d))
+    assert not step.ok and "size" in step.message
+
+
+def test_component_path_escaping_bundle_is_refused(tmp_path):
+    d = _make_bundle(tmp_path)
+    (tmp_path / "outside.bin").write_bytes(b"BL2")
+    _rewrite_bundle(d, lambda doc: doc["components"][0].update(file="../outside.bin"))
+    _doc, step = ps._validate_bundle(ps.Cfg(bundle_dir=d))
+    assert not step.ok and "escapes" in step.message

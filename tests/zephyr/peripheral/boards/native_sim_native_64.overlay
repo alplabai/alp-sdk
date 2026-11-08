@@ -18,6 +18,7 @@
         alp-spi0  = &spi0_emul;
         alp-uart0 = &uart0;
         alp-uart1 = &uart1_emul;
+        alp-uart2 = &uart2_lsr;
         /* #1631: alp-can0 -> the board's own can_loopback0 (status
          * "okay" by default in native_sim.dts, #include-d by this
          * platform's own native_sim_64.dts) so the CAN backend's
@@ -34,6 +35,13 @@
      * native_sim's real backing UART with no test-side RX hook, so a
      * second, purely emulated UART (uart_emul_put_rx_data()) backs
      * the timeout tests in src/uart.c instead of port 0. */
+    /* #2934: UART whose poll_in() clears the error latch like ns16550's LSR
+     * read (src/lsr_uart.c). */
+    uart2_lsr: uart-lsr-alp-uart2 {
+        compatible = "alp,test-lsr-uart";
+        status = "okay";
+    };
+
     uart1_emul: uart-emul-alp-uart1 {
         compatible = "zephyr,uart-emul";
         status = "okay";

@@ -12,11 +12,9 @@ HOMEPAGE = "https://github.com/alplabai/alp-sdk"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=787726818c896f394f6627ab59d98d69"
 
-# Track the alp-sdk default branch; SRCREV is repinned to the release-tag
-# commit at release time (same pattern as the other alp-* recipes in this
-# layer, e.g. alp-chips_0.6.bb), not by this file's PV bump.
+# SRCREV is the release-tag commit, set once in alp-sdk-version.inc for every
+# recipe that builds from this repo (all on branch=main; see the README).
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
-SRCREV  = "${AUTOREV}"
 
 # PV comes from the shared include (rewritten by scripts/bump_version.py).
 require recipes-core/alp-sdk/alp-sdk-version.inc
@@ -70,6 +68,14 @@ EXTRA_OECMAKE += "${@'-DALP_SDK_V2N_DOORBELL_RSP_CH8=ON' if d.getVar('ALP_V2N_DO
 # `inference.auto_order` into local.conf by `--emit yocto-conf`; empty means no preset order.
 ALP_SDK_INFERENCE_AUTO_ORDER ?= ""
 EXTRA_OECMAKE:append = "${@' -DALP_SDK_INFERENCE_AUTO_ORDER=' + d.getVar('ALP_SDK_INFERENCE_AUTO_ORDER') if d.getVar('ALP_SDK_INFERENCE_AUTO_ORDER') else ''}"
+
+# Active SoC capability profile (Kconfig-style symbol, e.g.
+# ALP_SOC_RENESAS_RZV2N_N44).  Generated from the SoM preset's silicon into
+# local.conf by `--emit yocto-conf`; CMake turns it into
+# CONFIG_<symbol>=1 so <alp/soc_caps.h> / ALP_SOC_REF_STR match the real
+# silicon.  Empty keeps the permissive "unknown SoC" profile.
+ALP_SDK_SOC ?= ""
+EXTRA_OECMAKE:append = "${@' -DALP_SOC=' + d.getVar('ALP_SDK_SOC') if d.getVar('ALP_SDK_SOC') else ''}"
 
 # Regenerate the CMake toolchain file as a do_configure prefunc.
 #

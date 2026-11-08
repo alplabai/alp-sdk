@@ -80,7 +80,10 @@ wiring of your own**.
 **Which key signs your app.** The factory MCUboot trusts the SDK's shared
 development key, [`keys/mcuboot_shared_dev_ecdsa_p256.pem`](../keys/README.md),
 which is committed to this repository. The AEN sysbuild configuration
-(`zephyr/sysbuild/aen/sysbuild.conf`) already signs with it, so an image built
+(`zephyr/sysbuild/aen/sysbuild.conf`) carries no key itself: `tan build` passes
+the key as an absolute `-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE`, and a hand-run
+sysbuild must pass that same -D (below). Leaving it out signs with MCUboot's
+`root-ec-p256.pem`, which the factory MCUboot rejects. With the key, an image built
 from a fresh clone boots on an Alp Lab-provisioned module without any key
 setup. The key is public: it gives **no** security, which matches the DM
 lifecycle the module ships in. For a product, build MCUboot with your own key
@@ -98,7 +101,8 @@ slot0 over the SE-UART via SETOOLS) before that refusal landed:
 # A board.yaml-driven app needs its alp.conf first: prefer `tan build`, or pass
 # -DEXTRA_CONF_FILE=<alp.conf> (docs/board-config-emit.md; #866).
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
-    --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
+    --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf \
+    -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="<abs-alp-sdk>/keys/mcuboot_shared_dev_ecdsa_p256.pem"
 west flash    # REFUSES (alp-sdk#2274) -- see the warning below. Historical
               # intent: alif_flash runner signs + writes your MCUboot-signed
               # image into slot0 via SETOOLS over the SE-UART (not SWD).

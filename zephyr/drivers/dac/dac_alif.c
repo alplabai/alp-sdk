@@ -246,10 +246,11 @@ static void dac_set_bypass_input(const struct device *dev, uint32_t bypass_val)
 
 	data = sys_read32(regs + DAC_REG1);
 	data &= ~(DAC_MAX_BYP_VAL_Msk);
-	sys_write32(data, (regs + DAC_REG1));
 
 	bypass_val = (bypass_val & DAC_MAX_INPUT);
 
+	/* One read-modify-write: a separate "clear the field" write would
+	 * glitch the analog output through code 0. */
 	data |= (bypass_val << DAC_REG1_DAC_BYP_VAL_Pos);
 	sys_write32(data, (regs + DAC_REG1));
 }
@@ -274,14 +275,14 @@ static int dac_write_data(const struct device *dev, uint8_t channel, uint32_t in
 		return -EINVAL;
 	}
 
-	/* If bypass mode is not enabled then pass
-	 * the input through the DAC_IN reg
-	 */
-	if (!(dac_input_mux_enabled(dev))) {
-		sys_write32(input_value, (regs + DAC_IN));
-	} else {
-		dac_set_bypass_input(dev, config->bypass_val);
+	/* In bypass mode the output is fixed to the DT bypass-val (programmed
+	 * once at init); DAC_IN is not selected, so the caller's value cannot
+	 * take effect.  Say so instead of silently reporting success. */
+	if (dac_input_mux_enabled(dev)) {
+		return -ENOTSUP;
 	}
+
+	sys_write32(input_value, (regs + DAC_IN));
 
 	/* There are no channels in DAC */
 	ARG_UNUSED(channel);
@@ -332,6 +333,10 @@ static int dac_init(const struct device *dev)
 	dac_reset_deassert(dev);
 
 	dac_set_config(dev);
+
+	if (config->bypass_enabled) {
+		dac_set_bypass_input(dev, config->bypass_val);
+	}
 
 	return 0;
 }

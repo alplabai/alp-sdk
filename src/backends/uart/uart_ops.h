@@ -32,6 +32,11 @@ typedef struct alp_uart_backend_state {
      * before the handle is released.  Zephyr-only today -- other
      * backends never set this field. */
 	void *rx_ringbuf;
+	/* Sticky "an RX overrun/framing/parity error was seen while transmitting"
+     * flag (issue #2934).  Accessed with __atomic builtins; set by the
+     * backend's write path, consumed (read-and-clear) by the next read or
+     * ring pop, which report it as ALP_ERR_IO.  Zephyr-only today. */
+	uint32_t line_err;
 } alp_uart_backend_state_t;
 
 struct alp_uart_ops {

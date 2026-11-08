@@ -176,6 +176,7 @@
 			storage_partition: partition@560000 {
 				label = "storage";
 				reg = <0x560000 DT_SIZE_K(96)>;
+				status = "disabled"; /* owned by the other M55 core (#2984) */
 			};
 
 			atoc_partition: partition@578000 {
@@ -192,6 +193,11 @@
 	pinctrl-0 = <&pinctrl_uart5>;
 	pinctrl-names = "default";
 	current-speed = <115200>;
+};
+
+/* lptimer0 is per-app: an app that needs it enables it in its board overlay. */
+&lptimer0 {
+	status = "disabled";
 };
 
 /*
@@ -435,6 +441,18 @@
 			alp,restore = "pin_release";
 		};
 	};
+};
+
+/*
+ * GPIO ports carrying a SoM power-domain pad (the SoC peripherals dtsi leaves
+ * them disabled).  Without them the SoM power layer cannot drive those pads.
+ */
+&gpio5 {
+	status = "okay";
+};
+
+&gpio11 {
+	status = "okay";
 };
 
 /* Arm Ethos-U NPU: enable the ethosu85 node declared in the SoC peripherals dtsi (see ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN). */

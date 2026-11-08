@@ -62,9 +62,10 @@
  * DDR (opcode 7Ch, the vendor driver's CMD_READ_DATA) rather than switching
  * back to 1-1-1 per call -- switching back would need its own 81h write
  * every time and a failure mid-switch would leave read() unable to tell
- * which framing the part is actually in. `read_jedec_id()`/`sfdp_read()`
- * are UNCHANGED and stay 1-1-1-only: they are diagnostic reads this driver
- * never calls itself, and nothing here calls them after a write/erase.
+ * which framing the part is actually in. `read()` holds `data->lock` across
+ * the mode check and every chunk, so a concurrent write/erase cannot switch
+ * the part mid-read. `read_jedec_id()`/`sfdp_read()` stay 1-1-1-only
+ * diagnostic reads and return -ENOTSUP once the part is in Octal DDR.
  *
  * BENCH-VERIFIED (#915) on E1M-AEN803 serial 2026W36-0001: erase, program,
  * byte-for-byte readback and restore of one 4 KiB sector through
@@ -1230,8 +1231,16 @@ static int ospi_alif_read(const struct device *dev, off_t offset, void *buffer, 
 	if (len > 0U && (uint64_t)offset + (len - 1U) > UINT32_MAX) {
 		return -EINVAL;
 	}
+	/* Hold the lock across the mode check AND every 1-1-1 chunk: a concurrent
+	 * write()/erase() flips octal_ddr_active under this same lock, and a switch
+	 * between chunks would send the rest as 1-1-1 to an Octal DDR part (garbage
+	 * RX, rc 0). k_mutex is recursive, so the per-chunk locks below nest. */
+	k_mutex_lock(&data->lock, K_FOREVER);
 	if (data->octal_ddr_active) {
-		return ospi_alif_read_octal(dev, offset, out, len);
+		int rc = ospi_alif_read_octal(dev, offset, out, len);
+
+		k_mutex_unlock(&data->lock);
+		return rc;
 	}
 	while (len > 0U) {
 		size_t  chunk = MIN(len, (size_t)OSPI_ALIF_MAX_FRAMES);
@@ -1245,12 +1254,14 @@ static int ospi_alif_read(const struct device *dev, off_t offset, void *buffer, 
 		int rc = ospi_alif_cmd_read(dev, cmd, sizeof(cmd), out, chunk);
 
 		if (rc != 0) {
+			k_mutex_unlock(&data->lock);
 			return rc;
 		}
 		out += chunk;
 		offset += (off_t)chunk;
 		len -= chunk;
 	}
+	k_mutex_unlock(&data->lock);
 	return 0;
 }
 
@@ -1262,12 +1273,21 @@ static int ospi_alif_read(const struct device *dev, off_t offset, void *buffer, 
 
 static int ospi_alif_read_jedec_id(const struct device *dev, uint8_t *id)
 {
-	static const uint8_t cmd[] = { OSPI_ALIF_JEDEC_RDID };
+	static const uint8_t   cmd[] = { OSPI_ALIF_JEDEC_RDID };
+	struct ospi_alif_data *data  = dev->data;
+	int                    rc;
 
 	if (id == NULL) {
 		return -EINVAL;
 	}
-	return ospi_alif_cmd_read(dev, cmd, sizeof(cmd), id, OSPI_ALIF_JEDEC_ID_LEN);
+	/* 1-1-1 only: once a write/erase switched the part to Octal DDR it no longer
+	 * answers this framing, so refuse instead of returning garbage with rc 0. */
+	k_mutex_lock(&data->lock, K_FOREVER);
+	rc = data->octal_ddr_active
+	         ? -ENOTSUP
+	         : ospi_alif_cmd_read(dev, cmd, sizeof(cmd), id, OSPI_ALIF_JEDEC_ID_LEN);
+	k_mutex_unlock(&data->lock);
+	return rc;
 }
 
 /* JESD216 Read SFDP: 0x5A, 24-bit address, 8 dummy clocks (one dummy byte in
@@ -1276,10 +1296,17 @@ static int ospi_alif_read_jedec_id(const struct device *dev, uint8_t *id)
 
 static int ospi_alif_sfdp_read(const struct device *dev, off_t offset, void *data, size_t len)
 {
-	uint8_t *out = data;
+	struct ospi_alif_data *drv = dev->data;
+	uint8_t               *out = data;
 
 	if (offset < 0 || (data == NULL && len != 0U)) {
 		return -EINVAL;
+	}
+	/* 1-1-1 only, see read_jedec_id(): lock across the mode check and all chunks. */
+	k_mutex_lock(&drv->lock, K_FOREVER);
+	if (drv->octal_ddr_active) {
+		k_mutex_unlock(&drv->lock);
+		return -ENOTSUP;
 	}
 	while (len > 0U) {
 		size_t  chunk = MIN(len, (size_t)OSPI_ALIF_MAX_FRAMES);
@@ -1293,17 +1320,19 @@ static int ospi_alif_sfdp_read(const struct device *dev, off_t offset, void *dat
 		int rc = ospi_alif_cmd_read(dev, cmd, sizeof(cmd), out, chunk);
 
 		if (rc != 0) {
+			k_mutex_unlock(&drv->lock);
 			return rc;
 		}
 		out += chunk;
 		offset += (off_t)chunk;
 		len -= chunk;
 	}
+	k_mutex_unlock(&drv->lock);
 	return 0;
 }
 #endif /* CONFIG_FLASH_JESD216_API */
 
-static const struct flash_driver_api ospi_alif_api = {
+static DEVICE_API(flash, ospi_alif_api) = {
 	.read           = ospi_alif_read,
 	.write          = ospi_alif_write,
 	.erase          = ospi_alif_erase,

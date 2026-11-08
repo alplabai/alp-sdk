@@ -221,7 +221,7 @@ its `cores:` keys.
 | `rpmsg-v2n`              | V2N flagship -- A55 Yocto consumer + M33-SM Zephyr producer, framed RPC over RPMsg. **(V2N)** |
 | `microros-ros2-v2n`       | micro-ROS node on the M33 publishing `std_msgs/Int32`, seen by ROS 2 on the A55 via a custom XRCE transport over RPMsg (ADR 0035; the M33 slice builds and boots, the ROS 2 round-trip is unproven). **(V2N)** |
 | `rpmsg-aen`              | AEN E8 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer. **(AEN)** |
-| `heterogeneous-offload`  | "Why heterogeneous compute?" -- A55 delegates a 1024-pt FFT to M33-SM via `alp_rpc_call`.     |
+| `heterogeneous-offload`  | "Why heterogeneous compute?" -- A55 delegates a 64-pt FFT to M33-SM via `alp_rpc_call`.       |
 | `mproc-mailbox`          | M55-HP ↔ M55-HE mailbox round-trip -- stage payload in shared SRAM, signal via HW mailbox, read the reply. **(AEN)** |
 
 ### V2N platform
@@ -234,6 +234,7 @@ SoM EEPROM manifest).
 |---------------------------------|--------------------------------------------------------------------------|
 | `v2n/v2n-gd32-bridge-ping`      | PING + GET_VERSION round-trip on both SPI fast path + I2C management path.|
 | `v2n/v2n-board-id-readout`      | Read the SoM EEPROM manifest + assert the SKU matches the firmware build. |
+| `v2n/v2n-alp-rpc-responder`     | M33 `<alp/rpc.h>` echo responder for the Linux A55 (build-only). |
 | `v2n/v2n-eeprom-manifest-dump`  | Hexdump + decode the 128-byte EEPROM manifest at offset 0x0000.          |
 | `v2n/v2n-temp-sensor`           | Read the on-module TMP112 once per second; print degrees C.              |
 | `v2n/v2n-soc-temperature`       | Read the SoC die temperature from the Linux thermal zones once per second. |

@@ -77,7 +77,8 @@ overrides `bench.yaml` `linux.host`; an EEPROM MAC change still forces rediscove
 `--only` run that starts past `boot_sd_linux` has no console login to discover a host from, so it
 needs `--linux-host` or `linux.host`. `--build-dir` builds an unsigned bundle from a deploy
 directory for bench work; such a unit is recorded `bench-only` and the ship
-check refuses it.
+check refuses it. A `bundle.json` with no `signature` gets the same treatment
+(`rootfs_bundle_version` is recorded as `unsigned:<release_version>`).
 
 `run --hw-rev <key>` sets this unit's hardware revision when it differs from
 the bundle/preset default (a batch can mix revisions). The key must be
