@@ -51,7 +51,7 @@ def test_the_pin_is_the_tag_commit_of_pv():
     pv = re.search(r'^PV\s*=\s*"([^"]+)"', text, re.M).group(1).replace("~", "-")
     pin = re.search(r'^SRCREV\s*=\s*"([0-9a-f]{40})"', text, re.M).group(1)
     tag = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"v{pv}^{{commit}}"],
-                         cwd=REPO, capture_output=True, text=True)
+                         cwd=REPO, capture_output=True, text=True, encoding="utf-8")
     if tag.returncode != 0:
         pytest.skip(f"tag v{pv} is not in this clone")
     assert tag.stdout.strip() == pin

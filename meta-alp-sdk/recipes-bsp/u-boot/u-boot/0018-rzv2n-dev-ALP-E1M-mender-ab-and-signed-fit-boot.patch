@@ -49,7 +49,7 @@ index 3ccfad27..b80fc949 100644
 +	bool "ALP E1M: boot the Mender A/B rootfs slot"
 +	depends on TARGET_RZV2N_DEV
 +	help
-+	  CONFIG_BOOTCOMMAND selects the rootfs partition from Mender's
++	  CONFIG_BOOTCOMMAND selects the rootfs partition from the Mender
 +	  saved mender_boot_part / mender_boot_part_hex instead of the fixed
 +	  eMMC partition 2 and recovers through Mender's bootcount /
 +	  altbootcmd rollback.  Needs meta-mender's env_mender.h in the
