@@ -120,6 +120,26 @@ extern "C" {
 #define EVK_ENC_ROTARY ALP_E1M_ENC0  /**< PEC11R-4215K-S0024 rotary encoder (designator E1, 2626-R2 EVK schematic netlist): ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4). */
 
 /* ------------------------------------------------------------------ */
+/* Hardware revision r3: routes that differ from the default */
+/* ------------------------------------------------------------------ */
+
+#ifdef ALP_E1M_EVK_HW_REV_R3
+#undef EVK_PIN_ENCODER_SW
+#undef EVK_PIN_LED_GREEN
+#define EVK_PIN_LED_GREEN ALP_E1M_GPIO_PWM0  /**< RGB LED green (D19, pad A6) -- the PWM0 pad driven as a digital GPIO. */
+#undef EVK_PIN_LED_RED
+#define EVK_PIN_LED_RED ALP_E1M_GPIO_PWM3  /**< RGB LED red (D19, pad B5) -- the PWM3 pad driven as a digital GPIO. */
+#undef EVK_PIN_LED_BLUE
+#define EVK_PIN_LED_BLUE ALP_E1M_GPIO_PWM1  /**< RGB LED blue (D19, pad B6) -- the PWM1 pad driven as a digital GPIO. */
+#undef EVK_PWM_LED_RED
+#define EVK_PWM_LED_RED ALP_E1M_PWM3  /**< RGB LED red channel (pad B5). */
+#undef EVK_PWM_LED_BLUE
+#define EVK_PWM_LED_BLUE ALP_E1M_PWM1  /**< RGB LED blue channel (pad B6). */
+#undef EVK_PWM_LED_GREEN
+#define EVK_PWM_LED_GREEN ALP_E1M_PWM0  /**< RGB LED green channel (pad A6). */
+#endif
+
+/* ------------------------------------------------------------------ */
 /* On-board I2C device addresses (from `i2c_devices:`) */
 /* ------------------------------------------------------------------ */
 

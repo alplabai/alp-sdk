@@ -405,6 +405,11 @@ zephyr_library_sources_ifdef(CONFIG_MBOX_ALIF_MHUV2
 zephyr_library_sources_ifdef(CONFIG_ENTROPY_ALIF_SE
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/entropy/entropy_alif_se.c)
 
+# GD32G553 supervisor TRNG entropy driver (#2951), chosen as zephyr,entropy on
+# the V2N/V2M CM33 boards. Binding: zephyr/dts/bindings/entropy/alp,gd32-trng.yaml.
+zephyr_library_sources_ifdef(CONFIG_ENTROPY_ALP_GD32_TRNG
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/entropy/entropy_alp_gd32_trng.c)
+
 # Alif Ensemble hardware-semaphore (HWSEM) driver -- vendor-ext, BENCH-UNVERIFIED.
 # AMP request/release latch shared between the two RTSS cores (M55-HE <-> M55-HP).
 # HWSEM has no upstream Zephyr device class, so this is a "misc" (no-class) driver

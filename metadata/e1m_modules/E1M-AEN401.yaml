@@ -182,7 +182,7 @@ memory_map:
   - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true, carveout: false, write_authority: customer_image }
   - { name: hp_slot0,  base: 0x802b0000, size_kib: 2688, accessible_from: [m55_hp],          cacheable: true, carveout: false, write_authority: customer_image }
   - { name: reserved,  base: 0x80550000, size_kib: 64,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: none }
-  - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: customer_runtime }
+  - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he],                           carveout: false, write_authority: customer_runtime }
   - { name: atoc,      base: 0x80578000, size_kib: 32,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: secure_enclave }
   - { name: mram_main, base: 0x80000000, size_kib: 5632, accessible_from: [m55_he, m55_hp], cacheable: true, write_authority: composite }
 

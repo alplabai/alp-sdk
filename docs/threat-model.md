@@ -104,8 +104,9 @@ Cannot touch the physical device or its supply chain.
 - MQTT runs over TLS 1.2/1.3 with pinned CA path.  Default
   bundle: `/etc/ssl/certs`.  Insecure flag exists but is
   documented as test-only.
-- BLE adv parser fuzzed under `tests/fuzz/ble_adv_parser_fuzz.c`
-  against the length-overrun CVE class.
+- Advertising-data parsing is not SDK code: it is the Zephyr BLE host
+  stack (or BlueZ on Yocto), so the SDK has no BLE adv parser of its
+  own to fuzz and relies on those upstreams for that surface.
 - Mender artefact verified against the bootloader's compiled-in
   pub key before swap-using-scratch commit.
 
@@ -141,8 +142,10 @@ supervisor MCU) or pretend to be a slave.
 
 **Mitigations:**
 
-- OPTIGA APDU parser fuzzed under
-  `tests/fuzz/optiga_apdu_fuzz.c`.
+- OPTIGA APDU/response decoding is done by the Infineon vendor
+  library, not SDK code (`chips/optiga_trust_m` passes APDUs
+  through), so there is no SDK-side parser fuzzed; the SDK relies on
+  the vendor library for that surface.
 - GD32 bridge framing fuzzed under
   `tests/fuzz/gd32_bridge_frame_fuzz.c`.
 - EEPROM manifest carries a CRC32; runtime

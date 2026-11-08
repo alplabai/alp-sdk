@@ -4,7 +4,7 @@
  *
  * The answer comes from the generated alp_storage_mounts[] table
  * (scripts/alp_orchestrate/headers.py), the same table that names each
- * mount point and sets `.storage_dev = FIXED_PARTITION_ID(<name>_partition)`.
+ * mount point and sets `.storage_dev = PARTITION_ID(<name>_partition)`.
  * Deciding by the backing partition -- not by how the mount point is
  * spelled -- is what makes "a mounted partition is not raw-addressable"
  * true for "/lfs/settings", "/lfs" or any other board.yaml mount name.

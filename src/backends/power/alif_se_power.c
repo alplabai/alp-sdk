@@ -171,7 +171,7 @@
 
 /* hal_alif SE service client (Apache-2.0): off_profile_t / run_profile_t and the
  * aiPM enums.  The memory-block and wake-event masks are NOT taken from its
- * headers (gen1 layout, see alif_aipm_gen2.h); only power-domain masks, clock
+ * headers (gen1 until #2785, see alif_aipm_gen2.h); only power-domain masks, clock
  * enums and the profile structs are. */
 #include <se_service.h>
 
@@ -179,6 +179,18 @@
 #include "alif_se_power_hw.h"
 #include "power_ops.h"
 #include "som_power.h"
+
+/*
+ * hal_alif's aipm.h must be compiled with its gen2 layout on E8/E4
+ * (alp-sdk#2785): gen1 puts BACKUP4K_MASK on bit20, which is FWRAM on gen2.
+ * CONFIG_ENSEMBLE_GEN2 comes from zephyr/kconfigs/vendor-alif-peripherals.kconfig.
+ */
+#if defined(CONFIG_SOC_SERIES_E8) || defined(CONFIG_SOC_SERIES_E4)
+BUILD_ASSERT(IS_ENABLED(CONFIG_ENSEMBLE_GEN2), "E8/E4 are gen2: CONFIG_ENSEMBLE_GEN2 must be set");
+BUILD_ASSERT(BACKUP4K_MASK == ALP_AIPM_GEN2_BACKUP4K_MASK,
+             "hal_alif aipm.h is not the gen2 layout");
+BUILD_ASSERT(FWRAM_MASK == ALP_AIPM_GEN2_FWRAM_MASK, "hal_alif aipm.h is not the gen2 layout");
+#endif
 
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 /* Bench-only OFF-profile knobs (declared in som_power.h): Kconfig supplies the defaults, the

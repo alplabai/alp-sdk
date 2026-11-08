@@ -105,10 +105,10 @@
  * counter with no wake record behind it is reported as record_valid FAIL and the sequence
  * restarts from cycle 1 (see disarm_stale_alarm()).
  *
- * SUMMARY covers only the boot that printed it.  Every STOP wake is a cold boot, so pass and
- * fail restart at 0 and the line counts the verdicts printed on this boot (the cycle just
- * judged, plus a refused request for the next one); grep the per-cycle
- * "POWER_STOP: cycleN <check> PASS|FAIL" lines to judge the whole run.
+ * SUMMARY covers the whole run: pass and fail are running totals, packed into one byte (tally.h)
+ * and kept next to the cycle counter (bench cell in BKRAM, or RV-3028 User RAM 2), so they survive
+ * the cold-boot wakes.  Both saturate (pass at 31, fail at 7).  Every per-cycle
+ * "POWER_STOP: cycleN <check> PASS|FAIL" line is still printed on its own boot.
  */
 
 #include <stdbool.h>
@@ -134,6 +134,7 @@
 #include "alif_se_power_hw.h" /* LPRTC register read (SDK-internal) */
 #include "som_power.h"        /* bench counter (SDK-internal) */
 #include "som_power_chips.h"  /* alp_som_power_bind_rv3028() (SDK-internal) */
+#include "tally.h"            /* pass/fail totals packed into one retained byte */
 
 #define N_CYCLES 3
 #define AWAKE_MS 10000u
@@ -211,24 +212,33 @@ static const cycle_t cycles[N_CYCLES] = {
  * the countdown. */
 static rv3028c7_t g_rtc;
 
+/* Running totals for the whole run.  Reloaded from the retained cell at the start of each boot
+ * (tally_load) and written back with the cycle counter (cycle_set), because a STOP wake is a
+ * cold boot and plain statics restart at 0. */
 static unsigned g_pass, g_fail;
 
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 /* Bench build: the cycle number lives in the bench cell in BKRAM. */
 static unsigned cycle_get(void)
 {
-	return alp_som_pd_bench_count();
+	return alp_som_pd_bench_count() & 0xFFu; /* bits 15..8 hold the tally */
 }
 
 static void cycle_set(unsigned n)
 {
-	alp_som_pd_bench_set(n);
+	alp_som_pd_bench_set(n | ((unsigned)tally_pack(g_pass, g_fail) << 8));
+}
+
+static void tally_load(void)
+{
+	tally_unpack((uint8_t)(alp_som_pd_bench_count() >> 8), &g_pass, &g_fail);
 }
 #else
 /* Product build (no bench cell, no diag): the cycle number lives in the RV-3028's User RAM 1
  * (register 1Fh, kept on the backup supply), tagged 0xC0 | n so a stale or never-written value
  * reads as 0.  The SDK's own wake record is what proves each wake. */
 #define RTC_USER_RAM1 0x1Fu
+#define RTC_USER_RAM2 0x20u /* the pass/fail tally, no tag: it is only read after a valid cycle */
 #define CYCLE_TAG     0xC0u
 
 static unsigned cycle_get(void)
@@ -248,6 +258,18 @@ static void cycle_set(unsigned n)
 	uint8_t buf[2] = { RTC_USER_RAM1, (uint8_t)(CYCLE_TAG | (n & 0x0Fu)) };
 
 	(void)alp_i2c_write(g_rtc.bus, RV3028C7_I2C_ADDR, buf, sizeof(buf));
+	buf[0] = RTC_USER_RAM2;
+	buf[1] = tally_pack(g_pass, g_fail);
+	(void)alp_i2c_write(g_rtc.bus, RV3028C7_I2C_ADDR, buf, sizeof(buf));
+}
+
+static void tally_load(void)
+{
+	uint8_t reg = RTC_USER_RAM2;
+	uint8_t v   = 0u;
+
+	(void)alp_i2c_write_read(g_rtc.bus, RV3028C7_I2C_ADDR, &reg, 1, &v, 1);
+	tally_unpack(v, &g_pass, &g_fail);
 }
 #endif
 
@@ -363,7 +385,10 @@ static void print_diag(const char *name, unsigned slot)
 		printk("POWER_STOP: diag %s empty\n", name);
 		return;
 	}
-	printk("POWER_STOP: diag %s seq=%u cycle=%u\n", name, (unsigned)d.seq, (unsigned)d.cycle);
+	printk("POWER_STOP: diag %s seq=%u cycle=%u\n",
+	       name,
+	       (unsigned)d.seq,
+	       (unsigned)(d.cycle & 0xFFu));
 	for (unsigned i = 0; i < ALP_SOM_PD_DIAG_WORDS; i += 4u) {
 		printk("POWER_STOP: diag %s w[%02u..%02u]=%08x %08x %08x %08x\n",
 		       name,
@@ -994,6 +1019,9 @@ int main(void)
 		done = 0u; /* stale or corrupt: start over */
 		cycle_set(0u);
 	}
+	if (done != 0u) {
+		tally_load(); /* the totals of the cycles before this boot; a fresh run starts at 0 */
+	}
 	if (done != 0u && !bi.valid) {
 		/* A counter with no wake record behind it: a reset kept the SRAM, or the
 		 * record did not survive.  Either way this is not a clean wake. */
@@ -1015,9 +1043,9 @@ int main(void)
 		start_cycle(done + 1u);
 	}
 
-	/* pass/fail are .bss and restart at every cold-boot wake, so they judge this boot only
-	 * (the cycle just judged, plus a refused request for the next one); scope=last_boot says so on the line itself. */
-	printk("POWER_STOP: SUMMARY cycles=%u pass=%u fail=%u scope=last_boot\n", done, g_pass, g_fail);
+	/* g_pass/g_fail were reloaded from the retained tally above and were written back with each
+	 * cycle_set(), so this line totals every cycle of the run. */
+	printk("POWER_STOP: SUMMARY cycles=%u pass=%u fail=%u scope=run\n", done, g_pass, g_fail);
 	for (;;) {
 		k_sleep(K_SECONDS(10));
 		printk("POWER_STOP: awake (done)\n");

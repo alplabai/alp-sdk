@@ -352,6 +352,9 @@ def test_emit_storage_mounts_c_littlefs(tmp_path: Path) -> None:
     assert "alp_mnt_mcuboot_scratch" not in out
     # The aggregate array carries the two mountable partitions.
     assert "alp_storage_mount_count = 2;" in out
+    # #3046: FIXED_PARTITION_ID is deprecated (-Werror) in Zephyr v4.4.1.
+    assert "(void *)PARTITION_ID(settings_partition)" in out
+    assert "FIXED_PARTITION_ID" not in out
 
 
 def _plan_shared(tmp_path: Path, board_yaml: str) -> dict:
@@ -385,7 +388,7 @@ def test_slice_alp_conf_storage_kconfig(tmp_path: Path) -> None:
     """The Kconfig fragment must enable CONFIG_FILE_SYSTEM_LITTLEFS for
     every littlefs entry, plus a documentation comment per littlefs
     partition so the customer knows how to reach the partition at
-    runtime (FIXED_PARTITION_ID(<name>_partition)).  The previous
+    runtime (PARTITION_ID(<name>_partition)).  The previous
     `CONFIG_FS_LITTLEFS_PARTITION_<NAME>=y` per-partition emit was a
     fictional Kconfig -- modern Zephyr's per-partition LFS wiring is
     DT-driven (`fixed-partitions` node + chosen
@@ -399,9 +402,9 @@ def test_slice_alp_conf_storage_kconfig(tmp_path: Path) -> None:
     # Per-partition hint comments (no live CONFIG_* line -- see comment block
     # above for why).
     assert "partition[settings]" in conf
-    assert "FIXED_PARTITION_ID(settings_partition)" in conf
+    assert "PARTITION_ID(settings_partition)" in conf
     assert "partition[app_data]" in conf
-    assert "FIXED_PARTITION_ID(app_data_partition)" in conf
+    assert "PARTITION_ID(app_data_partition)" in conf
     # Raw partition does NOT get a littlefs comment.
     assert "partition[mcuboot_scratch]" not in conf
     # Live CONFIG_FS_LITTLEFS_PARTITION_* lines must never come back --

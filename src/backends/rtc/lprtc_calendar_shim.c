@@ -15,14 +15,23 @@
  * stay above the vendor SDK; consume the Tier-2 counter_dw_rtc driver as-is).
  *
  * Model (software epoch base, see examples/aen/aen-rtc-regcheck/README.md):
- *   - epoch_base   : UNIX seconds at the instant alp_rtc_set_time() was called.
+ *   - epoch_base   : UNIX seconds at the last alp_rtc_set_time() or rebase.
  *   - tick_snapshot: counter_get_value() captured at that same instant.
  *   - get_time     : epoch_base + (counter_now - tick_snapshot) / freq, where
  *                    freq = counter_get_frequency() (32768 Hz on this node).
  *   - set_time     : recompute epoch_base from the supplied calendar fields and
  *                    re-snapshot the counter.
  * Unsigned 32-bit subtraction (counter_now - tick_snapshot) yields the correct
- * elapsed tick count across a single 32-bit wrap (~36 h at 32768 Hz).
+ * elapsed tick count across a single 32-bit wrap (2^32 / 32768 Hz = 131072 s,
+ * ~36.4 h).  A second wrap would be lost, so the base is REBASED -- whole
+ * elapsed seconds are folded into epoch_base and tick_snapshot is advanced by the
+ * same tick count -- on every get_time/set_time and by a 6 h k_timer, keeping
+ * the un-rebased span far below one wrap.  Time stays correct for any run
+ * length as long as the kernel timer runs (it is not tied to the app calling
+ * get_time).
+ *
+ * State is shared: the one always-on counter backs every handle, so open() seeds
+ * the state once and later opens (any handle) leave a set time intact.
  *
  * Volatility: epoch_base + tick_snapshot live in plain RAM only.  The DW-APB-RTC
  * has no battery-backed scratch to hold them, so the calendar resets to the
@@ -114,6 +123,8 @@
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/counter.h>
+#include <zephyr/kernel.h>
+#include <zephyr/spinlock.h>
 #include <zephyr/sys/util.h>
 
 #include <alp/backend.h>
@@ -136,18 +147,50 @@
 
 static const struct device *const _lprtc = ALP_LPRTC_COUNTER_DEV;
 
-/* Per-handle shim state: the software epoch base and the matching counter
+/* Shared shim state: the software epoch base and the matching counter
  * snapshot.  One LPRTC on the E8 (ALP_SOC_RTC_COUNT == 1), so a single static
  * instance suffices -- the dispatcher hands out at most ALP_SOC_RTC_COUNT
  * handles and they all alias the one always-on counter. */
 typedef struct {
-	int64_t  epoch_base;    /* UNIX seconds at the last set_time. */
-	uint32_t tick_snapshot; /* counter_get_value() at the last set_time. */
+	int64_t  epoch_base;    /* UNIX seconds at the last set_time or rebase. */
+	uint32_t tick_snapshot; /* counter_get_value() at the last set_time or rebase. */
 	uint32_t freq_hz;       /* counter_get_frequency(), cached at open. */
 	bool     set;           /* true once set_time has run. */
+	bool     seeded;        /* true once the first open() initialised the state. */
 } lprtc_shim_state_t;
 
 static lprtc_shim_state_t _state;
+static struct k_spinlock  _state_lock;
+
+/* Rebase period: well under the 2^32 / 32768 Hz = 131072 s wrap so a rebase
+ * always lands before the counter can wrap a second time. */
+#define LPRTC_REBASE_PERIOD_H 6
+
+/* Fold whole elapsed seconds into epoch_base and advance tick_snapshot by the
+ * same tick count (mod 2^32).  Caller holds _state_lock.  The sub-second
+ * remainder stays in (now - tick_snapshot), so no time is lost. */
+static void _rebase_locked(uint32_t now)
+{
+	uint32_t elapsed_ticks = now - _state.tick_snapshot;
+	uint32_t whole_s       = elapsed_ticks / _state.freq_hz;
+	_state.epoch_base += (int64_t)whole_s;
+	_state.tick_snapshot += (uint32_t)((uint64_t)whole_s * _state.freq_hz);
+}
+
+static void _rebase_timer_fn(struct k_timer *timer)
+{
+	ARG_UNUSED(timer);
+	uint32_t now;
+	if (_lprtc == NULL) return;
+	/* Counter read and state update under one lock: a read taken before the
+	 * lock can be older than a concurrent set_time/rebase snapshot, and
+	 * (now - tick_snapshot) would then underflow to ~2^32 ticks. */
+	k_spinlock_key_t key = k_spin_lock(&_state_lock);
+	if (_state.seeded && counter_get_value(_lprtc, &now) == 0) _rebase_locked(now);
+	k_spin_unlock(&_state_lock, key);
+}
+
+K_TIMER_DEFINE(_rebase_timer, _rebase_timer_fn, NULL);
 
 /*
  * Clean-room civil <-> days-from-epoch conversion (Howard Hinnant's
@@ -239,16 +282,30 @@ shim_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps
 	int rc = counter_start(_lprtc);
 	if (rc != 0 && rc != -EALREADY) return ALP_ERR_IO;
 
-	_state.freq_hz = counter_get_frequency(_lprtc); /* 32768 Hz on this node */
-	if (_state.freq_hz == 0u) return ALP_ERR_NOSUPPORT;
+	uint32_t freq_hz = counter_get_frequency(_lprtc); /* 32768 Hz on this node */
+	if (freq_hz == 0u) return ALP_ERR_NOSUPPORT;
 
-	/* Snapshot now against a compiled-in epoch so get_time is well-defined
-	 * before the first set_time (clock reads from the epoch base, monotonic
-	 * with the counter -- it just is not wall-accurate until set). */
-	_state.epoch_base = 0; /* 1970-01-01T00:00:00Z until set_time runs */
-	rc                = counter_get_value(_lprtc, &_state.tick_snapshot);
-	if (rc != 0) return ALP_ERR_IO;
-	_state.set = false;
+	/* Seed the shared state ONCE.  Every handle aliases the same always-on
+	 * counter, so a later open must not wipe a time set through an earlier
+	 * handle.  Until the first set_time the clock reads from 1970-01-01T00:00:00Z,
+	 * monotonic with the counter -- it just is not wall-accurate until set. */
+	k_spinlock_key_t key = k_spin_lock(&_state_lock);
+	if (!_state.seeded) {
+		uint32_t now;
+		rc = counter_get_value(_lprtc, &now);
+		if (rc != 0) {
+			k_spin_unlock(&_state_lock, key);
+			return ALP_ERR_IO;
+		}
+		_state.freq_hz       = freq_hz;
+		_state.epoch_base    = 0;
+		_state.tick_snapshot = now;
+		_state.set           = false;
+		_state.seeded        = true;
+		k_timer_start(
+		    &_rebase_timer, K_HOURS(LPRTC_REBASE_PERIOD_H), K_HOURS(LPRTC_REBASE_PERIOD_H));
+	}
+	k_spin_unlock(&_state_lock, key);
 
 	st->dev     = (void *)_lprtc;
 	st->rtc_id  = rtc_id;
@@ -262,14 +319,18 @@ static alp_status_t shim_set_time(alp_rtc_backend_state_t *st, const alp_rtc_tim
 	const struct device *dev = (const struct device *)st->dev;
 	if (!_fields_valid(t)) return ALP_ERR_INVAL;
 
-	uint32_t now;
-	int      rc = counter_get_value(dev, &now);
-	if (rc != 0) return ALP_ERR_IO;
-
-	/* Pin the wall-clock instant to this exact counter snapshot. */
+	/* Read the counter under the lock so the snapshot cannot be older than a
+	 * concurrent rebase's, and pin the wall-clock instant to it. */
+	uint32_t         now;
+	k_spinlock_key_t key = k_spin_lock(&_state_lock);
+	if (counter_get_value(dev, &now) != 0) {
+		k_spin_unlock(&_state_lock, key);
+		return ALP_ERR_IO;
+	}
 	s->epoch_base    = _calendar_to_unix(t);
 	s->tick_snapshot = now;
 	s->set           = true;
+	k_spin_unlock(&_state_lock, key);
 	return ALP_OK;
 }
 
@@ -278,19 +339,23 @@ static alp_status_t shim_get_time(alp_rtc_backend_state_t *st, alp_rtc_time_t *t
 	lprtc_shim_state_t  *s   = (lprtc_shim_state_t *)st->be_data;
 	const struct device *dev = (const struct device *)st->dev;
 
-	uint32_t now;
-	int      rc = counter_get_value(dev, &now);
-	if (rc != 0) return ALP_ERR_IO;
-
-	/* Unsigned 32-bit wrap gives the true elapsed ticks across one CCVR wrap. */
-	uint32_t elapsed_ticks = now - s->tick_snapshot;
-	int64_t  elapsed_s     = (int64_t)elapsed_ticks / (int64_t)s->freq_hz;
-	/* 64-bit intermediate: elapsed_s * freq_hz can exceed UINT32_MAX near the
-	 * one-CCVR-wrap boundary (129600 s * 32768 Hz > 4.2e9), so a 32-bit product
-	 * would wrap and corrupt rem_ticks. The remainder (< freq_hz) still fits u32. */
+	/* Counter read, rebase and base/remainder read all happen under one lock so
+	 * the snapshot can never be older than tick_snapshot (see the timer). */
+	uint32_t         now;
+	k_spinlock_key_t key = k_spin_lock(&_state_lock);
+	if (counter_get_value(dev, &now) != 0) {
+		k_spin_unlock(&_state_lock, key);
+		return ALP_ERR_IO;
+	}
+	_rebase_locked(now);
+	int64_t  epoch_base    = s->epoch_base;
+	uint32_t elapsed_ticks = now - s->tick_snapshot; /* < freq_hz after rebase */
+	k_spin_unlock(&_state_lock, key);
+	int64_t elapsed_s = (int64_t)elapsed_ticks / (int64_t)s->freq_hz;
+	/* The remainder (< freq_hz) fits u32. */
 	uint32_t rem_ticks = elapsed_ticks - (uint32_t)(elapsed_s * (int64_t)s->freq_hz);
 
-	int64_t unix_s = s->epoch_base + elapsed_s;
+	int64_t unix_s = epoch_base + elapsed_s;
 	_unix_to_calendar(unix_s, t);
 	/* Sub-second from the leftover ticks; 32768 Hz -> ms = ticks*1000/freq. */
 	t->millisecond = (uint16_t)(((uint64_t)rem_ticks * 1000u) / s->freq_hz);

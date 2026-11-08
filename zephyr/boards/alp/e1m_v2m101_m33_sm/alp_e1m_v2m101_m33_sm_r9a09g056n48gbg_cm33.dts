@@ -34,6 +34,7 @@
 	chosen {
 		zephyr,sram = &sram;
 		zephyr,ram-console = &ram_console;
+		zephyr,entropy = &gd32_trng;
 		/*
 		 * No CM33 serial console on this board.  The only console is the
 		 * A55's (Linux, on the shared debug UART); sci0 here is the EVK
@@ -79,6 +80,16 @@
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
 		gpios = <&gpio9 7 GPIO_ACTIVE_LOW>;
+	};
+
+	/*
+	 * The GD32 supervisor's TRNG as the Zephyr entropy source (#2951).  Zephyr's
+	 * mbedTLS (TF-PSA-Crypto) reads zephyr,entropy; the driver
+	 * (zephyr/drivers/entropy/entropy_alp_gd32_trng.c) is compiled only under
+	 * CONFIG_ALP_SDK_SECURITY_V2N_TRNG_ENTROPY, so without it this node is inert.
+	 */
+	gd32_trng: gd32-trng {
+		compatible = "alp,gd32-trng";
 	};
 
 	/*

@@ -41,14 +41,32 @@ function(_alp_add_fuzz_target name)
 endfunction()
 
 _alp_add_fuzz_target(cc3501e)
-_alp_add_fuzz_target(iot_mqtt)
+# Link the production reply decoder (cc3501e_reply_verdict); the harness stubs
+# only the bus/GPIO/time seams core.c reaches.
+target_sources(alp_fuzz_cc3501e PRIVATE
+    ${CMAKE_SOURCE_DIR}/chips/cc3501e/cc3501e_core.c)
+target_include_directories(alp_fuzz_cc3501e PRIVATE
+    ${CMAKE_SOURCE_DIR}/chips/cc3501e)
 _alp_add_fuzz_target(eeprom_manifest)
+# Link the production manifest classifier + CRC32 (alp_hw_info_classify_manifest).
+target_sources(alp_fuzz_eeprom_manifest PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/zephyr/hw_info_zephyr.c)
+target_include_directories(alp_fuzz_eeprom_manifest PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/common)
 _alp_add_fuzz_target(gd32_bridge_frame)
 _alp_add_fuzz_target(swd_packet)
+# Link the production SWD driver; the harness fakes only the pad seam + alp_gpio_*.
+target_sources(alp_fuzz_swd_packet PRIVATE
+    ${CMAKE_SOURCE_DIR}/chips/gd32_swd/gd32_swd.c)
+target_include_directories(alp_fuzz_swd_packet PRIVATE
+    ${CMAKE_SOURCE_DIR}/chips/gd32_swd)
 _alp_add_fuzz_target(mproc_frame)
-_alp_add_fuzz_target(ble_adv_parser)
-_alp_add_fuzz_target(optiga_apdu)
-_alp_add_fuzz_target(tls_handshake)
+# Link the production framing so the harness fuzzes the decoder the Zephyr
+# mproc driver actually calls, not an inline copy.
+target_sources(alp_fuzz_mproc_frame PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/common/proto/alp_mproc_frame.c)
+target_include_directories(alp_fuzz_mproc_frame PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/common)
 _alp_add_fuzz_target(update_log_entry)
 # Link the real engine + vendored SHA-256 so the harness fuzzes production decode.
 target_sources(alp_fuzz_update_log_entry PRIVATE
@@ -86,6 +104,9 @@ endif()
 target_sources(alp_fuzz_gd32_bridge_frame PRIVATE
     ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/protocol.c
     ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/bootloader/bootloader.c
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/boot_config.c
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/ota.c
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/crc32.c
     ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/hal/bridge_hw_stub.c
 )
 target_include_directories(alp_fuzz_gd32_bridge_frame PRIVATE

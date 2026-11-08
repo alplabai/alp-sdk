@@ -92,6 +92,8 @@ struct alp_uart_rx_ringbuf {
 	const struct device *dev;  /* mirror of port->state.dev for ISR use */
 	struct alp_uart     *port; /* back-ref for detach */
 	lwrb_t               rb;
+	struct k_sem         rx_sem;  /* ISR -> read(): bytes arrived */
+	atomic_t             dropped; /* bytes the ISR could not fit; cleared on report */
 
 	/* lifecycle/active_ops drive the generic open/op/close guard in
 	 * alp_slot_claim.h (issue #1634) -- placed before in_use so a
