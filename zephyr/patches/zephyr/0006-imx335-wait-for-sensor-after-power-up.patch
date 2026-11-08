@@ -1,0 +1,45 @@
+diff --git a/drivers/video/imx335.c b/drivers/video/imx335.c
+--- a/drivers/video/imx335.c
++++ b/drivers/video/imx335.c
+@@ -94,6 +94,10 @@
+ #define IMX335_STANDBY_STANDBY		BIT(0)
+ #define IMX335_REGHOLD			IMX335_REG8(0x3001)
+ #define IMX335_XMSTA			IMX335_REG8(0x3002)
++
++/* Alp Lab AB: cold-boot power-up wait before the first register write. */
++#define IMX335_POWER_UP_TIMEOUT_MS	1000
++#define IMX335_POWER_UP_POLL_MS		10
+ #define IMX335_BCWAIT_TIME		IMX335_REG8(0x300c)
+ #define IMX335_CPWAIT_TIME		IMX335_REG8(0x300d)
+ #define IMX335_WINMODE			IMX335_REG8(0x3018)
+@@ -862,6 +866,30 @@
+ 	}
+ #endif
+ 
++	/*
++	 * Alp Lab AB: wait for the sensor to answer before the first table write.
++	 * A module with no reset line (the RPi-style 15-pin camera connector has
++	 * none) is still coming out of its own power-up when the SoC's driver init
++	 * runs on a cold boot, and the first CCI write fails -- the sensor then
++	 * stays NOT_READY for the life of the boot while a warm reset works.
++	 * Poll the first register of the init table (STANDBY = 0x3000, written to
++	 * its reset value, so harmless) until it ACKs. Raw i2c_write_dt() rather
++	 * than video_write_cci_reg(), which would LOG_ERR every expected NACK.
++	 */
++	static const uint8_t standby_on[] = {0x30, 0x00, IMX335_STANDBY_STANDBY};
++
++	for (int64_t end = k_uptime_get() + IMX335_POWER_UP_TIMEOUT_MS;;) {
++		ret = i2c_write_dt(&cfg->i2c, standby_on, sizeof(standby_on));
++		if (ret == 0 || k_uptime_get() >= end) {
++			break;
++		}
++		k_msleep(IMX335_POWER_UP_POLL_MS);
++	}
++	if (ret < 0) {
++		LOG_ERR("Sensor did not answer within %d ms of init", IMX335_POWER_UP_TIMEOUT_MS);
++		return ret;
++	}
++
+ 	/* Initialize register values */
+ 	ret = video_write_cci_multiregs(&cfg->i2c, imx335_init_params,
+ 					ARRAY_SIZE(imx335_init_params));

@@ -103,8 +103,10 @@ a rail fault.
 The same sequence exists as an OS-agnostic driver function,
 `da9292_ch2_sequence()` in `chips/da9292/` (caller-opened GPIOs + a delay
 callback; it also checks CH2 OV / OC after P64 goes high, because the OTP
-masks OV out of PG).  Only U-Boot runs it on the A55; do not run it from the
-CM33, which would be a second, uncoordinated writer of the PMIC U-Boot
+masks OV out of PG).  U-Boot patch `0004` carries a standalone port of the same sequence;
+the C function is the OS-agnostic reference, used on the A55 only by the
+guarded `v2n-pmic-inspect --deepx-rail-sequence` bench action. Do not run
+it from the CM33, which would be a second, uncoordinated writer of the PMIC U-Boot
 already programmed.
 
 The DA9292-AROVx OTP enables the EN2 / VSEL2 pin functions (PMC_CFG_00
@@ -170,8 +172,10 @@ upstream DEEPX troubleshooting docs at
 [`github.com/DEEPX-AI/dx_rt`](https://github.com/DEEPX-AI/dx_rt).
 
 > **Firmware must already be present on the DX-M1.** The SoM-specific
-> DEEPX-built firmware image is provisioned onto the DX-M1 separately
-> (not distributed with the SDK) before this hand-off. Verify the
+> DEEPX-built firmware image is factory-provisioned by Alp Lab onto the
+> DX-M1 (not distributed with the SDK) and must not be replaced with stock
+> DEEPX firmware (the shipped `dxrt-cli` warns before `-u`, `-w` and `-C`; it does not
+> block them). Verify the
 > on-module firmware matches the pinned runtime stack with
 > `dxrt-cli -s` and check the reported firmware version against
 > `PREFERRED_VERSION_dx-rt` / `PREFERRED_VERSION_dx-driver` in

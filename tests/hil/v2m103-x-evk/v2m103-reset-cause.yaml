@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# U-Boot publishes why the SoC last reset to the kernel as
+# /chosen/alp,reset-cause (changelog.d/1153-uboot-reset-cause.md): one of
+# wdt-ca55, wdt-cm33, wdt-ca55-cm33, por-or-sw.  This spec only proves the
+# property exists and holds a known token after boot; it does not trigger a
+# watchdog reset.  Read-only.  NOT bench-verified yet.
+
+schema_version: 1
+name: v2m103-reset-cause
+description: |
+  /proc/device-tree/chosen/alp,reset-cause exists and is a known token.
+
+flash_method: ssh-run
+ssh_command: |-
+  c=$(tr -d '\000' < /proc/device-tree/chosen/alp,reset-cause 2>/dev/null)
+  echo "HIL_RESET_CAUSE $c"
+  case "$c" in wdt-ca55|wdt-cm33|wdt-ca55-cm33|por-or-sw) echo HIL_RESET_CAUSE_OK ;; esac
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_RESET_CAUSE_OK"

@@ -23,11 +23,26 @@ A minimal LVGL 9 dashboard on the E1M-X V2N MIPI-DSI panel
 - LCD panel (RK055HDMIPI4MA0) connected to the carrier's Display 1
   connector (J6).  The panel must be powered -- check the backlight
   enable line (GPT1 CH2 on the SoM, driven by the carrier DT).
-- For touch (optional): the GT911 controller is available once the
-  GD32 I2C-proxy follow-up task adds a Linux master path to BRD_I2C.
-  The dashboard runs display-only without it.
+- For touch (optional): the GT911 is on the J6 display I2C, which is
+  designed to be E1M-X I2C3 (GD32 bridge I2C3 proxy), but the X-EVK V2
+  carrier does not connect it (carrier fix needed; bench bodge from J12
+  pins 21 and 27).  I2C3 also has no pull-ups on the SoM or carrier
+  segment.  The dashboard runs display-only until touch is wired.
 
-## Consumer path 1 -- Yocto image (recommended)
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`board.yaml` declares the A55 cluster app (`./src`, Yocto recipe
+`alp-lvgl-dashboard`) and leaves `m33_sm` off, so `tan build` plans a Yocto
+slice for it.  The two consumer paths below do the same steps by hand.
+
+## Consumer path 1 -- Yocto image
 
 The `alp-lvgl-dashboard` Yocto recipe (in
 `meta-alp-sdk/recipes-examples/alp-lvgl-dashboard/`) packages this
@@ -78,16 +93,16 @@ the SDK sysroot provides.
 
 ## Touch note
 
-On current V2N hardware, the GT911's I2C bus terminates at the GD32
-IO-MCU (BRD_I2C), not directly at an RZ/V2N RIIC controller.  Until
-the GD32 I2C-proxy follow-up adds a Linux-visible I2C adapter,
-`/dev/input/event0` will not exist and the dashboard runs
-display-only.  The `access(2)` guard in `main.c` handles this
-gracefully -- no modification needed once touch becomes available.
+On the X-EVK V2 carrier the GT911 sits on the J6 display I2C, which is
+designed to be E1M-X I2C3 (GD32 I2C proxy, protocol 0.17), but the
+carrier does not connect it (needs a fix) and the Linux touch
+binding is not wired yet, so `/dev/input/event0` will not exist and the
+dashboard runs display-only.  The `access(2)` guard in `main.c`
+handles this gracefully -- no modification needed once touch becomes
+available.
 
 ## Verification status
 
 `[UNTESTED on silicon]` -- CMake parses cleanly; LVGL 9.1 API verified
 against the upstream v9.1.0 tag.  Real-hardware bring-up is gated on
-the display pipeline patches landing in the Yocto layer (Tasks 1-7 of
-the v2n-lcd-display1 branch).
+the display pipeline patches landing in the Yocto layer.

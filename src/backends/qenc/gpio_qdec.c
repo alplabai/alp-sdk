@@ -38,6 +38,7 @@
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/input/input.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
@@ -47,6 +48,8 @@
 #include <alp/counter.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
+#include "backends/gpio/gpio_pad.h"
 #include "qenc_ops.h"
 
 #define ALP_QENC_NODE(idx) DT_ALIAS(_CONCAT(alp_qenc, idx))
@@ -65,6 +68,22 @@ static const struct device *const _devs[] = {
 	ALP_QENC_QDEC_DEV_OR_NULL(1),
 	ALP_QENC_QDEC_DEV_OR_NULL(2),
 	ALP_QENC_QDEC_DEV_OR_NULL(3),
+};
+
+/* The two phase inputs of each gpio-qdec node.  gpio-qdec reads them with plain
+ * gpio_pin_get(), so (like gpio_dw) it never enables the pad input buffer --
+ * q_open() does, via gpio_pad.h (issue #2808).  Unused slots are zeroed. */
+#define ALP_QENC_PHASE_PADS(idx) \
+	COND_CODE_1(ALP_QENC_IS_GPIO_QDEC(idx), \
+	            ({ GPIO_DT_SPEC_GET_BY_IDX(ALP_QENC_NODE(idx), gpios, 0), \
+	               GPIO_DT_SPEC_GET_BY_IDX(ALP_QENC_NODE(idx), gpios, 1) }), \
+	            ({ { 0 }, { 0 } }))
+
+static const struct gpio_dt_spec _phase_pads[][2] = {
+	ALP_QENC_PHASE_PADS(0),
+	ALP_QENC_PHASE_PADS(1),
+	ALP_QENC_PHASE_PADS(2),
+	ALP_QENC_PHASE_PADS(3),
 };
 
 /* One accumulator per encoder_id slot, independent of any open()
@@ -100,6 +119,12 @@ q_open(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *st, alp_capabilit
 	 * dispatcher's fall-through tries the sensor backend next. */
 	if (dev == NULL) return ALP_ERR_NOSUPPORT;
 	if (!device_is_ready(dev)) return ALP_ERR_NOT_READY;
+	/* Phase inputs idle at 0 until the pad input buffer is on (issue #2808).
+	 * No pull: the encoder phases carry external pull-ups. */
+	for (size_t i = 0; i < ARRAY_SIZE(_phase_pads[0]); ++i) {
+		int rc = alp_z_gpio_pad_input(&_phase_pads[cfg->encoder_id][i], ALP_GPIO_PULL_NONE);
+		if (rc != 0) return alp_status_from_zephyr_errno(rc);
+	}
 	st->dev        = (void *)dev;
 	st->encoder_id = cfg->encoder_id;
 	/* Baseline the handle at the shared accumulator's current value so

@@ -1,37 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
 cmake_minimum_required(VERSION 3.20.0)
 
-# Resolve the alp-sdk root.  In-tree the SDK is the example's
-# grandparent directory; out-of-tree customers point ALP_SDK_ROOT
-# at their checkout.
-if(DEFINED ENV{ALP_SDK_ROOT})
-    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
-else()
-    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
+# Auto-apply the RK055HDMIPI4MA0 DSI shield on the AEN M55-HP board targets
+# (`alp_e1m_aen801_m55_hp/...`, `alp_e1m_aen803_m55_hp/...`): the E1M-EVK
+# has no panel on its own, and the shield provides the `zephyr,display`
+# chosen node and `alp-display0` alias alp_display_open() binds to (#2885,
+# the same panel examples/connectivity/iot-dashboard uses, #2173).  Skipped
+# when the caller already set SHIELD, so a different panel can be swapped
+# in; inert on every other target, including native_sim.  BOARD is read
+# from the environment or the sysbuild cache when it is not a -D entry --
+# see examples/connectivity/iot-dashboard/CMakeLists.txt for why.
+if(NOT DEFINED BOARD AND DEFINED ENV{BOARD})
+    set(BOARD $ENV{BOARD})
 endif()
-
-# PYTHON_EXECUTABLE is only set after find_package(Zephyr);
-# we need a Python interpreter at configure time *before*
-# that, so resolve one ourselves here.
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-execute_process(
-    COMMAND ${Python3_EXECUTABLE}
-            ${ALP_SDK_ROOT}/scripts/alp_project.py
-            --input  ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --output ${CMAKE_CURRENT_BINARY_DIR}/alp.conf
-            --emit zephyr-conf --core m55_hp
-    RESULT_VARIABLE rc
-    OUTPUT_VARIABLE _alp_stdout
-    ERROR_VARIABLE  _alp_stderr
-)
-if(NOT rc EQUAL 0)
-    message(FATAL_ERROR
-        "alp_project.py failed (rc=${rc}); "
-        "check ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml.\n"
-        "stderr: ${_alp_stderr}")
+if(NOT DEFINED BOARD AND DEFINED SYSBUILD_CACHE AND EXISTS "${SYSBUILD_CACHE}")
+    file(STRINGS "${SYSBUILD_CACHE}" _alp_sysbuild_board_line REGEX "^BOARD:STRING=")
+    if(_alp_sysbuild_board_line)
+        string(REGEX REPLACE "^BOARD:STRING=" "" BOARD "${_alp_sysbuild_board_line}")
+    endif()
 endif()
-list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_BINARY_DIR}/alp.conf)
+if(DEFINED BOARD AND BOARD MATCHES "^alp_e1m_aen80[13]_m55_hp(/|$)" AND NOT DEFINED SHIELD)
+    list(APPEND SHIELD e1m_evk_rk055hdmipi4ma0)
+endif()
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(ai_camera_viewer LANGUAGES C)

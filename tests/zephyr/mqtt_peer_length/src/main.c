@@ -191,6 +191,13 @@ static void broker_thread_entry_split(void *p1, void *p2, void *p3)
 	size_t header_len = publish_bytes_len - OVERSIZED_PAYLOAD_LEN;
 	size_t split_at   = header_len + CONFIG_ALP_SDK_MQTT_BUF_SIZE;
 
+	/* Fail loudly, not vacuously, if the Kconfig default ever rises to
+	 * or past the oversized payload: split_at would pass the end of
+	 * publish_bytes and the second send_all() length would underflow. */
+	zassert_true(OVERSIZED_PAYLOAD_LEN > CONFIG_ALP_SDK_MQTT_BUF_SIZE,
+	             "payload must exceed the rx buffer to exercise the drain");
+	zassert_true(split_at < publish_bytes_len, "split point past the publish bytes");
+
 	send_all(client_sock, publish_bytes, split_at);
 	k_sleep(K_MSEC(200));
 	send_all(client_sock, publish_bytes + split_at, publish_bytes_len - split_at);

@@ -533,8 +533,8 @@ def test_emit_system_manifest_dpidr_preflight_pair_is_never_half_armed(
         try:
             project = load_board_yaml(path)
         except OrchestratorError as exc:
-            # A SoM whose only hw_rev is still `tbd` cannot be loaded at
-            # all (E1M-NX9101 today). Skip ONLY that, and never a real
+            # A SoM whose only hw_rev is `tbd` cannot be loaded at
+            # all. Skip ONLY that, and never a real
             # failure -- a silent blanket `except` would let this whole
             # sweep degrade to a no-op without anyone noticing.
             if "not buildable" not in str(exc):

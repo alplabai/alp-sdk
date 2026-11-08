@@ -132,8 +132,7 @@ SCHEMA_VERSION = 2
 #
 # SoM `family:` (metadata/e1m_modules/E1M-*.yaml) -> pin-mux family file.
 # V2M reuses the V2N pinout in full (see the v2n-m1 comment in
-# scripts/gen_pinmux_capability.py); NX9101 (nxp-imx9) has no pinmux table
-# yet, so it is deliberately absent here, not guessed.
+# scripts/gen_pinmux_capability.py).
 _SOM_FAMILY_TO_PINMUX_FAMILY: dict[str, str] = {
     "alif-ensemble":       "aen",
     "renesas-rzv2n":       "v2n",
@@ -419,7 +418,7 @@ def _resolved_core_facets(board_yaml: Path) -> dict | None:
     The EXPECTED case is silent: `SdkRevisionNotBuildable` means the SoM
     hw_rev exists but its `status:` refuses a build (`tbd` / `reserved` /
     no status key), which is exactly the exclusion
-    `check_emit_snapshots.py:81-85` carves out for rpmsg-imx93.  Warning
+    `check_emit_snapshots.py` carves out for unbuildable hw_revs.  Warning
     about it on every regen and every `--check` would be a permanent false
     alarm that trains the reader to ignore the channel.
 

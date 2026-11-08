@@ -460,5 +460,53 @@ int main(void)
 		assert(a.ents[i].kind == b.ents[i].kind && a.ents[i].lane == b.ents[i].lane &&
 		       a.ents[i].y == b.ents[i].y && a.ents[i].low == b.ents[i].low);
 	}
+	/* A jump asked while the runner is ducking or airborne is held for
+	 * TR_JUMP_BUFFER_TICKS steps and taken the first step the runner is free;
+	 * asked earlier than that, it is dropped. */
+	{
+		tr_intent_t dk = tr_intent_none(), jp = tr_intent_none();
+
+		dk.duck = true;
+		jp.jump = true;
+		for (int early = 0; early < 2; early++) {
+			tr_game_init(&g, 7u);
+			tr_game_step(&g, dk, 1280); /* ducking, duck_ticks = TR_DUCK_TICKS - 1 */
+			assert(g.ducking);
+			/* idle until `left` steps remain of the duck, then ask */
+			int idle = early ? 2 : TR_DUCK_TICKS - 1 - TR_JUMP_BUFFER_TICKS + 1;
+
+			for (int k = 0; k < idle; k++) {
+				tr_game_step(&g, tr_intent_none(), 1280);
+			}
+			tr_game_step(&g, jp, 1280);
+			for (int k = 0; k < TR_DUCK_TICKS && !g.airborne; k++) {
+				tr_game_step(&g, tr_intent_none(), 1280);
+			}
+			if (early) {
+				assert(!g.airborne); /* asked too soon: forgotten */
+			} else {
+				assert(g.airborne); /* asked in the last steps of the duck: taken after it */
+			}
+			if (!g.alive) {
+				break;
+			}
+		}
+		/* ...and the same while airborne: asked with 2 steps of the jump left it is taken the
+		 * step after landing; asked with 5 left it has expired by then. */
+		for (int left = 5; left >= 2; left -= 3) {
+			tr_game_init(&g, 7u);
+			tr_game_step(&g, jp, 1280);
+			assert(g.airborne);
+			while (g.air_ticks > left) {
+				tr_game_step(&g, tr_intent_none(), 1280);
+			}
+			tr_game_step(&g, jp, 1280);
+			while (g.airborne) {
+				tr_game_step(&g, tr_intent_none(), 1280); /* until it lands */
+			}
+			tr_game_step(&g, tr_intent_none(), 1280);
+			assert(g.airborne == (left == 2));
+		}
+	}
 	return 0;
 }

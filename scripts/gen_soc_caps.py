@@ -5,7 +5,9 @@ Generate include/alp/soc_caps.h from metadata/socs/**/*.json.
 
 Each SoC's capability macros are gated by CONFIG_ALP_SOC_<TOKEN>.
 Apps select the active SoC via Kconfig (`CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y`
-or similar); the SDK's `alp_*_open` functions consult the matching
+or similar) on Zephyr, or via `-DALP_SOC=ALP_SOC_<TOKEN>` on plain CMake
+(baremetal/Yocto; the top-level CMakeLists.txt turns it into
+`CONFIG_ALP_SOC_<TOKEN>=1`); the SDK's `alp_*_open` functions consult the matching
 `ALP_SOC_*` macros to reject configurations that exceed the SoC's
 documented hardware caps.
 
@@ -152,11 +154,6 @@ CAPS: list[tuple[str, callable]] = [
         lambda p: p.get("mipi_csi2", 0) or 0),
     ("MIPI_DSI_COUNT",
         lambda p: p.get("mipi_dsi", 0) or 0),
-    # LCDIF / parallel-RGB display controller, distinct from mipi_dsi (issue
-    # #379).  imx93 has 1x nxp,imx-lcdifv3; E8 models its parallel display path
-    # as `dpi_parallel` (a different interface), so this key stays LCDIF-specific.
-    ("LCDIF_COUNT",
-        lambda p: p.get("lcdif", 0) or 0),
 ]
 
 
@@ -202,7 +199,6 @@ CAP_ALIASES: list[tuple[str, str, str]] = [
     ("USB_COUNT", "HW_USB", "count"),
     ("MIPI_CSI_COUNT", "HW_MIPI_CSI", "count"),
     ("MIPI_DSI_COUNT", "HW_MIPI_DSI", "count"),
-    ("LCDIF_COUNT", "HW_LCDIF", "count"),
     ("XSPI_DMA", "XSPI_DMA", "bool"),
     ("HEXSPI_DMA", "HEXSPI_DMA", "bool"),
     ("EMMC_DMA", "EMMC_DMA", "bool"),
@@ -475,11 +471,8 @@ def extract_unverified_peripherals(soc: dict[str, Any]) -> list[str]:
     e.g. E5 inheriting from E7) is treated as ALL of its `peripherals` keys
     being unverified, so the header doesn't understate the gap -- UNLESS the
     file carries its own `peripherals_unverified` (even `[]`), which means
-    the file itself already grounds its populated keys individually (e.g.
-    i.MX93: `pending_reference_manual_ingestion` covers the still-zero rest
-    of the block, but `mipi_dsi`/`lcdif` are cited in `notes` and so are
-    correctly declared with `peripherals_unverified: []`).  An explicit
-    per-file list always wins over the wholesale fallback.
+    the file itself already sorts its populated keys individually.  An
+    explicit per-file list always wins over the wholesale fallback.
     """
     if "peripherals_unverified" in soc:
         return sorted(str(k) for k in (soc.get("peripherals_unverified") or []))
@@ -517,7 +510,8 @@ def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
         " * by scripts/gen_soc_caps.py.  DO NOT EDIT BY HAND — regenerate.",
         " *",
         " * Each SoC's capability macros are gated by CONFIG_ALP_SOC_{TOKEN}.",
-        " * Apps select the active SoC via Kconfig.  When no SoC is",
+        " * Apps select the active SoC via Kconfig (Zephyr) or -DALP_SOC (plain",
+        " * CMake; the build plan emits it per SoM).  When no SoC is",
         " * selected the macros default to a permissive UINT16_MAX so",
         " * capability checks accept any config — apps that want runtime",
         " * validation must select a specific SoC.",

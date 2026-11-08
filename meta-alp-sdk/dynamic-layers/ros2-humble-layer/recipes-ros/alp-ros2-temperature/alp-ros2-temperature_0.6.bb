@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Builds the minimal ROS 2 alp_som_temperature node from
+# alp-sdk/examples/v2n/v2n-ros2-som-temperature/ (portable <alp/temperature.h>
+# only).  NOT in packagegroup-alp-ros: BENCH-UNVERIFIED.  SRCREV comes from
+# alp-sdk-version.inc (the release commit on main carries the example).
+# Lives in dynamic-layers/ros2-humble-layer/ -- parsed only when
+# upstream meta-ros2-humble is in bblayers.conf.
+#
+# Copyright (C) 2026 Alp Lab AB
+
+inherit ros_distro_humble
+inherit ros_superflore_generated
+
+ROS_BUILD_TYPE = "ament_cmake"
+inherit ros_${ROS_BUILD_TYPE}
+
+SUMMARY = "Alp SDK minimal ROS 2 node: SoM temperature via the portable API"
+HOMEPAGE = "https://github.com/alplabai/alp-sdk"
+LICENSE = "Apache-2.0"
+LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=787726818c896f394f6627ab59d98d69"
+
+# SRCREV (the release-tag commit) comes from alp-sdk-version.inc.
+SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
+require recipes-core/alp-sdk/alp-sdk-version.inc
+# Links the per-machine libalp_sdk.so, so must not be shared across machines (#2850).
+PACKAGE_ARCH = "${MACHINE_ARCH}"
+
+S = "${WORKDIR}/git/examples/v2n/v2n-ros2-som-temperature"
+
+ROS_BUILD_DEPENDS = " \
+    ament-cmake \
+    rclcpp      \
+    sensor-msgs \
+"
+
+ROS_EXPORT_DEPENDS = "${ROS_BUILD_DEPENDS}"
+ROS_BUILDTOOL_DEPENDS = "ament-cmake-native"
+ROS_BUILDTOOL_EXPORT_DEPENDS = ""
+ROS_EXEC_DEPENDS = "${ROS_BUILD_DEPENDS}"
+
+# Portable runtime only -- no alp-chips (this node opens no chip driver).
+DEPENDS = "${ROS_BUILD_DEPENDS} ${ROS_BUILDTOOL_DEPENDS} alp-sdk"
+RDEPENDS:${PN} = "${ROS_EXEC_DEPENDS} alp-sdk"

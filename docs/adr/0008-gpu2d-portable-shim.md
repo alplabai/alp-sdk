@@ -3,6 +3,10 @@
 Status: Accepted
 Date: 2026-05-14
 
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The i.MX 93 mentions below, including the "i.MX 93 has no Vivante GPU" finding, are history; with no NXP target there is no NXP GPU2D question left to answer. The D/AVE 2D-only conclusion is unchanged.
+
 ## Context
 
 The Alif Ensemble (AEN family) carries a TES **D/AVE 2D** GPU2D
@@ -67,13 +71,21 @@ Backends (as implemented per issue #24):
   (the SKUs whose SoC JSON sets `dave2d: true`) at priority 100,
   driven through the documented `d2_*` API of the proprietary
   Alif D/AVE 2D pack (build-time pull only).  Bench-unverified at
-  authoring time.  Backend selection is per-SoC-exclusive (no
+  authoring time (amended 2026-10-21: bench-verified, #916).  Backend selection is per-SoC-exclusive (no
   per-op fallback in the dispatcher), so blend modes the engine
   cannot express single-pass (ADDITIVE / MULTIPLY) are delegated
   to the software path by the backend itself, via the internal
   `alp_gpu2d_sw_ops()` hook -- the "write once" contract holds
   op-by-op, not just SoM-by-SoM.
-- **V2N / V2N-M1 / i.MX 93 / native_sim / other**
+- **RZ/V2N family Linux (Mali-G31)**
+  (`src/backends/gpu2d/yocto_gles.c`) -- the Mali-G31 is a 3D GPU, not a
+  2D engine, so the three ops run as EGL + OpenGL ES 3 draws on a pbuffer
+  context (ADR 0017 Tier-1.5, standard Khronos headers only).  A wildcard
+  at priority 50, linked only under `ALP_SDK_USE_GPU2D_GLES`; it delegates
+  small rects, non-ARGB8888 formats and any GL failure -- or the whole handle
+  when no context can be created -- to the CPU path.  Bench-unverified.  See
+  `docs/v2n-mali-gpu.md`.
+- **i.MX 93 / native_sim / every target without a GPU backend**
   (`src/backends/gpu2d/sw_fallback.c`) -- the portable software
   fallback, wildcard `"*"` at priority 0.  It does the *real* CPU
   fill / blit / blend rather than returning `ALP_ERR_NOSUPPORT`, so
@@ -150,7 +162,7 @@ fallback.  Do not re-introduce a "Vivante on i.MX 93" backend.
 - [`src/backends/gpu2d/sw_fallback.c`](../../src/backends/gpu2d/sw_fallback.c)
   — the portable software 2D fallback (priority 0).
 - [`src/backends/gpu2d/alif_dave2d.c`](../../src/backends/gpu2d/alif_dave2d.c)
-  — the AEN D/AVE 2D real backend (priority 100, bench-unverified).
+  — the AEN D/AVE 2D real backend (priority 100, bench-verified since #916).
 - [`docs/soms/aen.md`](../soms/aen.md) — AEN-family SoM support
   overview for SDK-visible accelerator blocks.
 - [`docs/abi-markers.md`](../abi-markers.md) — explains why

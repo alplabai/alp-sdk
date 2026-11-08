@@ -11,7 +11,9 @@ component it reports that component as skipped.
 
 The flat form runs a linear, stop-on-first-failure sequence:
 
-1. **validate** the bundle (`check_som_bundle.py`)
+1. **validate** the bundle (`check_som_bundle.py`), then check every component's
+   path (it must stay inside the bundle), `size_bytes` and `sha256` as gates, as
+   `gates.artefacts` does in the V2N flow; a mismatch refuses the bundle before any flash
 2. **HiL spec check** — if `--hil-spec` (or a `--carrier`-derived path; a relative
    `--hil-spec` resolves against `--alp-sdk-root`, or the repo root, not the working
    directory) is given, the directory must exist. This is checked here, before any
@@ -22,31 +24,28 @@ The flat form runs a linear, stop-on-first-failure sequence:
    system image to eMMC (`yocto_wic`) — the image is skipped for a
    `bootloader-only:image-pending-hw` bundle. **Re-flashing FIP on a unit
    that has already been provisioned** (a field/repair FIP upgrade, not
-   first-time provisioning of a fresh module): if that unit ever had a
-   *saved* U-Boot env (an MMC-resident `bootcmd` from before the
-   `alp_eth_mac` V2N/V2M command existed, or a manual `setenv
-   bootcmd; saveenv`), the new FIP's compiled-in `CONFIG_BOOTCOMMAND`
-   is never reached -- the saved one runs instead, and `env default -a`
-   in it still wipes whatever `board_late_init()` derived, leaving Linux
-   with the DRP-AI vendor default MAC (see
-   `docs/soms/v2n.md#ethernet-mac-address-policy`). Reset the saved env
-   as part of the same upgrade: `env default -a; saveenv` from the
-   U-Boot prompt (or erase the env partition/offset the saved copy lives
-   at) before the unit next autoboots.
+   first-time provisioning of a fresh module): a FIP older than the
+   persistent-environment change keeps its saved environment at the old
+   location (end of the eMMC user area) and a new FIP ignores it, so
+   nothing needs resetting; the new environment (eMMC boot partition 2,
+   offsets `0x220000` / `0x230000`, see
+   `docs/soms/v2n.md#uboot-environment`) is created on its first boot.
+   The provisioning boot write never touches it: `write_emmc_boot`
+   refuses an image that would reach offset `0x220000`.
 4. **EEPROM** — allocate a serial, build the 128-byte manifest (`program_eeprom.py`).
    The RIIC0 @0x50 write + read-back-verify is HW-gated (see below) — this step only
    plans it, even under `--execute`.
 5. **power-on test** — runs `tests/hil/run_smoke.py` for the board (gated on the
    firmware's `alp_hw_info_read()` succeeding first) if a HiL spec was given in step 2;
    a no-op (reported as skipped) otherwise.
-6. **record** the unit to the ledger (`som_ledger.py record`) — `--test-result` is
-   three-valued, one value per outcome (#1305):
+6. **record** the unit to the ledger (`som_ledger.py record`) — this flow records
+   `fail` or `pending-hw` (#1305; `som_ledger.py` also accepts `pass`):
 
    | value | meaning |
    |---|---|
-   | `pass` | `--execute`, a test was configured, it ran, it passed |
+   | `pass` | never recorded by this flow: it does not write the EEPROM, so no unit is verified end to end |
    | `fail` | `--execute`, a test was configured, it ran, it **failed** |
-   | `pending-hw` | everything else: dry-run, no test configured, or a test skipped under `--execute` |
+   | `pending-hw` | everything else: dry-run, no test configured, a test skipped under `--execute`, or a test that passed (the EEPROM write is HW-gated) |
 
    `fail` and `pending-hw` are distinct on purpose: "verified bad" and "not yet
    verified" are different states, and before #1305 both wrote `pending-hw`, so a

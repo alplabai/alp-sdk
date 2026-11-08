@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <zephyr/cache.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/barrier.h>
 #include <zephyr/sys/sys_io.h>
@@ -49,8 +50,12 @@
 
 /* Shared global SRAM0 mailbox. Keep clear of the dualcore example beacons and
  * the OpenAMP vring carve-out used by aen-rpc-pingpong. */
-#define AEN_ULOG_REQ ((volatile struct aen_ulog_req *)0x02003000U)
-#define AEN_ULOG_RSP ((volatile struct aen_ulog_rsp *)0x02003100U)
+#ifndef AEN_ULOG_REQ_ADDR /* overridable so the host test can point at a buffer */
+#define AEN_ULOG_REQ_ADDR 0x02003000U
+#define AEN_ULOG_RSP_ADDR 0x02003100U
+#endif
+#define AEN_ULOG_REQ ((volatile struct aen_ulog_req *)(uintptr_t)AEN_ULOG_REQ_ADDR)
+#define AEN_ULOG_RSP ((volatile struct aen_ulog_rsp *)(uintptr_t)AEN_ULOG_RSP_ADDR)
 
 #define AEN_ULOG_MAGIC   0x554C4F47U /* "ULOG" */
 #define AEN_ULOG_VERSION 1U
@@ -58,8 +63,12 @@
 /* Bench proof beacons in global SRAM0, away from the request/reply mailboxes.
  * They are deliberately simple so a J-Link `mem32` read can prove owner/client
  * progress even when the UART capture misses early boot text. */
-#define AEN_ULOG_HP_BEACON       ((volatile uint32_t *)0x02000060U)
-#define AEN_ULOG_HE_BEACON       ((volatile uint32_t *)0x02001060U)
+#ifndef AEN_ULOG_HP_BEACON_ADDR
+#define AEN_ULOG_HP_BEACON_ADDR 0x02000060U
+#define AEN_ULOG_HE_BEACON_ADDR 0x02001060U
+#endif
+#define AEN_ULOG_HP_BEACON       ((volatile uint32_t *)(uintptr_t)AEN_ULOG_HP_BEACON_ADDR)
+#define AEN_ULOG_HE_BEACON       ((volatile uint32_t *)(uintptr_t)AEN_ULOG_HE_BEACON_ADDR)
 #define AEN_ULOG_HP_BEACON_MAGIC 0x554C4F90U
 #define AEN_ULOG_HE_BEACON_MAGIC 0x554C4FE0U
 
@@ -97,6 +106,50 @@ struct aen_ulog_rsp {
 	alp_update_log_entry_t   entry;
 };
 
+_Static_assert(sizeof(struct aen_ulog_req) <= 0x100U, "request overruns the 0x02003000 slot");
+_Static_assert(sizeof(struct aen_ulog_rsp) <= 0x100U, "reply overruns the 0x02003100 slot");
+
+/* Cache maintenance for the SRAM0 mailbox. The two M55 cores do not share a
+ * D-cache, so with CONFIG_DCACHE=y a plain volatile store can sit in the
+ * writer's cache and a plain load can hit a stale line in the reader's.
+ * The writer cleans (flushes) what it wrote; the reader invalidates before
+ * it reads. With the D-cache off (or cache management not built) the
+ * sys_cache_data_* calls are no-ops, so the same code serves both builds.
+ * The mailbox slots are 0x100 apart and line-aligned, so a range never
+ * shares a cache line with the other direction's slot. A struct spans
+ * several lines and a flush writes them back in no fixed order, so the
+ * publisher flushes the payload first, fences, and only then writes and
+ * flushes the line that carries seq.
+ *
+ * Cacheability: zephyr/soc-bridge/alif/mpu_regions_e8.c has no region for
+ * 0x02003000 (SRAM0 is only mapped when the image is linked into it, and then
+ * with the cacheable flash attribute), so the mailbox falls to the ARMv8-M
+ * default map: Normal, cacheable memory. The flush and invalidate above are
+ * therefore real when CONFIG_DCACHE=y and no-ops when it is n (the
+ * firmware-update-log example builds with n).
+ *
+ * Restart safety (either core may reset alone while SRAM0 is retained). The
+ * owner keeps last_seq and the client keeps g_client_seq in RAM; both restart
+ * at 0 while REQ->seq / RSP->seq survive. HP restart: the owner clears both
+ * seq words at start, so nothing stale is replayed. HE restart: the client
+ * seeds g_client_seq from the retained RSP->seq on its first call, so its
+ * seqs continue past the last one the owner served (== the owner's last_seq):
+ * a fresh REQ is never skipped as already seen and never matches the stale
+ * RSP. Each slot keeps a single writer. */
+#if defined(CONFIG_DCACHE) && !defined(CONFIG_CACHE_MANAGEMENT)
+#error "AEN M55 update-log mailbox needs CONFIG_CACHE_MANAGEMENT when CONFIG_DCACHE=y"
+#endif
+
+static inline void aen_mbox_flush(volatile void *p, size_t len)
+{
+	(void)sys_cache_data_flush_range((void *)p, len);
+}
+
+static inline void aen_mbox_invalidate(volatile void *p, size_t len)
+{
+	(void)sys_cache_data_invd_range((void *)p, len);
+}
+
 static void aen_mhu_ring(void)
 {
 	barrier_dmem_fence_full();
@@ -127,6 +180,9 @@ static alp_status_t aen_mhu_sender_ready(void)
 #if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT)
 
 #if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN)
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE)
+#error "The app-immutable profile and the firewall probe are mutually exclusive"
+#endif
 static alp_status_t aen_firewall_proven(void)
 {
 	return ALP_OK;
@@ -160,6 +216,8 @@ static alp_status_t client_call(enum aen_ulog_op              op,
 			client_beacon(op, g_client_seq, rc);
 			return rc;
 		}
+		aen_mbox_invalidate(&AEN_ULOG_RSP->seq, sizeof(AEN_ULOG_RSP->seq));
+		g_client_seq       = AEN_ULOG_RSP->seq;
 		g_client_mhu_ready = true;
 	}
 
@@ -179,16 +237,20 @@ static alp_status_t client_call(enum aen_ulog_op              op,
 	} else {
 		memset((void *)&AEN_ULOG_REQ->entry, 0, sizeof(AEN_ULOG_REQ->entry));
 	}
+	aen_mbox_flush(AEN_ULOG_REQ, sizeof(*AEN_ULOG_REQ));
 	barrier_dmem_fence_full();
 	AEN_ULOG_REQ->seq = seq;
+	aen_mbox_flush(&AEN_ULOG_REQ->seq, sizeof(AEN_ULOG_REQ->seq));
 
 	aen_mhu_ring();
 
 	int64_t deadline = k_uptime_get() + CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_RPC_TIMEOUT_MS;
 	while (k_uptime_get() < deadline) {
 		aen_mhu_drain();
+		aen_mbox_invalidate(&AEN_ULOG_RSP->seq, sizeof(AEN_ULOG_RSP->seq));
 		if (AEN_ULOG_RSP->seq == seq) {
 			barrier_dmem_fence_full();
+			aen_mbox_invalidate(AEN_ULOG_RSP, sizeof(*AEN_ULOG_RSP));
 			if (AEN_ULOG_RSP->magic != AEN_ULOG_MAGIC ||
 			    AEN_ULOG_RSP->version != AEN_ULOG_VERSION) {
 				return ALP_ERR_IO;
@@ -326,8 +388,10 @@ static void owner_reply(uint32_t                      seq,
 	} else {
 		memset((void *)&AEN_ULOG_RSP->entry, 0, sizeof(AEN_ULOG_RSP->entry));
 	}
+	aen_mbox_flush(AEN_ULOG_RSP, sizeof(*AEN_ULOG_RSP));
 	barrier_dmem_fence_full();
 	AEN_ULOG_RSP->seq = seq;
+	aen_mbox_flush(&AEN_ULOG_RSP->seq, sizeof(AEN_ULOG_RSP->seq));
 	aen_mhu_ring();
 }
 
@@ -346,7 +410,16 @@ void update_log_aen_m55_owner_run(void)
 	uint32_t          last_seq = 0U;
 	uint32_t          served   = 0U;
 
-	AEN_ULOG_RSP->seq     = 0U;
+	/* Clear both directions of the mailbox. RSP->seq alone is not enough: a
+	 * request the previous owner already served stays in retained SRAM0
+	 * (REQ->seq != 0), and with last_seq reset to 0 it would be run again,
+	 * replaying its APPEND into the audit log. A request the client posts
+	 * before this point is dropped: that in-flight call returns
+	 * ALP_ERR_TIMEOUT and the caller must retry it. */
+	AEN_ULOG_REQ->seq = 0U;
+	AEN_ULOG_RSP->seq = 0U;
+	aen_mbox_flush(&AEN_ULOG_REQ->seq, sizeof(AEN_ULOG_REQ->seq));
+	aen_mbox_flush(&AEN_ULOG_RSP->seq, sizeof(AEN_ULOG_RSP->seq));
 	AEN_ULOG_HP_BEACON[0] = AEN_ULOG_HP_BEACON_MAGIC;
 	AEN_ULOG_HP_BEACON[1] = (log != NULL) ? (uint32_t)ALP_OK : (uint32_t)ALP_ERR_NOT_READY;
 	AEN_ULOG_HP_BEACON[2] = 0U;
@@ -355,6 +428,7 @@ void update_log_aen_m55_owner_run(void)
 	for (;;) {
 		aen_mhu_drain();
 
+		aen_mbox_invalidate(&AEN_ULOG_REQ->seq, sizeof(AEN_ULOG_REQ->seq));
 		uint32_t seq = AEN_ULOG_REQ->seq;
 		if (seq == 0U || seq == last_seq) {
 			k_msleep(1);
@@ -362,6 +436,14 @@ void update_log_aen_m55_owner_run(void)
 		}
 		last_seq = seq;
 		barrier_dmem_fence_full();
+		aen_mbox_invalidate(AEN_ULOG_REQ, sizeof(*AEN_ULOG_REQ));
+
+		/* The first open can fail transiently (flash/MRAM not ready at HP
+		 * start). Retry per request so that is not a permanent outage. */
+		if (log == NULL) {
+			log                   = alp_update_log_open();
+			AEN_ULOG_HP_BEACON[1] = (log != NULL) ? (uint32_t)ALP_OK : (uint32_t)ALP_ERR_NOT_READY;
+		}
 
 		if (AEN_ULOG_REQ->magic != AEN_ULOG_MAGIC || AEN_ULOG_REQ->version != AEN_ULOG_VERSION) {
 			owner_reply(seq, ALP_ERR_VERSION, 0U, ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN, 0U, NULL);

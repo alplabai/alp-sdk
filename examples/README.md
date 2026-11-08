@@ -40,7 +40,6 @@ marks the ones locked to specific silicon:
 * **(AEN)** -- Alif Ensemble family (Ethos-U NPU, dual-M55).
 * **(V2N)** -- Renesas RZ/V2N.
 * **(V2N-M1)** -- V2N plus the DEEPX DX-M1 NPU.
-* **(iMX93)** -- NXP i.MX93.
 * **(E1M-X)** -- E1M-X form-factor pad / peripheral.
 
 "Portable" means the board/SoM is swappable across the tagged
@@ -56,7 +55,7 @@ general, peripheral-agnostic Ring 1 examples are expected to stay on
 the portable `<alp/peripheral.h>` + `BOARD_*` surface with no
 chip-driver include.
 
-Many v0.5--v0.6 examples are still `[UNTESTED]` -- they build on
+Many examples are still `[UNTESTED]` -- they build on
 `native_sim/native/64` and cross-compile, but await hardware-in-the-
 loop bring-up.  Each example's own `README.md` carries its status.
 
@@ -109,8 +108,8 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `audio-noise-suppression`   | Real-time denoise -- I2S mic → FFT → int8 CNN gain mask → I2S out. **(V2N)** |
 | `audio-wake-word`           | Always-on "Hey Alp" keyword spotting on the M55-HE core + Ethos-U55. **(AEN)** |
 | `butterworth-lowpass`       | Design a 2nd-order Butterworth low-pass biquad + run it through the `<alp/dsp.h>` IIR chain stage (CMSIS-DSP on-silicon, portable C under native_sim). |
-| `acoustic-anomaly-wind-turbine` | Wind-turbine nacelle acoustic anomaly detector -- acoustic + rotor-speed + bearing-pass-frequency features; v0.6 paper-correct, HiL bench-gated. **(AEN)** |
-| `acoustic-safety-events` | Always-listening safety/security node -- a MEMS mic classifies audible-band events into four types; v0.9 paper-correct, HiL bench-gated. **(AEN)** |
+| `acoustic-anomaly-wind-turbine` | Wind-turbine nacelle acoustic anomaly detector -- acoustic + rotor-speed + bearing-pass-frequency features; paper-correct, HiL bench-gated. **(AEN)** |
+| `acoustic-safety-events` | Always-listening safety/security node -- a MEMS mic classifies audible-band events into four types; paper-correct, HiL bench-gated. **(AEN)** |
 
 ### Camera / Vision
 
@@ -126,14 +125,17 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `ai-anomaly-detection-vibration`   | Predictive maintenance -- sliding-window vibration → 1D-CNN anomaly score via TFLM. **(AEN)** |
 | `aen/edgeai-vision-aen`            | On-device vision inference with Ethos-U on an AEN SoM. **(AEN)**              |
 | `v2n/v2n-drpai-inference`          | DRP-AI3 on-die NPU still-frame inference through `<alp/inference.h>` -- the exhibition booth demo. **(V2N, Yocto)** |
+| `v2n/v2n-gpu2d-compose`            | Fill / blit / SRC_OVER-blend ARGB8888 layers through `<alp/gpu2d.h>` -- Mali-G31 via EGL/GLES when the image has it, CPU fallback otherwise; reports which. **(V2N, Yocto)** |
+| `v2n/v2n-two-models`               | DRP-AI3 and DX-M1 running at the same time -- one model per NPU, one thread each, per-NPU latency and combined FPS. **(V2M, Yocto, not bench-verified)** |
 | `v2n/v2n-m1-deepx-inference`       | DEEPX DX-M1 NPU bring-up + a single inference through `<alp/inference.h>`. **(V2N-M1)** |
 | `v2n/v2n-m1-ros-perception`        | ROS 2 perception node -- detection on DEEPX, DRP-AI3 fallback on plain V2N. **(V2N / V2N-M1, Yocto)** |
-| `cold-chain-monitor`               | Pharma/food cold-chain integrity monitor -- BME280 T/RH/P samples → anomaly classification; v0.9 paper-correct, HiL bench-gated. |
-| `motor-current-signature`          | DC motor/load current-signature health monitor -- INA236 current sensing → 1D-CNN health classifier; v0.9 paper-correct, HiL bench-gated. |
-| `multimodal-fusion-pdm`            | Multi-sensor motor-health monitor fusing vibration (ICM-42670) + current + acoustic (PDM mic); v0.9 paper-correct, HiL bench-gated. |
-| `rail-predictive-maintenance`      | Rail-bogie predictive maintenance -- vibration + GNSS-position features → anomaly score; v0.6 paper-correct, HiL bench-gated. |
-| `visual-defect-detection`          | Camera-fed surface-inspection station flagging manufacturing defects via an autoencoder; v0.9 paper-correct, HiL bench-gated. |
-| `wearable-activity-fall`           | Wearable activity + fall detector -- motion features → two-stage classifier; v0.9 paper-correct, HiL bench-gated. |
+| `v2n/v2n-ros2-som-temperature`     | Minimal ROS 2 node: portable `alp_temperature_read_milli_c()` -> `sensor_msgs/Temperature`. `[UNTESTED]` **(V2N / V2N-M1, Yocto)** |
+| `cold-chain-monitor`               | Pharma/food cold-chain integrity monitor -- BME280 T/RH/P samples → anomaly classification; paper-correct, HiL bench-gated. |
+| `motor-current-signature`          | DC motor/load current-signature health monitor -- INA236 current sensing → 1D-CNN health classifier; paper-correct, HiL bench-gated. |
+| `multimodal-fusion-pdm`            | Multi-sensor motor-health monitor fusing vibration (ICM-42670) + current + acoustic (PDM mic); paper-correct, HiL bench-gated. |
+| `rail-predictive-maintenance`      | Rail-bogie predictive maintenance -- vibration + GNSS-position features → anomaly score; paper-correct, HiL bench-gated. |
+| `visual-defect-detection`          | Camera-fed surface-inspection station flagging manufacturing defects via an autoencoder; paper-correct, HiL bench-gated. |
+| `wearable-activity-fall`           | Wearable activity + fall detector -- motion features → two-stage classifier; paper-correct, HiL bench-gated. |
 
 ### Connectivity / IoT
 
@@ -142,7 +144,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `iot-connected-camera`   | End-to-end IoT -- capture a frame, publish it to MQTT.                             |
 | `camera-mjpeg-stream`    | Capture, JPEG-encode, and serve an MJPEG stream over a plain BSD TCP socket -- browser/VLC/ffmpeg client, no host tool. **(AEN)** |
 | `iot-dashboard`          | BME280 env samples → MQTT-over-TLS publish + a live LVGL dashboard. **(AEN)**      |
-| `iot-fleet-ota`          | Secure OTA firmware update with rollback; the v0.6 declarative `boot:` + `ota:` reference. |
+| `iot-fleet-ota`          | Secure OTA firmware update with rollback; the declarative `boot:` + `ota:` reference. |
 | `firmware-update-log`    | Portable update audit log -- software tamper-evident tier everywhere, TF-M secure-owner hardware tier where the secure backend is wired. |
 | `production-deployment`  | Field-product lifecycle flagship -- secure-boot + OTA + EEPROM provisioning + attestation in one `board.yaml`. |
 | `modbus-server`      | ADR 0018 `libraries: [modbus]` teaching example -- one Zephyr Modbus client + server in-process over the RAW_ADU backend, no UART/RS-485/CAN/TCP needed. **(V2N)** |
@@ -168,12 +170,13 @@ Each needs a display panel wired per its `board.yaml`.
 | `counter-alarm`            | Free-running counter + alarm callback at a configured value.                |
 | `timer-periodic-interrupt` | Re-arming periodic alarm + ISR-safe coordination pattern (flag + drain).    |
 | `wdt-feed`                 | Watchdog open + feed cadence; demonstrates reset-on-stall.                  |
-| `power-managed-sensor`     | Low-power BME280 + IMU node -- the v0.6 `cores.<id>.power:` sleep + multi-source-wakeup reference. **(AEN)** |
+| `power-managed-sensor`     | Low-power node -- the `cores.<id>.power:` declarative sleep + multi-source-wakeup reference (a `board.yaml` reference: its `main.c` drives no sensor). **(AEN)** |
 
 ### Third-party libraries
 
 How to enable and use each optional third-party library the SDK
-integrates (via `board.yaml`'s `cores.<id>.libraries:` array + the
+integrates (via `board.yaml`'s top-level `libraries:` block, optionally scoped
+with `cores: [<id>]`, + the
 per-library profile under
 [`metadata/library-profiles/`](../metadata/library-profiles/)). One
 focused example per library; every one builds and runs on
@@ -209,16 +212,16 @@ by peripheral -- multi-core projects, and SoM-specific board bring-up.
 ### Multi-core & heterogeneous-OS
 
 These declare more than one core in `board.yaml` and exercise the
-v0.6 orchestrator's per-core fan-out.  Each carries a per-core
+orchestrator's per-core fan-out.  Each carries a per-core
 subdirectory layout (`linux/`, `m33_sm/`, `m55_hp/`, ...) matching
 its `cores:` keys.
 
 | Directory                | What it shows                                                                                |
 |--------------------------|----------------------------------------------------------------------------------------------|
 | `rpmsg-v2n`              | V2N flagship -- A55 Yocto consumer + M33-SM Zephyr producer, framed RPC over RPMsg. **(V2N)** |
+| `microros-ros2-v2n`       | micro-ROS node on the M33 publishing `std_msgs/Int32`, seen by ROS 2 on the A55 via a custom XRCE transport over RPMsg (ADR 0035; the M33 slice builds and boots, the ROS 2 round-trip is unproven). **(V2N)** |
 | `rpmsg-aen`              | AEN E8 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer. **(AEN)** |
-| `rpmsg-imx93`            | iMX93 -- A55 Yocto consumer + M33 Zephyr producer (structural; **not buildable** -- imx93 r1's `status: tbd` is refused by the hw_rev-buildable gate, [#1025](https://github.com/alplabai/alp-sdk/issues/1025)). **(iMX93)** |
-| `heterogeneous-offload`  | "Why heterogeneous compute?" -- A55 delegates a 1024-pt FFT to M33-SM via `alp_rpc_call`.     |
+| `heterogeneous-offload`  | "Why heterogeneous compute?" -- A55 delegates a 64-pt FFT to M33-SM via `alp_rpc_call`.       |
 | `mproc-mailbox`          | M55-HP ↔ M55-HE mailbox round-trip -- stage payload in shared SRAM, signal via HW mailbox, read the reply. **(AEN)** |
 
 ### V2N platform
@@ -231,13 +234,12 @@ SoM EEPROM manifest).
 |---------------------------------|--------------------------------------------------------------------------|
 | `v2n/v2n-gd32-bridge-ping`      | PING + GET_VERSION round-trip on both SPI fast path + I2C management path.|
 | `v2n/v2n-board-id-readout`      | Read the SoM EEPROM manifest + assert the SKU matches the firmware build. |
-| `v2n/v2n-ethernet-dual`         | Bring up both RTL8211FDI PHYs (ET0 + ET1) -- probe, reset, autoneg, link, WoL. |
+| `v2n/v2n-alp-rpc-responder`     | M33 `<alp/rpc.h>` echo responder for the Linux A55 (build-only). |
 | `v2n/v2n-eeprom-manifest-dump`  | Hexdump + decode the 128-byte EEPROM manifest at offset 0x0000.          |
 | `v2n/v2n-temp-sensor`           | Read the on-module TMP112 once per second; print degrees C.              |
+| `v2n/v2n-soc-temperature`       | Read the SoC die temperature from the Linux thermal zones once per second. |
 | `v2n/v2n-pwm-fan-control`       | Ramp a GD32-side PWM channel along a five-stop fan curve (25 kHz board). |
 | `v2n/v2n-secure-element-sign`   | OPTIGA Trust M probe, Coprocessor UID read and raw APDU session. |
-| `v2n/v2n-xspi-flash-readwrite`  | Erase + write + read-back one page on the on-module xSPI NOR.            |
-| `v2n/v2n-emmc-block-stat`       | Disk-access ioctls + first-block read on the on-module eMMC.             |
 | `v2n/v2n-gd32-swd-flash`        | Host-driven SWD bit-bang -- connect, halt, erase, write, verify, reset.  |
 | `v2n/v2n-brd-i2c-bringup`       | Patch-day diagnostic for the V2N SoM's BRD_I2C management bus (Renesas RIIC8) -- distinguishes a bus-level electrical fault from per-device failures; prints a PASS/FAIL/SKIP table. |
 | `v2n/v2n-gd32-bridge-functional` | Single-pass functional validation of the GD32G553 supervisor-MCU bridge, followed by a forever PWM7 duty staircase as a live oscilloscope observable. **(V2N-M1)** |
@@ -251,9 +253,9 @@ SoM EEPROM manifest).
 These live under `examples/aen/` and target the E1M-AEN (Alif
 Ensemble) family on the E1M-EVK board (lead part: E8).
 
-`examples/aen/` has 84 tracked directories; the 10 below are the
-customer-facing catalog (the ones carrying a `board.yaml`).  The
-remaining 74 are internal bring-up/regression apps (per-driver
+The directories in the table below are the customer-facing catalog
+of `examples/aen/` (the ones carrying a `board.yaml`).  The
+remaining directories are internal bring-up/regression apps (per-driver
 regcheck, bench smoke tests, dual-core internal validation) --
 `board.yaml` presence is the reliable way to tell them apart, not
 their filename (some of those internal dirs don't follow a
@@ -268,6 +270,7 @@ their filename (some of those internal dirs don't follow a
 | `aen/aen-cc3501e-companion-tour` | Capstone full-surface tour of the CC3501E coprocessor: the portable wireless checkpoint plus every companion surface `aen-cc3501e-bringup` doesn't exercise. |
 | `aen/aen-cc3501e-gatt-register` | Bench PASS/FAIL gate for `alp_ble_gatt_register_service()` (#480/#892) -- registers a service on the CC3501E's NimBLE host over the inter-chip bridge; peer-free, no central-side discovery. |
 | `aen/aen-cc3501e-gpio`          | CC3501E GPIO proxy + camera-enable demo over the inter-chip SPI bridge. |
+| `aen/aen-sdcard-file`          | FatFs file write/read/list on the E1M-EVK microSD slot (J7). |
 | `aen/aen-eeprom-manifest`       | Read + decode the 128-byte Alp hardware-info manifest from the on-module 24C128 EEPROM over the portable `<alp/*>` API. |
 | `aen/aen-eeprom-provision`      | Write (and lock down) the 128-byte Alp hardware-info manifest into the on-module 24C128 EEPROM -- the production sibling of `aen-eeprom-manifest`. |
 | `aen/aen-secure-element-sign`   | OPTIGA Trust M probe and Coprocessor UID read over BRD_I2C (M55-HE). |
@@ -276,7 +279,7 @@ their filename (some of those internal dirs don't follow a
 
 ```
 examples/<name>/
-├── CMakeLists.txt    # invokes scripts/alp_project.py + delegates to west build
+├── CMakeLists.txt    # Zephyr app build (alp.conf comes from `tan build`)
 ├── prj.conf          # mostly empty -- feature selection is in board.yaml
 ├── board.yaml        # SoM + board + cores + peripherals + chip drivers
 ├── src/
@@ -307,7 +310,8 @@ To adapt to your own project:
    * `som.sku` -- your SoM MPN.
    * `board.name` -- your board preset (or inline `board.populated`).
    * `cores.<id>.peripherals` -- what each core uses.
-   * `cores.<id>.libraries` -- per-core library knobs.
+   * `libraries:` -- top-level library list; add `cores: [<id>]` to scope an
+     entry to one core.
    * Heterogeneous projects: `ipc:` -- name a carve-out the
      orchestrator allocates from the SoM's `memory_map:`.
 3. Modify each core's `src/main.c` to whatever your app needs.

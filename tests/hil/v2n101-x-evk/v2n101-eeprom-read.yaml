@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2N101 EEPROM presence at 0x50 on i2c-0 (RIIC0, E1M_I2C0 /
+# E1M_X_I2C0), READ-ONLY.
+#
+# ADDRESS COLLISION, flagged for the maintainer: the SoM eeprom_24c128
+# (metadata/e1m_modules/E1M-V2N101.yaml, e1m_i2c0, 0x50) and the carrier
+# board-ID eeprom_24c128 (metadata/boards/e1m-x-evk.yaml,
+# XEVK_I2C_ADDR_EEPROM, 0x50, E1M_X_I2C0) are on the SAME wire at the SAME
+# address.  An ACK at 0x50 therefore cannot tell the SoM part from the
+# carrier part, so this spec only proves "SOMETHING at 0x50 on i2c-0"; it
+# does NOT prove the SoM EEPROM is fitted or alive.  Telling them apart
+# needs a hardware/DT change (e.g. distinct address straps).
+#
+# EEPROM SAFETY: no I2C write of any kind.  Pinned to i2c-0 only (never
+# loops over buses).  If the kernel at24 driver bound a node
+# (/sys/bus/i2c/devices/0-0050/eeprom) it is read with dd; otherwise
+# `i2cdetect -r` (SMBus read-byte, current-address read: no address-pointer
+# write) is used.  0x58 (Secure Data Page / lock byte) is never addressed.
+
+schema_version: 1
+name: v2n101-eeprom-read
+description: |
+  Something ACKs 0x50 on i2c-0 (SoM/carrier collision, see header); read-only.
+
+flash_method: ssh-run
+ssh_command: |-
+  echo "HIL_EEPROM_NOTE SoM and carrier 24c128 share i2c-0 @0x50; cannot distinguish"
+  n=/sys/bus/i2c/devices/0-0050/eeprom
+  if [ -r "$n" ]; then
+    dd if="$n" of=/dev/null bs=4 count=1 2>/dev/null && echo HIL_EEPROM_READ_OK
+  else
+    i2cdetect -y -r 0 0x50 0x50 2>/dev/null | grep -Eq '^50: +(50|UU)' && echo HIL_EEPROM_READ_OK
+  fi
+
+serial:
+  duration_s: 15
+  expect_contains:
+    - "HIL_EEPROM_READ_OK"

@@ -27,7 +27,7 @@ button read.  Time budget: 20 minutes.
 
 ```
 examples/peripheral-io/gpio-button-led/
-├── CMakeLists.txt    # invokes scripts/alp_project.py + west
+├── CMakeLists.txt    # plain Zephyr app (no loader step)
 ├── prj.conf          # mostly empty -- features come from board.yaml
 ├── board.yaml        # SoM SKU + board + OS + peripherals
 ├── src/
@@ -51,9 +51,9 @@ cores:
 ```
 
 That's it.  No DT overlay, no hand-rolled Kconfig fragment.  The
-loader (`scripts/alp_project.py`) reads `board.yaml` at configure
-time and emits a Zephyr-side `alp.conf` that gets layered on top
-of `prj.conf` via `EXTRA_CONF_FILE`.
+loader (`scripts/alp_project.py`) reads `board.yaml` before the build
+(`tan build` runs it for you) and emits a Zephyr-side `alp.conf` that
+gets layered on top of `prj.conf` via `EXTRA_CONF_FILE`.
 
 ## Step 2 -- Read the source
 
@@ -122,7 +122,7 @@ to driving `alp_project.py` + `west build` directly:
 ```bash
 python3 alp-sdk/scripts/alp_project.py \
     --input examples/peripheral-io/gpio-button-led/board.yaml \
-    --emit zephyr-conf > /tmp/alp.conf
+    --emit zephyr-conf --core m55_hp --output /tmp/alp.conf
 
 west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/gpio-button-led -- \
     -DEXTRA_CONF_FILE=/tmp/alp.conf \

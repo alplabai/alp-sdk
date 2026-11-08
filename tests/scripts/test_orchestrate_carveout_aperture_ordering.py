@@ -147,15 +147,15 @@ class TestMramMainOrderingGuard:
                 f"carve-out placed at 0x{entry.base:x}, inside the live "
                 f"ATOC band -- exactly the #1365 hazard")
 
-    def test_raw_shmem_entry_on_aen801_also_stays_blocked(self):
+    def test_raw_shmem_entry_on_aen801_resolves_into_sram_ipc(self):
         """`mproc-mailbox`'s raw_shmem entry (m55_hp/m55_he, not
-        a32_cluster) exercises the same SoM/aperture with a different
-        `ipc.kind` -- the exclusion must not be accidentally scoped to
-        `rpmsg` alone."""
+        a32_cluster) must land in the SRAM0 `sram_ipc` row, never in a
+        flash-class MRAM region."""
         project = _with_mram_main_resolved(load_board_yaml(MPROC_MAILBOX_BOARD))
         entry = _by_name(resolve_carve_outs(project))["alp_shmem0"]
-        assert entry.status == "blocked"
-        assert "flash-class" in entry.reason
+        assert entry.status == "ok", entry.reason
+        assert entry.region == "sram_ipc"
+        assert 0x023E0000 <= entry.base < 0x023F0000
 
 
 def _with_outside_aperture_row_added(project):
@@ -249,7 +249,7 @@ class TestUnclassifiedWriteAuthorityLegCoverage:
     def test_outside_aperture_authored_row_with_no_write_authority_blocks(self):
         """Same hazard, absent `write_authority:` rather than a wrong
         value -- `ABSENT MEANS UNRESOLVED, NEVER customer_runtime`
-        (`som-preset-v1.schema.json`'s `write_authority` description)."""
+        (`som-preset-v2.schema.json`'s `write_authority` description)."""
         eligible, reason = _region_ipc_eligibility(
             {"base": _OUTSIDE_APERTURE_BASE, "size_kib": 1024},
             (_E8_APERTURE_BASE, 0x80580000),

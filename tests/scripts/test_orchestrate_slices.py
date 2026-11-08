@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _orchestrate_support import (              # noqa: E402
     REPO,
-    _synthetic_nx9101_root,
+    _synthetic_tbd_mailbox_root,
     _write_board,
 )
 
@@ -42,7 +42,7 @@ from alp_orchestrate import (                       # noqa: E402
 # ---------------------------------------------------------------------
 # SoM-intrinsic chip driver auto-enable (Phase 4 on_module fix)
 # Tests cover: _slugs_from_on_module, _slugs_from_helper_firmware,
-# and _slice_alp_conf integration for V2N101 / AEN701 / NX9101.
+# and _slice_alp_conf integration for V2N101 / AEN701.
 # ---------------------------------------------------------------------
 
 
@@ -72,8 +72,8 @@ def test_slugs_from_on_module_v2n101() -> None:
 
 
 def test_slugs_from_on_module_aen701() -> None:
-    """AEN701 on_module: cc3501e, optiga_trust_m, rv3028c7, tmp112,
-    eeprom_24c128 present; ospi_memories / hyperram storage MPNs are
+    """AEN701 on_module: cc3501e, rv3028c7, tmp112, eeprom_24c128 present
+    (optiga_trust_m is DNP on the shared AEN PCB, #2958); ospi_memories / hyperram storage MPNs are
     excluded (they have no chips/<part>/ driver)."""
     import yaml
     with open(REPO / "metadata" / "e1m_modules" / "E1M-AEN701.yaml",
@@ -81,9 +81,9 @@ def test_slugs_from_on_module_aen701() -> None:
         preset = yaml.safe_load(f)
     slugs = _slugs_from_on_module(preset["on_module"])
 
-    for expected in ("cc3501e", "eeprom_24c128", "optiga_trust_m",
-                     "rv3028c7", "tmp112"):
+    for expected in ("cc3501e", "eeprom_24c128", "rv3028c7", "tmp112"):
         assert expected in slugs, f"missing expected slug: {expected}"
+    assert "optiga_trust_m" not in slugs, "DNP part must not auto-enable"
 
     assert "TBD" not in slugs, "TBD values must be excluded"
     assert "alif:ensemble:e7" not in slugs, "silicon field must be excluded"
@@ -118,20 +118,13 @@ def test_slugs_from_on_module_aen801_excludes_hard_dnp_i2c_device() -> None:
         assert expected in slugs, f"missing expected slug: {expected}"
 
 
-def test_slugs_from_on_module_nx9101_tbd_filtered() -> None:
-    """NX9101 on_module: TBD wifi_ble and ethernet_phy are filtered out;
-    only pca9451a (the one non-TBD scalar chip) survives."""
-    import yaml
-    with open(REPO / "metadata" / "e1m_modules" / "E1M-NX9101.yaml",
-              encoding="utf-8") as f:
-        preset = yaml.safe_load(f)
-    slugs = _slugs_from_on_module(preset["on_module"])
+def test_slugs_from_on_module_tbd_filtered() -> None:
+    """on_module: TBD wifi_ble and ethernet_phy are filtered out; only the
+    non-TBD scalar chip survives."""
+    slugs = _slugs_from_on_module(
+        {"wifi_ble": "TBD", "ethernet_phy": "TBD", "pmic_main": "act8760"})
 
-    assert "pca9451a" in slugs, "pca9451a must be present"
-    assert "TBD" not in slugs, "TBD values must be excluded"
-    # NX9101 has no i2c_devices or ospi_memories, so the list is short.
-    for slug in slugs:
-        assert slug != "TBD"
+    assert slugs == ["act8760"], slugs
 
 
 def test_slugs_from_helper_firmware_v2n101() -> None:
@@ -155,14 +148,9 @@ def test_slugs_from_helper_firmware_aen701_tbd_filtered() -> None:
     assert "cc3501e" in slugs
 
 
-def test_slugs_from_helper_firmware_nx9101_empty() -> None:
-    """NX9101 has no helper MCUs; helper_firmware: [] returns empty list."""
-    import yaml
-    with open(REPO / "metadata" / "e1m_modules" / "E1M-NX9101.yaml",
-              encoding="utf-8") as f:
-        preset = yaml.safe_load(f)
-    slugs = _slugs_from_helper_firmware(preset.get("helper_firmware", []))
-    assert slugs == []
+def test_slugs_from_helper_firmware_empty() -> None:
+    """A SoM with no helper MCUs: helper_firmware: [] returns empty list."""
+    assert _slugs_from_helper_firmware([]) == []
 
 
 def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
@@ -201,8 +189,8 @@ def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
     sku_prop["pattern"] = sku_prop["pattern"][:-2] + "|TST[0-9]{3})$"
     (schemas / "board.schema.json").write_text(
         _json.dumps(bc_schema), encoding="utf-8")
-    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
-                schemas / "som-preset-v1.schema.json")
+    shutil.copy(real_meta / "schemas" / "som-preset-v2.schema.json",
+                schemas / "som-preset-v2.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
                 schemas / "soc-spec-v1.schema.json")
     # Copy the renesas n44 SoC JSON so silicon refs resolve in the temp root.
@@ -296,18 +284,18 @@ def test_slice_alp_conf_emits_som_intrinsic_chips(tmp_path: Path) -> None:
 
 
 def test_slice_alp_conf_1487_chip_subsystems_no_gap(tmp_path: Path) -> None:
-    """Regression for issue #1487: every one of the ten chip slugs that
-    were missing a `_CHIP_SUBSYSTEMS` key (act8760/tps628640/pca9451a/
+    """Regression for issue #1487: every one of the nine chip slugs that
+    were missing a `_CHIP_SUBSYSTEMS` key (act8760/tps628640/
     da9292/clk_5l35023b/pi3dbs12212/murata_lbee5hy2fy/deepx_dxm1/gd32_swd/
     gd32g553) must turn on its declared subsystem, not just print its own
     `=y` line.
 
-    This fixture's on_module: block deliberately carries ONLY the ten
+    This fixture's on_module: block deliberately carries ONLY the nine
     formerly-missing slugs -- no rv3028c7 / optiga_trust_m / eeprom_24c128
     / tmp112 (the table-listed I2C chips that masked the gap in-tree, per
     the issue's own honest-scope note) -- so CONFIG_GPIO=y / CONFIG_I2C=y
     / CONFIG_SPI=y have no other source to leak in from.  Reverting any of
-    the ten `_CHIP_SUBSYSTEMS` entries this fixture exercises makes this
+    the nine `_CHIP_SUBSYSTEMS` entries this fixture exercises makes this
     test fail.
     """
     project = _make_som_only_project(
@@ -324,7 +312,6 @@ def test_slice_alp_conf_1487_chip_subsystems_no_gap(tmp_path: Path) -> None:
               pmic_secondary:     da9292
               clock_generator:    clk_5l35023b
               buck_converter:     tps628640
-              pmic_alt:           pca9451a
               wifi_ble:           murata_lbee5hy2fy
               supervisor_mcu:     gd32g553
               npu:                deepx_dxm1
@@ -349,18 +336,18 @@ def test_slice_alp_conf_1487_chip_subsystems_no_gap(tmp_path: Path) -> None:
     conf = _slice_alp_conf(project, m33_slice)
 
     for chip in ("act8760", "da9292", "clk_5l35023b", "tps628640",
-                 "pca9451a", "murata_lbee5hy2fy", "gd32g553", "deepx_dxm1",
+                 "murata_lbee5hy2fy", "gd32g553", "deepx_dxm1",
                  "pi3dbs12212", "gd32_swd"):
         assert f"CONFIG_ALP_SDK_CHIP_{chip.upper()}=y" in conf, (
             f"missing chip line for {chip}")
 
     # No other on-module entry in this fixture depends on GPIO/I2C/SPI, so
-    # these can only come from the ten chips above.
+    # these can only come from the nine chips above.
     assert "CONFIG_GPIO=y" in conf, (
         "GPIO dependency of pi3dbs12212/murata_lbee5hy2fy/deepx_dxm1/"
         "gd32_swd not turned on -- _CHIP_SUBSYSTEMS gap regressed")
     assert "CONFIG_I2C=y" in conf, (
-        "I2C dependency of act8760/tps628640/pca9451a/da9292/"
+        "I2C dependency of act8760/tps628640/da9292/"
         "clk_5l35023b not turned on -- _CHIP_SUBSYSTEMS gap regressed")
     assert "CONFIG_SPI=y" in conf, (
         "gd32g553's (SPI || I2C) dependency dropped the SPI side")
@@ -391,8 +378,8 @@ def test_slice_alp_conf_deduplicate_som_vs_board(tmp_path: Path) -> None:
     sku_prop["pattern"] = sku_prop["pattern"][:-2] + "|TST[0-9]{3})$"
     (schemas / "board.schema.json").write_text(
         _json2.dumps(bc_schema), encoding="utf-8")
-    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
-                schemas / "som-preset-v1.schema.json")
+    shutil.copy(real_meta / "schemas" / "som-preset-v2.schema.json",
+                schemas / "som-preset-v2.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
                 schemas / "soc-spec-v1.schema.json")
     # Copy SoC JSON so silicon ref renesas:rzv2n:n44 resolves in temp root.
@@ -549,8 +536,8 @@ def test_slice_alp_conf_real_v2n101(tmp_path: Path) -> None:
     real_meta = REPO / "metadata"
     shutil.copy(real_meta / "schemas" / "board.schema.json",
                 schemas / "board.schema.json")
-    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
-                schemas / "som-preset-v1.schema.json")
+    shutil.copy(real_meta / "schemas" / "som-preset-v2.schema.json",
+                schemas / "som-preset-v2.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
                 schemas / "soc-spec-v1.schema.json")
     shutil.copy(real_meta / "socs" / "renesas" / "rzv2n" / "n44.json",
@@ -634,8 +621,9 @@ features:
 
 
 def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
-    """End-to-end: loading real E1M-AEN701 preset emits cc3501e, optiga_trust_m,
-    rv3028c7, tmp112, eeprom_24c128; TBD ospi entries absent."""
+    """End-to-end: loading real E1M-AEN701 preset emits cc3501e, rv3028c7,
+    tmp112, eeprom_24c128 (not the DNP optiga_trust_m); TBD ospi entries
+    absent."""
     import alp_orchestrate
     meta = tmp_path / "metadata"
     e1m = meta / "e1m_modules"
@@ -648,8 +636,8 @@ def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
     real_meta = REPO / "metadata"
     shutil.copy(real_meta / "schemas" / "board.schema.json",
                 schemas / "board.schema.json")
-    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
-                schemas / "som-preset-v1.schema.json")
+    shutil.copy(real_meta / "schemas" / "som-preset-v2.schema.json",
+                schemas / "som-preset-v2.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
                 schemas / "soc-spec-v1.schema.json")
     # AEN SoC JSON for capability resolution.
@@ -680,10 +668,10 @@ def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
     m55_slice = project.cores["m55_hp"]
     conf = _slice_alp_conf(project, m55_slice)
 
-    for chip in ("cc3501e", "optiga_trust_m", "rv3028c7", "tmp112",
-                 "eeprom_24c128"):
+    for chip in ("cc3501e", "rv3028c7", "tmp112", "eeprom_24c128"):
         assert f"CONFIG_ALP_SDK_CHIP_{chip.upper()}=y" in conf, (
             f"missing CONFIG_ALP_SDK_CHIP_{chip.upper()}=y for AEN701")
+    assert "CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M" not in conf
 
     assert "CONFIG_ALP_SDK_CHIP_TBD" not in conf
     assert "SoM-intrinsic chip drivers" in conf
@@ -809,30 +797,27 @@ def test_slice_alp_conf_iot_tls_only_emits_network_base(
     NETWORKING/NET_SOCKETS, which previously only the wifi/mqtt branches
     emitted, so a TLS-only slice silently resolved TLS_CREDENTIALS to n.
 
-    Runs against `_synthetic_nx9101_root`'s scratch metadata root
-    (#1025: the real E1M-NX9101 is refused outright before this
-    slice-emission logic is ever reached -- see that helper's
-    docstring)."""
+    Runs against `_synthetic_tbd_mailbox_root`'s scratch metadata root."""
     import alp_orchestrate
 
-    meta = _synthetic_nx9101_root(tmp_path)
+    meta = _synthetic_tbd_mailbox_root(tmp_path)
     body = """
 som:
-  sku: E1M-NX9101
+  sku: E1M-AEN898
 
 libraries:
   - name: mbedtls
-    cores: [m33]
+    cores: [m55_hp]
 
 cores:
-  m33:
+  m55_hp:
     os: zephyr
-    app: ./m33
+    app: ./m55_hp
     iot: { tls: true }
 """
     path = _write_board(tmp_path, body)
     project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
-    conf = _slice_alp_conf(project, project.cores["m33"])
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
 
     assert "CONFIG_NETWORKING=y" in conf
     assert "CONFIG_NET_IPV4=y" in conf
@@ -905,31 +890,29 @@ def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
     """A SoM whose wireless provider is still TBD emits the generic Zephyr
     networking / MQTT / TLS / BLE gates rather than a false provider.
 
-    Runs against `_synthetic_nx9101_root`'s scratch metadata root
-    (#1025: the real E1M-NX9101 is refused outright before this
-    slice-emission logic is ever reached -- see that helper's
-    docstring); the synthetic preset's `on_module.wifi_ble: TBD` is
-    what this test actually exercises, same as the real one's."""
+    Runs against `_synthetic_tbd_mailbox_root`'s scratch metadata root;
+    the synthetic preset's `on_module.wifi_ble: TBD` is what this test
+    actually exercises."""
     import alp_orchestrate
 
-    meta = _synthetic_nx9101_root(tmp_path)
+    meta = _synthetic_tbd_mailbox_root(tmp_path)
     body = """
 som:
-  sku: E1M-NX9101
+  sku: E1M-AEN898
 
 libraries:
   - name: mbedtls
-    cores: [m33]
+    cores: [m55_hp]
 
 cores:
-  m33:
+  m55_hp:
     os: zephyr
-    app: ./m33
+    app: ./m55_hp
     iot: { wifi: true, mqtt: true, tls: true, ble: true }
 """
     path = _write_board(tmp_path, body)
     project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
-    conf = _slice_alp_conf(project, project.cores["m33"])
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
 
     for expected in (
         "CONFIG_NETWORKING=y",
@@ -987,3 +970,35 @@ cores:
     assert 'PACKAGECONFIG:append:pn-alp-sdk = " mqtt security"' in conf
 
 
+def _mender_local_conf(tmp_path: Path, tenant: str) -> str:
+    body = f"""
+som:
+  sku: E1M-V2N101
+
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+
+ota:
+  provider: mender
+  server:
+    url: "https://hosted.mender.io"
+    tenant: "{tenant}"
+"""
+    project = load_board_yaml(_write_board(tmp_path, body))
+    return _slice_local_conf(project, project.cores["a55_cluster"])
+
+
+def test_local_conf_mender_tenant_placeholder_not_emitted(tmp_path: Path) -> None:
+    """#2706: a ${NAME} tenant is not expanded by BitBake; emit no assignment."""
+    conf = _mender_local_conf(tmp_path, "${MENDER_TENANT_TOKEN}")
+    assert "MENDER_TENANT_TOKEN ?=" not in conf
+    assert "${MENDER_TENANT_TOKEN}" not in conf
+    assert 'MENDER_SERVER_URL ?= "https://hosted.mender.io"' in conf
+
+
+def test_local_conf_mender_tenant_literal_emitted(tmp_path: Path) -> None:
+    conf = _mender_local_conf(tmp_path, "abc123")
+    assert 'MENDER_TENANT_TOKEN ?= "abc123"' in conf

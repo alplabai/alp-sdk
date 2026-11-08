@@ -22,9 +22,26 @@ The `src/` is intentionally parallel -- everything goes through the SoM-portable
   example's HE overlay enables SoC I2C0, so nothing on the HP core touches
   the same controller.
 
+## Build
+
+From this directory, or from your own copy of it:
+
 ```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```bash
+# writes examples/aen/aen-secure-element-sign/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/aen/aen-secure-element-sign
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-    examples/aen/aen-secure-element-sign
+    examples/aen/aen-secure-element-sign -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

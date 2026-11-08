@@ -38,7 +38,7 @@ extern "C" {
  * docs/release-policy.md.  Rewritten by scripts/bump_version.py.
  */
 #define ALP_VERSION_MAJOR 0  /**< SDK major version (ABI-breaking changes). */
-#define ALP_VERSION_MINOR 16 /**< SDK minor version (additive ABI changes). */
+#define ALP_VERSION_MINOR 18 /**< SDK minor version (additive ABI changes). */
 #define ALP_VERSION_PATCH 0  /**< SDK patch version (fixes, no surface change). */
 
 /**
@@ -49,7 +49,7 @@ extern "C" {
  * `alp_version_string()` below, which returns it verbatim) that can tell an
  * rc build apart from the GA version it targets (#1902).
  */
-#define ALP_VERSION_STRING "0.16.0"
+#define ALP_VERSION_STRING "0.18.0"
 
 /**
  * @brief Encode a MAJOR.MINOR.PATCH triple into one comparable integer.
@@ -124,19 +124,24 @@ extern "C" {
 #define ALP_ABI_STATUS_RPC       ALP_ABI_STABLE /**< <alp/rpc.h>. */
 
 /* Experimental classes -- may change in any minor release. */
-#define ALP_ABI_STATUS_STORAGE    ALP_ABI_EXPERIMENTAL /**< <alp/storage.h>. */
-#define ALP_ABI_STATUS_USB        ALP_ABI_EXPERIMENTAL /**< <alp/usb.h>. */
-#define ALP_ABI_STATUS_POWER      ALP_ABI_EXPERIMENTAL /**< <alp/power.h>. */
-#define ALP_ABI_STATUS_CAMERA     ALP_ABI_EXPERIMENTAL /**< <alp/camera.h>. */
-#define ALP_ABI_STATUS_DISPLAY    ALP_ABI_EXPERIMENTAL /**< <alp/display.h>. */
-#define ALP_ABI_STATUS_DSP        ALP_ABI_EXPERIMENTAL /**< <alp/dsp.h>. */
-#define ALP_ABI_STATUS_GPU2D      ALP_ABI_EXPERIMENTAL /**< <alp/gpu2d.h>. */
-#define ALP_ABI_STATUS_TMU        ALP_ABI_EXPERIMENTAL /**< <alp/tmu.h>. */
-#define ALP_ABI_STATUS_MODEL      ALP_ABI_EXPERIMENTAL /**< <alp/model.h>. */
-#define ALP_ABI_STATUS_UPDATE_LOG ALP_ABI_EXPERIMENTAL /**< <alp/update_log.h>. */
-#define ALP_ABI_STATUS_BACKEND    ALP_ABI_EXPERIMENTAL /**< <alp/backend.h>. */
-#define ALP_ABI_STATUS_CAP        ALP_ABI_EXPERIMENTAL /**< <alp/cap.h> + <alp/cap_instance.h>. */
+#define ALP_ABI_STATUS_STORAGE     ALP_ABI_EXPERIMENTAL /**< <alp/storage.h>. */
+#define ALP_ABI_STATUS_USB         ALP_ABI_EXPERIMENTAL /**< <alp/usb.h>. */
+#define ALP_ABI_STATUS_POWER       ALP_ABI_EXPERIMENTAL /**< <alp/power.h>. */
+#define ALP_ABI_STATUS_CAMERA      ALP_ABI_EXPERIMENTAL /**< <alp/camera.h>. */
+#define ALP_ABI_STATUS_DISPLAY     ALP_ABI_EXPERIMENTAL /**< <alp/display.h>. */
+#define ALP_ABI_STATUS_DSP         ALP_ABI_EXPERIMENTAL /**< <alp/dsp.h>. */
+#define ALP_ABI_STATUS_GPU2D       ALP_ABI_EXPERIMENTAL /**< <alp/gpu2d.h>. */
+#define ALP_ABI_STATUS_TMU         ALP_ABI_EXPERIMENTAL /**< <alp/tmu.h>. */
+#define ALP_ABI_STATUS_MODEL       ALP_ABI_EXPERIMENTAL /**< <alp/model.h>. */
+#define ALP_ABI_STATUS_UPDATE_LOG  ALP_ABI_EXPERIMENTAL /**< <alp/update_log.h>. */
+#define ALP_ABI_STATUS_BACKEND     ALP_ABI_EXPERIMENTAL /**< <alp/backend.h>. */
+#define ALP_ABI_STATUS_CAP         ALP_ABI_EXPERIMENTAL /**< <alp/cap.h> + <alp/cap_instance.h>. */
 #define ALP_ABI_STATUS_TEMPERATURE ALP_ABI_EXPERIMENTAL /**< <alp/temperature.h>. */
+#define ALP_ABI_STATUS_I3C         ALP_ABI_EXPERIMENTAL /**< <alp/i3c.h>. */
+#define ALP_ABI_STATUS_JPEG        ALP_ABI_EXPERIMENTAL /**< <alp/jpeg.h>. */
+#define ALP_ABI_STATUS_AHRS        ALP_ABI_EXPERIMENTAL /**< <alp/ahrs.h>. */
+#define ALP_ABI_STATUS_PID         ALP_ABI_EXPERIMENTAL /**< <alp/pid.h>. */
+#define ALP_ABI_STATUS_I2C_REGFILE ALP_ABI_EXPERIMENTAL /**< <alp/i2c_regfile.h>. */
 
 /**
  * @brief Return the SDK release version as a string.
@@ -146,8 +151,10 @@ extern "C" {
  * the SDK is consumed as a shared library and the header used at
  * compile time may be older than the runtime).
  *
- * @return Pointer to a static NUL-terminated "MAJOR.MINOR.PATCH"
- *         string; never NULL.
+ * @return Pointer to a static NUL-terminated string identical to
+ *         @ref ALP_VERSION_STRING, i.e. "MAJOR.MINOR.PATCH", or
+ *         "MAJOR.MINOR.PATCH-rcN" for a release-candidate build; never
+ *         NULL.
  */
 const char *alp_version_string(void);
 

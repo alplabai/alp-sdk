@@ -93,6 +93,11 @@ void fake_rv3028c7_fail_next_write(uint8_t reg, uint8_t val);
  *  armed fault. */
 void fake_rv3028c7_reset(void);
 
+/** Model STATUS (0Eh) as a plain read/write byte, i.e. writing 1 SETS a
+ *  flag, instead of the default write-0-clears / write-1-ignored model.
+ *  Cleared by fake_rv3028c7_reset(). */
+void fake_rv3028c7_set_write1_sets(bool on);
+
 /* ------------------------------------------------------------------ */
 /* fake TCAL9538 / TCA6408A                                            */
 /* ------------------------------------------------------------------ */
@@ -150,6 +155,25 @@ uint32_t fake_ina236_read_count(uint8_t reg);
 void     fake_ina236_reset(void);
 
 /* ------------------------------------------------------------------ */
+/* fake INA228                                                         */
+/* ------------------------------------------------------------------ */
+/* Big-endian 16 / 24 / 40-bit register wire protocol -- see
+ * fake_ina228.c.  get_reg / set_reg take the register's RAW bytes as an
+ * integer (a 24-bit register's value is bits 23:0, so a 20-bit reading
+ * sits in bits 23:4). */
+
+uint64_t fake_ina228_get_reg(uint8_t reg);
+void     fake_ina228_set_reg(uint8_t reg, uint64_t raw);
+uint32_t fake_ina228_write_count(uint8_t reg);
+uint32_t fake_ina228_log_len(void);
+uint8_t  fake_ina228_log_reg(uint32_t idx);
+uint16_t fake_ina228_log_val(uint32_t idx);
+void     fake_ina228_set_absent(bool absent);
+void     fake_ina228_fail_nth(uint32_t n, int neg_errno); /* the Nth transfer from now fails once */
+void     fake_ina228_set_error(int neg_errno); /* every transfer returns it; 0 = answer again */
+void     fake_ina228_reset(void);
+
+/* ------------------------------------------------------------------ */
 /* fake TAS2563                                                        */
 /* ------------------------------------------------------------------ */
 /* Book/page-paged register file -- see fake_tas2563.c.  get_reg /
@@ -199,6 +223,9 @@ void fake_tas2563_fail_write_at(uint8_t book, uint8_t page, uint8_t reg);
 /** Reset registers to their datasheet POR values, clear the write
  *  log, the counters, the book/page selection and any armed fault. */
 void fake_tas2563_reset(void);
+
+/** Value the fake returns for a B0/P1/0x02 read (ROM/tuning select). */
+void fake_tas2563_set_app_mode(uint8_t val);
 
 /* ------------------------------------------------------------------ */
 /* fake GD32G553 supervisor-MCU bridge (PING/GET_VERSION/GET_STATE)    */

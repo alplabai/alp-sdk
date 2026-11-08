@@ -1,9 +1,9 @@
 /* isa.ld -- a32/common/payload.ld with room for the golden-frame buffers:
- * .bss may run to 0x025F0000 (the renderer's DL/bins/stacks MiB-1 tail: it is
- * halted and rebuilds all of it at its next LAUNCH; 0x025FE000, its core-1
- * gate word, stays untouched). */
+ * .bss may run to 0x025E0000 (the renderer's stacks, 0x025C0000..0x025DFFFF: it is
+ * halted and rebuilds them at its next LAUNCH; 0x025E0000, its core-1 gate
+ * word, and FB B from 0x025EA000 stay untouched). */
 ENTRY(_start)
-MEMORY { SRAM1 (rwx) : ORIGIN = 0x02500000, LENGTH = 0xF0000 }
+MEMORY { SRAM1 (rwx) : ORIGIN = 0x02500000, LENGTH = 0xE0000 }
 SECTIONS
 {
 	.image : {

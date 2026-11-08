@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+
+tests:
+  alp_sdk.cloud_sdks.build:
+    # Skipped unless both extras-cloud checkouts exist (see ./Kconfig).
+    filter: CONFIG_CLOUD_SDKS_PRESENT
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - cloud

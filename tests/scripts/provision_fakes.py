@@ -72,6 +72,7 @@ class FakePower(Power):
 
     def on(self) -> None:
         self.events.append("on")
+        self._mark_on()
         self.state = True
         if self.on_hook:
             self.on_hook()
@@ -80,7 +81,7 @@ class FakePower(Power):
         self.events.append("off")
         self.state = False
 
-    def cycle(self, off_s: float = 3.0) -> None:  # no sleeping in tests
+    def cycle(self, off_s: float = 3.0, console=None) -> None:  # no sleeping in tests
         self.off()
         self.on()
 
@@ -123,6 +124,16 @@ class FakeProbe(Probe):
     def reset_run(self) -> None:
         self.sessions += 1
         self.calls.append(("reset_run",))
+
+    def erase(self, addr: int, size: int) -> None:
+        self.sessions += 1
+        self.calls.append(("erase", addr, size))
+        for base in list(self.memory):          # every stored range overlapping the erased one
+            data = self.memory.pop(base)
+            if base < addr:
+                self.memory[base] = data[: addr - base]
+            if base + len(data) > addr + size:
+                self.memory[addr + size] = data[addr + size - base :]
 
 
 class FakeLinux:

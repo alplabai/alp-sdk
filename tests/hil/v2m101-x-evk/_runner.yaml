@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Runner defaults for E1M-V2M101 (V2N101 silicon + on-module DEEPX
-# DX-M1 NPU) + E1M-X-EVK.  Inherits the portable spec set from
-# tests/hil/_common/.  No SoM-specific specs exist in this dir yet.
-# TODO(#1160): not yet written — v2n-m1-deepx-inference, DEEPX
-# 0.75 V rail.
+# Runner defaults for E1M-V2M101 + E1M-X-EVK.  Inherits the portable spec set
+# from tests/hil/_common/.  This dir carries its own ssh-run specs, derived
+# from v2m103-x-evk and NOT BENCH-VERIFIED on a E1M-V2M101 unit (the SoM preset
+# populates the same hardware).  Omitted: v2m103-chosen-sku and v2m103-eeprom-manifest (assert the V2M103 SKU string).  DX-M1 specs apply: the preset lists npu: deepx_dxm1.
 
 schema_version: 1
 board: alp_e1m_v2m101_m33_sm

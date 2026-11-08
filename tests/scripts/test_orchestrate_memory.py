@@ -25,7 +25,7 @@ from _orchestrate_support import (              # noqa: E402
     V2N_HAPPY,
     _scratch_metadata_root,
     _synthetic_aen_unresolved_base_root,
-    _synthetic_nx9101_root,
+    _synthetic_tbd_mailbox_root,
     _write_board,
 )
 
@@ -35,20 +35,24 @@ from alp_orchestrate import (                       # noqa: E402
 )
 
 
-# NX9101 still has TBD mailbox metadata; any ipc carve-out must
-# surface that as a clear blocked entry.
-NX_TBD = """
+# A SoM with TBD mailbox metadata (the synthetic preset from
+# `_synthetic_tbd_mailbox_root`); any ipc carve-out must surface that
+# as a clear blocked entry.
+TBD_MAILBOX = """
 som:
-  sku: E1M-NX9101
+  sku: E1M-AEN898
 
 cores:
-  m33:
+  m55_hp:
     os: zephyr
-    app: ./m33
+    app: ./m55_hp
+  m55_he:
+    os: zephyr
+    app: ./m55_he
 
 ipc:
   - kind: rpmsg
-    endpoints: [m33, a55_cluster]
+    endpoints: [m55_hp, m55_he]
     carve_out_kb: 64
     name: alp_test_rpmsg
 """
@@ -146,20 +150,13 @@ def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
     see the gap; the actual slice-build step trips on the C header's
     `#error` directive.
 
-    This is the mailbox-controller-TBD placeholder (a genuinely
-    different `TBD` than #1025's hw_rev `status:` gate -- E1M-NX9101's
-    real `metadata/e1m_modules/E1M-NX9101.yaml` still carries both).
-    #1025 refuses the real E1M-NX9101 preset outright before
-    `resolve_carve_outs` is ever reached (its only hw_rev, imx93 r1,
-    is `status: tbd`), and there is no second hw_rev to pick and no
-    other SoM with this same mailbox-TBD placeholder to swap to -- so
-    this runs against `_synthetic_nx9101_root`'s scratch metadata root
-    (see its docstring for why the #1025 gate is a no-op there without
-    this being a claim about the real E1M-NX9101's buildability)."""
+    This is the mailbox-controller-TBD placeholder. No shipped preset
+    carries it, so this runs against `_synthetic_tbd_mailbox_root`'s
+    scratch metadata root."""
     import alp_orchestrate
 
-    meta = _synthetic_nx9101_root(tmp_path)
-    path = _write_board(tmp_path, NX_TBD)
+    meta = _synthetic_tbd_mailbox_root(tmp_path)
+    path = _write_board(tmp_path, TBD_MAILBOX)
     project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
     resolved = resolve_carve_outs(project)
     assert len(resolved) == 1
@@ -167,7 +164,7 @@ def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
     assert entry.status == "blocked"
     assert entry.reason is not None
     assert "TBD" in entry.reason
-    assert "E1M-NX9101" in entry.reason
+    assert "E1M-AEN898" in entry.reason
 
 
 @pytest.mark.parametrize(
@@ -269,30 +266,22 @@ def test_resolve_carve_outs_routes_an_unresolved_base_through_the_full_pipeline(
     assert "write_authority is 'composite'" in entry.reason
 
 
-def test_resolve_carve_outs_aen801_stays_blocked_after_1069_memory_map(
+def test_resolve_carve_outs_aen801_lands_in_sram_ipc_not_mram(
     tmp_path: Path,
 ) -> None:
-    """#1069 gave E1M-AEN801 a real `memory_map:` (mcuboot/he_slot0/
-    hp_slot0/reserved/storage/mram_main), but an m55_hp+m55_he rpmsg
-    carve-out MUST still land `status: blocked`: the five fine-grained
-    regions are MRAM (flash-class), not RAM, and are marked
-    `carveout: false` so resolve_carve_outs() can't silently place a
-    shared-memory ring inside non-volatile flash just because the region
-    has a real `base` (needed only for the board generator's DTS
-    partition table, see metadata/e1m_modules/E1M-AEN801.yaml). The only
-    other both-core-accessible region, `mram_main`, is ALSO excluded --
-    its `base` resolved to `0x80000000` (#2053), so its extent equals the
-    aperture exactly (the whole-device alias) and it is `flash`-class
-    too, not the `write_authority`-keyed unresolved-base refusal it used
-    to hit while its `base` was still `"TBD"`."""
+    """E1M-AEN801's MRAM regions (mcuboot/he_slot0/hp_slot0/reserved/
+    storage/atoc/mram_main) are flash-class and ineligible; an
+    m55_hp+m55_he carve-out must land in the SRAM0 `sram_ipc` row
+    (metadata/e1m_modules/E1M-AEN801.yaml), never in non-volatile
+    flash."""
     path = _write_board(tmp_path, AEN801_MAPPED)
     project = load_board_yaml(path)
     resolved = resolve_carve_outs(project)
     assert len(resolved) == 1
     entry = resolved[0]
-    assert entry.status == "blocked"
-    assert entry.reason is not None
-    assert "mram_main" in entry.reason
+    assert entry.status == "ok", entry.reason
+    assert entry.region == "sram_ipc"
+    assert 0x023E0000 <= entry.base < 0x023F0000
 
 
 # ---------------------------------------------------------------------

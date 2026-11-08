@@ -59,6 +59,7 @@
 #include "dave_registermap.h"
 
 #include <zephyr/cache.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/barrier.h>
 
 #if defined(CONFIG_D1_MALLOC_D0LIB)
@@ -300,7 +301,10 @@ static void _cache_post(const alp_gpu2d_surface_t *dst)
  * until the next op -- bench-observed as every result arriving one call late.
  * Starting and ending an empty frame kicks this op's buffer and waits for it.
  */
-static void _submit_and_wait(d2_device *dev)
+/** Upper bound on the engine write-back drain after a submitted op. */
+#define DAVE2D_IDLE_TIMEOUT_MS 100
+
+static alp_status_t _submit_and_wait(d2_device *dev)
 {
 	d2_endframe(dev);
 	/* The display list is Normal memory the CPU just wrote; the kick is a
@@ -320,8 +324,13 @@ static void _submit_and_wait(d2_device *dev)
 	 */
 	d1_device *hw = d2_level1interface(dev);
 
+	/* Bounded: a wedged or bus-faulted engine must not hang the caller. */
+	const int64_t deadline = k_uptime_get() + DAVE2D_IDLE_TIMEOUT_MS;
+
 	while ((d1_getregister(hw, D1_DAVE2D, D2_STATUS) & (D2C_BUSY_ENUM | D2C_BUSY_WRITE)) != 0) {
+		if (k_uptime_get() > deadline) return ALP_ERR_TIMEOUT;
 	}
+	return ALP_OK;
 }
 
 static alp_status_t dave2d_open(alp_gpu2d_backend_state_t *state, alp_capabilities_t *caps_out)
@@ -387,10 +396,10 @@ static alp_status_t dave2d_fill_rect(alp_gpu2d_backend_state_t *state,
 	             (d2_point)(x << 4),
 	             (d2_point)(y << 4),
 	             (d2_width)(w << 4),
-	             (d2_width)(h << 4)); /* 16.4 fixed point */
-	_submit_and_wait(dev);            /* submit-and-wait per the v0.5 API contract */
+	             (d2_width)(h << 4));        /* 16.4 fixed point */
+	alp_status_t ws = _submit_and_wait(dev); /* submit-and-wait per the v0.5 API contract */
 	_cache_post(dst);
-	return ALP_OK;
+	return ws;
 }
 
 static alp_status_t dave2d_blit(alp_gpu2d_backend_state_t *state,
@@ -445,9 +454,9 @@ static alp_status_t dave2d_blit(alp_gpu2d_backend_state_t *state,
 	            (d2_point)(dx << 4),
 	            (d2_point)(dy << 4),
 	            0);
-	_submit_and_wait(dev);
+	alp_status_t ws = _submit_and_wait(dev);
 	_cache_post(dst);
-	return ALP_OK;
+	return ws;
 }
 
 static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
@@ -524,9 +533,9 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
 	            (d2_point)(dx << 4),
 	            (d2_point)(dy << 4),
 	            d2_bf_usealpha);
-	_submit_and_wait(dev);
+	alp_status_t ws = _submit_and_wait(dev);
 	_cache_post(dst);
-	return ALP_OK;
+	return ws;
 }
 
 static void dave2d_close(alp_gpu2d_backend_state_t *state)

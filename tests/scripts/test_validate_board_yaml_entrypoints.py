@@ -52,10 +52,7 @@ def _combined(proc: subprocess.CompletedProcess[str]) -> str:
 def test_reports_per_core_peripheral_warning(
     tmp_path: Path,
 ) -> None:
-    # E1M-AEN801, not E1M-NX9101: NX9101's only hw_rev (imx93 r1) is
-    # `status: tbd`, so it is refused outright by the hw_rev-buildable
-    # gate (#1025) before this test's peripheral-warning path is even
-    # reached (exit 5, not 0).  'emmc' has no key (or `emmc_lp`) at all
+    # 'emmc' has no key (or `emmc_lp`) at all
     # in metadata/socs/alif/ensemble/e8.json -- board-side, not a direct
     # SoC cap -- so it reproduces the same false-positive ALP-B010 this
     # test pins.

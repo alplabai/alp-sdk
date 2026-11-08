@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * ALP E1M-V2N SoM -- GIC SPI of the CM33 -> CA55 OpenAMP doorbell.
+ *
+ *   404  MHU-B SWINT unit 12 (INTID 436), the path bench-proven in #697.
+ *        Default until the 385 path is proven on silicon.
+ *   385  Renesas' documented rsp_ch8_ns (MHU-B RSP channel 8, level-high).
+ *
+ * The linux-renesas bbappend rewrites the number below when
+ * ALP_V2N_DOORBELL_SPI = "385" is set.  The SAME choice must be made on the
+ * CM33 (CONFIG_ALP_V2N_DOORBELL_RSP_CH8) and in libalp_sdk
+ * (ALP_SDK_V2N_DOORBELL_RSP_CH8); the register offsets for both live in
+ * include/alp/protocol/v2n_mhu_doorbell.h.
+ */
+#define ALP_V2N_DOORBELL_SPI 404

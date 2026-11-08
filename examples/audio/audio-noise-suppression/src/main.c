@@ -52,11 +52,11 @@
  *      on that same M33 slice (CPU TFLM kernels), inside the
  *      human-perceivable glass-to-glass threshold.
  *   2. "Same source for the desktop / conferencing rig?"  Yes --
- *      flipping `som.sku` to a V2H / V2N-M1 retargets the
- *      inference backend without touching app code.
+ *      flipping `som.sku` to a V2N-M1 keeps CPU TFLM on
+ *      this M33 slice; only an A55/Yocto app reaches the DX-M1.
  *   3. "Where does the SW fallback live?"  CMSIS-DSP on the host
- *      CPU.  On native_sim that's the reference C kernels, on a
- *      real V2N A55 cluster the Neon path.  The portable
+ *      CPU.  On native_sim that's the reference C kernels; on an
+ *      A55/Yocto build (a separate project) it is the Neon path.  The portable
  *      <alp/dsp.h> chain swap-in costs the customer zero lines.
  *
  *
@@ -139,9 +139,7 @@ LOG_MODULE_REGISTER(noise_suppress, LOG_LEVEL_INF);
  * model
  *     #include "models/rnnoise_v06_int8.h"
  * The 1-byte stub is enough for the v0.5 framing path -- on
- * native_sim alp_inference_open returns NULL anyway; on a real
- * V2N-M1 the loader-emitted backend tolerates a stub model for
- * the bring-up scenario.
+ * native_sim alp_inference_open returns NULL anyway.
  */
 static const uint8_t s_model[] = { 0x00 };
 

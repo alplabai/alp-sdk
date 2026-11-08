@@ -22,7 +22,7 @@ image plus the Wi-Fi host driver + NimBLE host (sized for a bridge peripheral).
 
 **Production images are signed by the HSM**, which holds the production root key. The
 HSM is *not* on a dev/bench machine, so signing is the one step a developer cannot do
-locally. Bench/staging uses the **Alp VALIDATION** key (`deploy_validate.ps1`); those
+locally. Bench/staging uses the **Alp VALIDATION** key (`deploy_validate.sh`); those
 units are validation/staging only and are **NOT production-shippable** (rooted to the
 validation key, not the HSM).
 
@@ -70,9 +70,8 @@ below). Each step is one `simplelink-wifi-toolbox` (TI Wi-Fi toolbox) invocation
    Alif console — `alp companion ver`, `alp companion wifi scan`,
    `alp companion ble enable`, `alp companion ble scan`.
 
-The bench helper `fib_program_warm.ps1 -Version <X.Y.Z.W>` chains steps 2–4; bump the
-version on **every** flash. Keys live outside the repo (never committed); reference
-them by role, not path.
+Bump the image version on **every** flash; keys live outside the repo (never
+committed); reference them by role, not path.
 
 > Validation-key images are **staging only** — NOT production-shippable (rooted to the
 > VALIDATION key, not the HSM). Production uses `package_cc3501e_prod.ps1` + the HSM.
@@ -103,7 +102,7 @@ dropped ~2 s then returned) → the swapped image self-accepted and **persisted 
 cold POR** (no rollback). The `OTA_STATUS reserved[0]` byte surfaces the swap-reboot rc
 (0 = success, non-zero = refused).
 
-## Status / open items (2026-06-24)
+## Status / open items (2026-07-10)
 
 - ✅ Full firmware (Wi-Fi+BLE+bridge+OTA) builds + links (`-Ble`, 0 errors).
 - ✅ **Wi-Fi SCAN ON-AIR validated** (2026-06-22, warm-programmed v0.0.161.0): `wifi scan`

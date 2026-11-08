@@ -1,4 +1,5 @@
-"""Versioned machine diagnostics format (JSON + SARIF) for `alp validate`.
+"""Versioned machine diagnostics format (JSON + SARIF) for board.yaml validation
+(consumed by scripts/check_diagnostic_schema.py).
 
 The Rust-style `render()` in `alp_cli.diagnostic` is the HUMAN renderer and
 is untouched by this module. This module is the MACHINE-consumable sibling

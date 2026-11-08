@@ -1,5 +1,7 @@
 # `alp model` machine-readable envelope — Implementation Plan (Plan A, alp-sdk foundation)
 
+> **Status (2026-10-08): Superseded** — the `scripts/alp_cli/model.py` surface was retired (#1727); the `alp model` engine and its envelope now live in tan (`python/tan/model/`, ADR 0028).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the `alp model` CLI emit machine-readable JSON (`--format json`) for `build`, and add `list` / `doctor` / `info` subcommands, so a downstream wrapper (`tan model *`) can surface model compilation + toolchain state through its envelope.

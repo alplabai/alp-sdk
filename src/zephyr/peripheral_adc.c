@@ -191,10 +191,36 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 		alp_z_set_last_error(s);
 		return NULL;
 	}
-	s = gd32g553_adc_stream_begin(
-	    ctx, (uint8_t)slot, (uint8_t)cfg->channel_id, cfg->sample_rate_hz);
+	/* v0.15 link with ADC_STREAM2 granted: BEGIN2 (lossless accounting,
+	 * the deepest ring the firmware grants at watermark 0).  This API is poll-driven, so no
+	 * watermark events are requested.  Otherwise the legacy BEGIN, which
+	 * the firmware keeps unchanged.  The choice is per stream and sticks
+	 * for its life: a BEGIN2 stream answers only READ2. */
+	const bool                  use_stream2 = (ctx->granted & GD32G553_LINK_FEAT_ADC_STREAM2) != 0u;
+	gd32g553_adc_stream2_info_t info        = { 0 };
+	bool                        unscaled    = false;
+	if (use_stream2) {
+		s = gd32g553_adc_stream_begin2(
+		    ctx, (uint8_t)slot, (uint8_t)cfg->channel_id, cfg->sample_rate_hz, 0u, &info);
+		if (s == ALP_OK && info.full_scale == 0u) {
+			/* A reply with no scaling cannot be converted to millivolts.
+			 * The GD32 stream is live: roll it back below, after the
+			 * supervisor is released, through the guarded path. */
+			unscaled = true;
+		}
+	} else {
+		s = gd32g553_adc_stream_begin(
+		    ctx, (uint8_t)slot, (uint8_t)cfg->channel_id, cfg->sample_rate_hz);
+	}
 	alp_z_v2n_supervisor_release();
 
+	if (unscaled) {
+		/* Free the slot only if the GD32 confirms the stream stopped; an
+		 * unconfirmed END keeps it reserved (see bridge_stream_end_and_free). */
+		(void)bridge_stream_end_and_free((uint8_t)slot);
+		alp_z_set_last_error(ALP_ERR_IO);
+		return NULL;
+	}
 	if (s != ALP_OK) {
 		bridge_stream_free_slot((uint8_t)slot);
 		alp_z_set_last_error(s);
@@ -216,6 +242,9 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 	h->channel        = (uint8_t)cfg->channel_id;
 	h->channel_id     = cfg->channel_id;
 	h->sample_rate_hz = cfg->sample_rate_hz;
+	h->stream2        = use_stream2;
+	h->full_scale     = info.full_scale;
+	h->vref_mv        = info.vref_mv;
 	/* Publish LAST, with release semantics: alp_handle_op_enter()'s
 	 * acquire-load of `lifecycle` is what a reader pairs with, so
 	 * anything that observes OPEN also observes stream_id/channel/rate
@@ -246,17 +275,47 @@ adc_stream_read_mv_body(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size
 	if (stream->via_bridge) {
 		/* Backend caps per-call at GD32G553_BRIDGE_ADC_STREAM_READ_MAX
          * (= 32); callers wanting more loop in their own thread. */
-		const uint8_t want     = (cap > (size_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX)
-		                             ? (uint8_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX
-		                             : (uint8_t)cap;
-		uint8_t       got_this = 0u;
+		uint8_t want     = (cap > (size_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX)
+		                       ? (uint8_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX
+		                       : (uint8_t)cap;
+		uint8_t got_this = 0u;
 
 		gd32g553_t  *ctx = NULL;
 		alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
 		if (s != ALP_OK) return s;
-		s = gd32g553_adc_stream_read(ctx, stream->stream_id, want, &got_this, mv);
+		if (!stream->stream2) {
+			s = gd32g553_adc_stream_read(ctx, stream->stream_id, want, &got_this, mv);
+			alp_z_v2n_supervisor_release();
+			if (s != ALP_OK) return s;
+			*got = got_this;
+			return ALP_OK;
+		}
+
+		/* v0.15 READ2: raw codes straight into the caller's buffer, then
+		 * scaled to millivolts in place.  The reply ceiling follows the
+		 * negotiated link (28 codes at 65 B, 121 with BIG_FRAME). */
+		const size_t read2_max = ((size_t)ctx->max_payload - GD32G553_READ2_HDR_BYTES) / 2u;
+		if (read2_max != 0u && want > read2_max) want = (uint8_t)read2_max;
+		uint32_t first_index = 0u;
+		uint32_t dropped     = 0u;
+		s                    = gd32g553_adc_stream_read2(
+		    ctx, stream->stream_id, want, &first_index, &dropped, &got_this, mv);
 		alp_z_v2n_supervisor_release();
 		if (s != ALP_OK) return s;
+		if (dropped == GD32G553_READ2_DROPPED_UNKNOWN) {
+			/* Discontinuity of unknown length (ROVF recovery, DSP gap): the
+			 * stream is intact but the sample sequence is not.  The ONLY
+			 * condition this API still reports as BUSY; a known drop count
+			 * (overrun) delivers the freshest samples with ALP_OK. */
+			return ALP_ERR_BUSY;
+		}
+		/* code -> mV: min(code, full_scale) * vref_mv / full_scale, integer
+		 * truncation -- bit-identical to the legacy STREAM_READ maths. */
+		for (uint8_t i = 0u; i < got_this; ++i) {
+			uint32_t code = mv[i];
+			if (code > stream->full_scale) code = stream->full_scale;
+			mv[i] = (uint16_t)((code * stream->vref_mv) / stream->full_scale);
+		}
 		*got = got_this;
 		return ALP_OK;
 	}
@@ -712,7 +771,13 @@ adc_spectrum_read_bins_body(alp_adc_spectrum_t *spec, float *bins, size_t cap, s
 		uint16_t     raw[GD32G553_BRIDGE_ADC_STREAM_READ_MAX];
 		size_t       got_raw = 0u;
 		alp_status_t s       = alp_adc_stream_read_mv(spec->stream, raw, want, &got_raw);
-		if (s != ALP_OK) return s;
+		if (s != ALP_OK) {
+			/* ALP_ERR_BUSY from the stream read is a discontinuity of unknown
+			 * length: the samples already accumulated and the next ones are
+			 * not one contiguous block, so drop the partial block. */
+			if (s == ALP_ERR_BUSY) spec->accumulated = 0u;
+			return s;
+		}
 		if (got_raw == 0u) {
 			/* Backend ring was empty; caller should poll again
              * later.  Not an error -- partial accumulation persists

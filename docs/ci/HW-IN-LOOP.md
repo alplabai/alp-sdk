@@ -128,9 +128,17 @@ new SoM's bench coverage means:
 
 ## Future boards
 
-Coverage for V2N / V2N-M1 / i.MX 93 follows the same bench-run
+Coverage for V2N / V2N-M1 follows the same bench-run
 contract above — their board dirs already exist under `tests/hil/`
 (`v2n101-x-evk`, `v2n102-x-evk`, `v2n103-x-evk`, `v2m101-x-evk`,
-`v2m102-x-evk`, `v2m103-x-evk`, `nx9101-evk`) — no separate runner-label scheme to design; the
+`v2m102-x-evk`, `v2m103-x-evk`) — no separate runner-label scheme to design; the
 constraint (serial, reservation-gated, license-gated tooling) is the
 same for every board on this bench.
+
+Each V2N/V2M SKU has its own ssh-run spec set in its board dir
+(`v2n101-x-evk/` .. `v2n103-x-evk/`, `v2m101-x-evk/` .. `v2m103-x-evk/`),
+limited to hardware that SKU's SoM preset populates.  Only the V2M103 set
+is bench-derived; the other SKUs' specs are copies marked NOT BENCH-VERIFIED
+and skip the V2M103-pinned values (kernel release, PHY ID, EXT_CSD, MAC,
+EEPROM manifest).  Nothing includes another SKU's dir automatically, so
+target the SKU's own dir explicitly.

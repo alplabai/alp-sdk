@@ -26,6 +26,7 @@ tests:
     # reaches hardware. Real provisioning passes an operator-generated blob from
     # scripts/program_eeprom.py.
     extra_args:
+      - EXTRA_CONF_FILE=generated/alp.conf
       - ALP_MANIFEST_BIN=ci-fixture-manifest.bin
 
   alp_sdk.examples.aen.eeprom_provision.secure_page_write.native_sim:
@@ -45,6 +46,7 @@ tests:
     # still required to configure (CMakeLists.txt does not make it
     # conditional on mode), even though mode 2's C code never references it.
     extra_args:
+      - EXTRA_CONF_FILE=generated/alp.conf
       - ALP_MANIFEST_BIN=ci-fixture-manifest.bin
       - ALP_SECURE_PAGE_BIN=ci-fixture-secure-page.bin
 
@@ -65,6 +67,7 @@ tests:
     # cold-power-cycle read-back per docs/som-batch-provisioning-procedure.md
     # #7 (alp-sdk-internal).
     extra_args:
+      - EXTRA_CONF_FILE=generated/alp.conf
       - ALP_MANIFEST_BIN=ci-fixture-manifest.bin
       - ALP_SECURE_PAGE_BIN=ci-fixture-secure-page.bin
       - ALP_LOCK_SECURE_PAGE=1

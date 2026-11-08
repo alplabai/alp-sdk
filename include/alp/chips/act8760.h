@@ -383,8 +383,13 @@ alp_status_t act8760_rail_set_voltage_mv(act8760_t *ctx, act8760_rail_t rail, ui
  * @return ALP_OK; ALP_ERR_NOT_READY if not initialised; ALP_ERR_INVAL on
  *         an invalid rail; ALP_ERR_NOSUPPORT if no table is installed, the
  *         rail is not enable-writable, or @p enable is false on a
- *         `critical` rail; ALP_ERR_IO if the read-back differs; the bus
- *         status on I2C failure.
+ *         `critical` rail, or @p enable is true, a window is installed
+ *         and BAND_SEL aliases VSET0 (Buck1/2/7);
+ *         ALP_ERR_OUT_OF_RANGE if @p enable is true, a window is
+ *         installed, and the live VSET0 setpoint lies outside it;
+ *         ALP_ERR_IO if the read-back differs; the bus status on I2C
+ *         failure.  The enable-time window rule is the shared one in
+ *         pmic_rail_limit.h.
  */
 alp_status_t act8760_rail_set_enable(act8760_t *ctx, act8760_rail_t rail, bool enable);
 

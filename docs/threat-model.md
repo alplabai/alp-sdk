@@ -104,8 +104,9 @@ Cannot touch the physical device or its supply chain.
 - MQTT runs over TLS 1.2/1.3 with pinned CA path.  Default
   bundle: `/etc/ssl/certs`.  Insecure flag exists but is
   documented as test-only.
-- BLE adv parser fuzzed under `tests/fuzz/ble_adv_parser_fuzz.c`
-  against the length-overrun CVE class.
+- Advertising-data parsing is not SDK code: it is the Zephyr BLE host
+  stack (or BlueZ on Yocto), so the SDK has no BLE adv parser of its
+  own to fuzz and relies on those upstreams for that surface.
 - Mender artefact verified against the bootloader's compiled-in
   pub key before swap-using-scratch commit.
 
@@ -141,8 +142,10 @@ supervisor MCU) or pretend to be a slave.
 
 **Mitigations:**
 
-- OPTIGA APDU parser fuzzed under
-  `tests/fuzz/optiga_apdu_fuzz.c`.
+- OPTIGA APDU/response decoding is done by the Infineon vendor
+  library, not SDK code (`chips/optiga_trust_m` passes APDUs
+  through), so there is no SDK-side parser fuzzed; the SDK relies on
+  the vendor library for that surface.
 - GD32 bridge framing fuzzed under
   `tests/fuzz/gd32_bridge_frame_fuzz.c`.
 - EEPROM manifest carries a CRC32; runtime
@@ -165,7 +168,7 @@ CPU, dump RAM, reflash.
 - Production-side: lock the SWD interface via the SoC's
   debug-disable fuse + the secure-boot lock register.  See
   the per-SoM bring-up docs (e.g.
-  [`bring-up-v2n.md`](bring-up-v2n.md) "Production lock-down").
+  [`bring-up-v2n.md`](bring-up-v2n.md)).
 - Pre-production / dev builds: SWD open.  Customers should
   blow the lock fuse for production runs.
 
@@ -215,7 +218,7 @@ defend (e.g. `<alp/e1m_pinout.h>` is just constants) marked n/a.
 | `<alp/security.h>` | All five | Wraps MbedTLS PSA Crypto + OPTIGA TM; secret material wiped via `OPENSSL_cleanse` on Yocto, `psa_destroy_key` on Zephyr |
 | `<alp/inference.h>` | Supply-chain (Vela model swap) | Model-bytes integrity is application-owned; SDK signs the firmware containing it via MCUboot |
 | `<alp/mproc.h>` (IPC framing) | Cross-core peer-compromise | Envelope decoder fuzzed under `tests/fuzz/mproc_frame_fuzz.c` |
-| `<alp/rpc.h>` (framed RPC over OpenAMP/RPMsg) | **Availability**: a compromised or crashed peer core going silent was indistinguishable from an idle one -- `alp_rpc_send()` kept returning `ALP_OK` into a dead vring forever (issue #1643), and the caller had no way to detect or react to the loss | Method-name framing is fixed-shape (≤32-byte NUL-terminated header, no SDK-side parse of the opaque application payload -- same posture as `<alp/mproc.h>`).  `alp_rpc_set_link_callback` / `alp_rpc_link_state` (v0.17) surface the transport's own bind/unbind/error signal as `ALP_RPC_LINK_DOWN`/`_UP`/`_LOST`; once `_LOST` is observed, `alp_rpc_send()` (and a NEW `alp_rpc_call()`, at entry) rejects with `ALP_ERR_NOT_READY` instead of silently accepting into the dead queue.  **Coverage differs by backend in this revision**: fully wired on the Linux/A-class chardev backend (`yocto_drv.c`); on Zephyr/M-class the pinned `ipc_service` RPMsg static-vrings backend reports `_UP` but never invokes the `unbound`/`error` callbacks this code wires, so `_LOST` is NOT observable there yet; V2N's own A55 selects the still-unwired `yocto_uio_drv.c` and is in the same UP-only position -- see `include/alp/rpc.h`'s `@par Link liveness` block.  Re-establishing the link (close + reopen) stays application-owned -- the SDK reports loss, it does not auto-reconnect |
+| `<alp/rpc.h>` (framed RPC over OpenAMP/RPMsg) | **Availability**: a compromised or crashed peer core going silent was indistinguishable from an idle one -- `alp_rpc_send()` kept returning `ALP_OK` into a dead vring forever (issue #1643), and the caller had no way to detect or react to the loss | Method-name framing is fixed-shape (≤32-byte NUL-terminated header, no SDK-side parse of the opaque application payload -- same posture as `<alp/mproc.h>`).  `alp_rpc_set_link_callback` / `alp_rpc_link_state` (v0.17) surface the transport's own bind/unbind/error signal as `ALP_RPC_LINK_DOWN`/`_UP`/`_LOST`; once `_LOST` is observed, `alp_rpc_send()` (and a NEW `alp_rpc_call()`, at entry) rejects with `ALP_ERR_NOT_READY` instead of silently accepting into the dead queue.  **Coverage differs by backend in this revision**: fully wired on the Linux/A-class chardev backend (`yocto_drv.c`); on the AEN M55 cores the pinned `ipc_service` RPMsg static-vrings backend reports `_UP` but never invokes the `unbound`/`error` callbacks this code wires, so `_LOST` is NOT observable there yet, while the V2N/V2M Cortex-M33 backend (`zephyr/drivers/ipc/ipc_alp_v2n_rpmsg.c`) calls `unbound` on an A55-requested link reset (build-verified, bench pending); V2N's own A55 selects the still-unwired `yocto_uio_drv.c` and is in the same UP-only position -- see `include/alp/rpc.h`'s `@par Link liveness` block.  Re-establishing the link (close + reopen) stays application-owned -- the SDK reports loss, it does not auto-reconnect |
 | `<alp/mproc.h>` `alp_mproc_boot_core` (v0.9) | **Privilege**: releasing a peer core with an attacker-controlled `entry_addr` is arbitrary code execution on that core | Boot-authority (SE / boot firmware) validates the request; `ALP_CORE_SELF` rejected at the API; the entry image is expected to be covered by the platform's secure-boot chain (MCUboot / SETOOLS ATOC) — the SDK call releases a core, it does not bypass image authentication.  Callers run in the firmware trust domain (no unprivileged-caller path exists on the supported RTOS targets) |
 | `<alp/hw_info.h>` | Local I²C 3.3 (manifest rewrite) | CRC32 verification on read; production WP strap on the EEPROM |
 | `<alp/hw_info.h>` SoC identity (`alp_soc_info_read` / `alp_soc_secure_fw_ping`, v0.9) | Spoofed / compromised secure-fw ("SE") responses over the service transport; DoS by an unresponsive controller | Bounded round-trips (`ALP_ERR_NOT_READY` instead of hangs); `out` zero-filled + build-time `soc_ref` stamped even on failure; transport faults surface `ALP_ERR_IO`.  Identity fields are **informational** — the SDK never gates an authorisation decision on them; anything security-critical stays with the secure-boot chain |

@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Sat, 3 Oct 2026 10:00:00 +0200
+Subject: [PATCH] drpai: require CAP_SYS_RAWIO for the register ioctls
+
+DRPAI_READ/WRITE_DRP_REG, DRPAI_READ/WRITE_DRPAI_REG and
+DRPAI_READ/WRITE_CPG_REG (ioctls 64-69) let any process that can open
+/dev/drpai0 read and write the DRP, DRP-AI and CPG register blocks.
+DRPAI_WRITE_CPG_REG can gate clocks the Cortex-M33 owns.  The userspace
+runtime never issues them, so require CAP_SYS_RAWIO and leave the
+inference ioctls to a plain node open.  DMA descriptors passed to
+DRPAI_ASSIGN / DRPAI_START are not bounded by this patch.
+---
+ drivers/drpai/drpai-if.c | 17 +++++++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/drivers/drpai/drpai-if.c b/drivers/drpai/drpai-if.c
+--- a/drivers/drpai/drpai-if.c
++++ b/drivers/drpai/drpai-if.c
+@@ -19,6 +19,7 @@
+ #include <asm/io.h>
+ #include <asm/uaccess.h>
+ #include <linux/cdev.h>
++#include <linux/capability.h>
+ #include <linux/device.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/fs.h>
+@@ -989,6 +990,22 @@ static long drpai_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+ {
+     long result = 0;
+ 
++    /* Raw register access (ioctls 64-69): root-equivalent, so it is
++     * privileged.  Everything else is the inference path. */
++    switch (cmd) {
++    case DRPAI_READ_DRP_REG:
++    case DRPAI_WRITE_DRP_REG:
++    case DRPAI_READ_DRPAI_REG:
++    case DRPAI_WRITE_DRPAI_REG:
++    case DRPAI_READ_CPG_REG:
++    case DRPAI_WRITE_CPG_REG:
++        if (!capable(CAP_SYS_RAWIO))
++            return -EPERM;
++        break;
++    default:
++        break;
++    }
++
+     switch (cmd) {
+     case DRPAI_ASSIGN:
+         DRPAI_DEBUG_PRINT("[ioctl(DRPAI_ASSIGN)]\n");
+-- 
+2.43.0

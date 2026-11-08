@@ -57,7 +57,6 @@ families:
   - aen
   - v2n
   - v2n-m1
-  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
@@ -97,3 +96,5 @@ physical:
     - { pad: F3, signal: DOGND }
     - { pad: F4, signal: D6 }
     - { pad: F5, signal: D4 }
+tracking:
+  blocker: "no child issue filed; not scheduled, deferred until a product selects the part"

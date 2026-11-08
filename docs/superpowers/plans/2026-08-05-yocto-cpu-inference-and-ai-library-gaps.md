@@ -1,5 +1,7 @@
 # Yocto CPU Inference + AI Library Gaps Implementation Plan
 
+> **Note (2026-10-10):** E1M-NX9101 / NXP i.MX 93 was removed in #2781 / #2782 (67ed22d86; the module was never produced): E1M-NX9101, its ORT 1.24.3 scoping and the `ethos_u_n93.cpp` stub (Ethos-U65) below are gone; the Cortex-A55 SoMs are E1M-V2N / E1M-V2M only.
+
 > **STATUS — LANDED.** Task 1 shipped in PR #1246 via the plan's own Step 1
 > tag-preference branch — `v1.3.2` in both
 > `metadata/libraries/madgwick-ahrs.yaml:53` and `west.yml:476`, SHA

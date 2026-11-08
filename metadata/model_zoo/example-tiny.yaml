@@ -1,0 +1,28 @@
+# Honest smoke entry: a genuinely tiny INT8 model used to wire + test the zoo
+# machinery. Real curated entries (person-detection, MobileNet, keyword-spotting)
+# with upstream {url, sha256} + bench-validated validated_soms are authored
+# separately (manufacturer data flywheel).
+#
+# tests/fixtures/models/gen_tiny_model.py reproduces
+# tests/fixtures/models/tiny_int8.tflite -- a synthetic FULLY_CONNECTED INT8
+# model with constant, non-trained weights (0x01 repeated + a zero bias),
+# of which starters/example-tiny.tflite is a byte copy (guarded by
+# tests/scripts/test_model_zoo_metadata.py's
+# test_real_starter_file_exists_and_matches_tiny_int8_fixture). No real
+# upstream model's weights are redistributed here.
+schema_version: 1
+kind: fixture
+id: example-tiny
+task: smoke
+description: Tiny INT8 smoke model for wiring the zoo add/build flow end to end.
+license: Apache-2.0
+source:
+  bundled: starters/example-tiny.tflite
+# This is a smoke fixture, not a bench-validated entry -- no SoM has ever
+# actually run inference with it, so `validated_soms` stays empty rather
+# than listing SKUs `tan model zoo --sku` would then treat as a hardware
+# claim. `kind: fixture` above is the schema-level discriminator
+# scripts/validate_metadata.py cross-checks against this: a fixture's
+# validated_soms MUST be empty and its source MUST be `bundled` --
+# enforced, not just documented.
+validated_soms: []

@@ -103,6 +103,7 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
     "optiga_trust_m":     ("I2C",),
     "eeprom_24c128":      ("I2C",),
     "tcal9538":           ("I2C",),
+    "ina228":             ("I2C",),
     "ina236":             ("I2C",),
     # pdm_mic helper has no subsystem dep declared in Kconfig
     # (uses <alp/i2s.h> when enabled at v0.2+).
@@ -161,9 +162,9 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
     "tlv320aic3204":      ("I2C",),
     "max98357a":          ("GPIO",),
     "es8388":             ("I2C",),
-    # SoM-intrinsic batch (issue #1487) -- act8760/tps628640/pca9451a/
+    # SoM-intrinsic batch (issue #1487) -- act8760/tps628640/
     # da9292/clk_5l35023b are I2C-only PMIC/clock parts; pi3dbs12212/
-    # murata_lbee5hy2fy/deepx_dxm1/gd32_swd are GPIO-only.  All ten were
+    # murata_lbee5hy2fy/deepx_dxm1/gd32_swd are GPIO-only.  All nine were
     # missing from this table despite each having a `config
     # ALP_SDK_CHIP_<NAME>` / `depends on` entry in
     # zephyr/kconfigs/chips.kconfig, so the loader turned the chip on
@@ -172,7 +173,6 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
     "act8760":            ("I2C",),
     "tps628640":          ("I2C",),
     "pi3dbs12212":        ("GPIO",),
-    "pca9451a":           ("I2C",),
     "da9292":             ("I2C",),
     "clk_5l35023b":       ("I2C",),
     "murata_lbee5hy2fy":  ("GPIO",),

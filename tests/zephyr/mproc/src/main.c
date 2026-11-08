@@ -58,7 +58,7 @@ ZTEST_SUITE(alp_mproc, NULL, NULL, NULL, NULL, NULL);
 
 ZTEST(alp_mproc, test_shmem_open_no_backend_returns_null)
 {
-	alp_shmem_config_t cfg = { .name = "alp_shmem0", .size = 4096, .cacheable = false };
+	alp_shmem_config_t cfg = { .name = "alp_shmem0", .size = 4096 };
 	alp_shmem_t       *s   = alp_shmem_open(&cfg);
 	zassert_is_null(s);
 	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT);
@@ -80,6 +80,7 @@ ZTEST(alp_mproc, test_shmem_view_null_handle_errors)
 	alp_shmem_close(NULL);
 }
 
+#ifndef ALP_MPROC_TEST_DOORBELL /* the doorbell scenario defines alp-mbox0 */
 ZTEST(alp_mproc, test_mbox_open_no_backend_returns_null)
 {
 	alp_mbox_config_t cfg = { .channel = 0, .peer = ALP_CORE_M55_HE };
@@ -87,6 +88,7 @@ ZTEST(alp_mproc, test_mbox_open_no_backend_returns_null)
 	zassert_is_null(m);
 	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT);
 }
+#endif
 
 ZTEST(alp_mproc, test_mbox_lifecycle_null_handle_safe)
 {
@@ -241,7 +243,7 @@ ZTEST(alp_mproc, test_frame_decode_null_frame_invalid)
 
 ZTEST(alp_mproc, test_shmem_open_resolves_name)
 {
-	alp_shmem_config_t cfg = { .name = "alp_shmem0", .size = 0, .cacheable = false };
+	alp_shmem_config_t cfg = { .name = "alp_shmem0", .size = 0 };
 	alp_shmem_t       *s   = alp_shmem_open(&cfg);
 	zassert_not_null(s, "open should resolve alp_shmem0 alias");
 
@@ -258,7 +260,7 @@ ZTEST(alp_mproc, test_shmem_open_resolves_name)
 
 ZTEST(alp_mproc, test_shmem_open_unknown_name_returns_null)
 {
-	alp_shmem_config_t cfg = { .name = "nope_not_a_region", .size = 0, .cacheable = false };
+	alp_shmem_config_t cfg = { .name = "nope_not_a_region", .size = 0 };
 	zassert_is_null(alp_shmem_open(&cfg));
 	zassert_equal(alp_last_error(), ALP_ERR_NOT_READY);
 }

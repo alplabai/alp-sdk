@@ -6,7 +6,7 @@
 # Hardware fixtures expected:
 #   - At least ONE I2C peripheral reachable on E1M_I2C0.  Typical
 #     populations:
-#       * E1M-EVK    (AEN/NX9): LSM6DSO @ 0x6A, BMP581 @ 0x47,
+#       * E1M-EVK    (AEN): LSM6DSO @ 0x6A, BMP581 @ 0x47,
 #                               SSD1306 @ 0x3C.
 #       * E1M-X-EVK  (V2N/V2M): per-board breakouts; LSM6DSO + IMU
 #                               variants common.

@@ -1,0 +1,54 @@
+From 9d9ce61ab66a2b90dad9ad15b4a068850f89fc34 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <dev@alplab.ai>
+Date: Sun, 11 Oct 2026 12:36:32 +0000
+Subject: [PATCH] gpio: gd32-bridge: gate IO15/IO26 on protocol minor 16
+
+Protocol minor 15 does not say whether the firmware has GPIO pads 21/22; several firmware branches report 0.15 with only 21 pads and ignore the higher bits, so a write to IO15/IO26 returned OK and drove nothing.  Require minor 16, the first release that reserves the pads 21/22 build.
+---
+ drivers/gpio/gpio-gd32-bridge.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
+index 97e13ce5d512..2dc5a63b28f7 100644
+--- a/drivers/gpio/gpio-gd32-bridge.c
++++ b/drivers/gpio/gpio-gd32-bridge.c
+@@ -242,7 +242,7 @@
+ #define GD32_NGPIO_TOTAL	28
+ 
+ /* Bridge protocol minor at which bits 21/22 (IO15/IO26) first exist. */
+-#define GD32_PROTO_MINOR_IO_EXT		15
++#define GD32_PROTO_MINOR_IO_EXT		16
+ #define GD32_IO_EXT_BIT_MASK		(BIT(21) | BIT(22))
+ 
+ /* Bridge protocol minor at which bits 23..26 (CAM_EN_LDO0..3) first exist. */
+@@ -360,7 +360,7 @@ struct gd32_bridge_gpio {
+ 	 * -- reusing one mutex for both would self-deadlock.
+ 	 */
+ 	int wifi_bt_reg_on_status;
+-	/* Same resolution rule for lines 22/23 (IO15/IO26, minor >= 15);
++	/* Same resolution rule for lines 22/23 (IO15/IO26, minor >= 16);
+ 	 * resolved by the same GET_VERSION as wifi_bt_reg_on_status, under
+ 	 * status_lock. */
+ 	int io_ext_status;
+@@ -1048,15 +1048,15 @@ static int gd32_bridge_gpio_request(struct gpio_chip *chip,
+ 		return gd32_bridge_defer_or_again(ret);
+ 	}
+ 
+-	/* can-stby exists from minor 13; gated on the minor >= 15 cache (a
+-	 * bridge older than 0.15 predates the CAN-FD pad map work).  Kernel
++	/* can-stby exists from minor 13; gated on the minor >= 16 cache (a
++	 * bridge older than that minor is refused here too).  Kernel
+ 	 * consumer (phy-can-transceiver): defer on a silent bridge. */
+ 	if (offset == GD32_CAN_STBY_LINE) {
+ 		ret = gd32_bridge_resolve_late(gd32, gd32_bridge_io_ext_status);
+ 		return gd32_bridge_defer_or_again(ret);
+ 	}
+ 
+-	/* IO15/IO26: gated on protocol minor >= 15, like lines 18/19 on 11. */
++	/* IO15/IO26: gated on protocol minor >= 16, like lines 18/19 on 11. */
+ 	if (offset >= GD32_LINE_IO15)
+ 		return gd32_bridge_resolve_io_ext(gd32);
+ 
+-- 
+2.53.0
+

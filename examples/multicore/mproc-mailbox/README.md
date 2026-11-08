@@ -12,8 +12,8 @@ hardware mailbox, wait for a reply, read the result back.
 - Resolving a raw pointer view of the shared region with
   `alp_shmem_view()`, then staging payload bytes by `memcpy`
   through that pointer (the surface hands back a base pointer +
-  size and trusts the caller to write through it; the backend
-  handles cache-coherency for `cacheable = false` regions).
+  size and trusts the caller to write through it; the region is
+  non-cacheable, so no cache maintenance is needed).
 - Signalling the peer with `alp_mbox_send` carrying a small
   tuple (offset + length) that points at the staged bytes.
 - Receiving the reply through an inbound callback registered with
@@ -25,50 +25,22 @@ hardware mailbox, wait for a reply, read the result back.
 
 ## Build
 
-### native_sim (no peer core; HP-side init only)
+From this directory, or from your own copy of it:
 
 ```bash
-west build -b native_sim/native/64 examples/multicore/mproc-mailbox
-west build -t run
+tan build
+tan flash --core m55_hp
+tan flash --core m55_he
 ```
 
-Expected output:
-
-```
-[mproc] init mbox + shmem
-[mproc] sending payload  "hello-from-HP" (13 bytes)
-[mproc]   native_sim: no peer core; skipping reply
-[mproc] done
-```
-
-### Real silicon (AEN dual-core, both images built from this project)
+`board.yaml` declares both `m55_hp` (`app: ./src`) and `m55_he`
+(`app: ./peer`) as real project cores, so one `tan build` produces both
+images -- no topology-default `alp-stock-shim` placeholder on the HE side.
 
 The peer-side firmware lives at
 [`examples/multicore/mproc-mailbox/peer/main.c`](peer/main.c) -- HE-side
 image that waits on the same mbox, reads the staged shmem
 payload, and writes back an echo via reverse send.
-
-`board.yaml` declares both `m55_hp` (`app: ./src`) and `m55_he`
-(`app: ./peer`) as real project cores, so one `tan build` now
-produces both images -- no more topology-default `alp-stock-shim`
-placeholder on the HE side:
-
-```bash
-tan build --project examples/multicore/mproc-mailbox
-```
-
-Each core can also be built standalone with `west build` directly
-(e.g. while iterating on one side):
-
-```bash
-# HP side.
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/multicore/mproc-mailbox
-west flash
-
-# HE side.
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer
-west flash
-```
 
 Flash both into the matching SoC partitions (HP -> RTSS-HP slot,
 HE -> RTSS-HE slot) and the roundtrip completes:
@@ -82,6 +54,45 @@ HE -> RTSS-HE slot) and the roundtrip completes:
 [mproc] HE replied via mbox callback
 [mproc] HE replied       "echo: hello-from-HP" (19 bytes)
 [mproc] done
+```
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+native_sim (no peer core; HP-side init only):
+
+```bash
+# writes examples/multicore/mproc-mailbox/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/multicore/mproc-mailbox
+west build -b native_sim/native/64 examples/multicore/mproc-mailbox -- -DEXTRA_CONF_FILE=generated/alp.conf
+west build -t run
+```
+
+Expected output:
+
+```
+[mproc] init mbox + shmem
+[mproc] sending payload  "hello-from-HP" (13 bytes)
+[mproc]   native_sim: no peer core; skipping reply
+[mproc] done
+```
+
+Each core can also be built standalone with `west build` directly
+(e.g. while iterating on one side):
+
+```bash
+# HP side.
+# writes examples/multicore/mproc-mailbox/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/multicore/mproc-mailbox
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/multicore/mproc-mailbox -- -DEXTRA_CONF_FILE=generated/alp.conf
+west flash
+
+# HE side.
+# writes examples/multicore/mproc-mailbox/peer/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/multicore/mproc-mailbox/peer
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer -- -DEXTRA_CONF_FILE=generated/alp.conf
+west flash
 ```
 
 ## Reference

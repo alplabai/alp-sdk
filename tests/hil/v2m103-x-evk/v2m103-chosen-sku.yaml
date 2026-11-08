@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 U-Boot publishes the detected SoM SKU to the kernel as
+# /chosen/alp,sku (changelog.d/2298-hostname-from-som-sku.md); it must read
+# E1M-V2M103.  Read-only.
+
+schema_version: 1
+name: v2m103-chosen-sku
+description: |
+  /proc/device-tree/chosen/alp,sku == E1M-V2M103.
+
+flash_method: ssh-run
+ssh_command: |-
+  s=$(tr -d '\000' < /proc/device-tree/chosen/alp,sku 2>/dev/null)
+  echo "HIL_SKU $s"
+  [ "$s" = E1M-V2M103 ] && echo HIL_SKU_OK
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_SKU_OK"

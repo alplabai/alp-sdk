@@ -40,7 +40,7 @@ import yaml
 import jsonschema
 
 REPO        = Path(__file__).resolve().parent.parent.parent.parent
-SCHEMA_PATH = REPO / "metadata" / "schemas" / "som-preset-v1.schema.json"
+SCHEMA_PATH = REPO / "metadata" / "schemas" / "som-preset-v2.schema.json"
 SCHEMA      = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 
 

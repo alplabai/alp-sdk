@@ -81,43 +81,54 @@ config ALP_SDK_SECURITY
 	  backend opt-in.
 
 config ALP_SDK_SECURITY_SW_FALLBACK
-	bool "Software security fallback (no-op / deterministic random)"
+	bool "Software security fallback (honest NOSUPPORT stub)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a stub security backend that registers as a wildcard
-	  at priority 0.  For native_sim build / test and for any build
-	  where MbedTLS / PSA Crypto is absent -- hash_open / aead_open
-	  succeed (the dispatcher hands out a handle) but hash_update /
-	  hash_finish / aead_encrypt / aead_decrypt all return
-	  ALP_ERR_NOT_IMPLEMENTED; random_bytes returns ALP_OK and fills
-	  the buffer with a deterministic counter+0xAA pattern.  NOT
-	  cryptographically random -- the wildcard exists for native_sim
-	  portability, not security.  Production builds always link the
-	  priority-100 zephyr_drv backend which routes through PSA
-	  Crypto's DRBG.
+	  at priority 0.  Every entry point -- hash_open / aead_open /
+	  random_bytes included -- returns ALP_ERR_NOSUPPORT (the
+	  dispatcher relays open failures as a NULL handle + last_error),
+	  so it never fakes a digest, ciphertext or entropy.  That is why
+	  it defaults y on every target, unlike the other classes'
+	  fallbacks (which fake success and default to native_sim only):
+	  a build without MbedTLS / PSA Crypto then fails loudly at
+	  runtime instead of failing to link.  Builds with the
+	  priority-100 zephyr_drv backend (PSA Crypto) never pick it.
 
 config ALP_SDK_SECURITY_V2N_TRNG_ENTROPY
 	bool "Feed the GD32 supervisor's TRNG into MbedTLS entropy on V2N"
 	default y if ALP_SDK_V2N_SUPERVISOR && ALP_SDK_SECURITY
 	depends on ALP_SDK_V2N_SUPERVISOR && ALP_SDK_SECURITY
 	help
-	  Compile the mbedtls_hardware_poll() implementation in
-	  src/backends/security/zephyr_drv.c that drains true-random bytes
-	  from the GD32G553 supervisor's NIST SP800-90B pre-certified
-	  TRNG.  The mbedtls profile (metadata/library-profiles/mbedtls/
-	  mbedtls_config.h) sets MBEDTLS_NO_PLATFORM_ENTROPY, so
-	  mbedtls's entropy module asks the SDK to supply the platform
-	  entropy poll callback; this option provides that symbol on
-	  V2N.  The portable alp_random_bytes() transparently benefits
-	  -- PSA Crypto's DRBG seeds from this source the first time
-	  it's drawn from.  No effect on alp_random_bytes's public
-	  contract (still ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_IO /
-	  ALP_ERR_INVAL); the GD32 dependency is invisible to apps.
-	  Off-V2N builds leave this OFF -- mbedtls picks whatever
-	  hardware_poll the active vendor's HAL registered, or falls
-	  back to ALP_ERR_IO on alp_random_bytes if nothing is wired.
+	  Build the Zephyr entropy driver (zephyr/drivers/entropy/
+	  entropy_alp_gd32_trng.c, compatible "alp,gd32-trng") over the GD32G553
+	  supervisor's NIST SP800-90B pre-certified TRNG.  The V2N/V2M CM33
+	  boards choose it as zephyr,entropy, and Zephyr's mbedTLS
+	  (modules/mbedtls/zephyr_entropy.c, mbedtls_platform_get_entropy())
+	  reads that chosen device -- so the PSA RNG seeds from the GD32 TRNG,
+	  CONFIG_CSPRNG_ENABLED becomes y, and the weak-RNG check
+	  (ALP_SDK_MBEDTLS_WEAK_RNG) passes without
+	  CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY.  (Zephyr 4.4.1's mbedTLS never calls
+	  mbedtls_hardware_poll(), so that hook is not used.)
+
+	  The bytes come over the supervisor bridge, thread context only; the
+	  first request performs the lazy GD32 handshake.  With this off, the
+	  chosen node is inert and the build has no entropy driver.
+
+	  No effect on alp_random_bytes's public contract (still ALP_OK /
+	  ALP_ERR_NOT_READY / ALP_ERR_IO / ALP_ERR_INVAL).
+
+config ENTROPY_ALP_GD32_TRNG
+	bool
+	default y
+	depends on ENTROPY_GENERATOR
+	depends on DT_HAS_ALP_GD32_TRNG_ENABLED
+	depends on ALP_SDK_SECURITY_V2N_TRNG_ENTROPY
+	select ENTROPY_HAS_DRIVER
+	help
+	  GD32 supervisor TRNG entropy driver; see
+	  ALP_SDK_SECURITY_V2N_TRNG_ENTROPY.
 
 config ALP_SDK_SECURITY_SE_CRYPTOCELL
 	bool "Route <alp/security.h> to the Alif SE CryptoCell (hardware crypto)"

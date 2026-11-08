@@ -20,6 +20,17 @@ SUMMARY = "Alp SDK production image (hardened: key-only SSH, no debug tooling)"
 
 require alp-image-common.inc
 
+# The dev-kit opkg feed must never reach a field image (#2854). A prefunc, not a
+# parse-time fatal: bitbake parses this recipe in every build, including edge
+# builds that legitimately set ALP_DEVKIT_FEED (#2853).
+python alp_prod_no_devkit_feed() {
+    if d.getVar('ALP_DEVKIT_FEED') == '1':
+        bb.fatal('alp-image-prod must not be built with the dev-kit opkg feed '
+                 '(ALP_DEVKIT_FEED=1); build it from a build dir without '
+                 'conf/distro/include/alp-devkit-feed.inc')
+}
+do_rootfs[prefuncs] += "alp_prod_no_devkit_feed"
+
 # Vision appliance: camera + display, but NOT ros (opt in with alp-ros if the
 # product's app is a ROS node). debug-tweaks is never enabled here.
 IMAGE_FEATURES += "alp-camera alp-display"
@@ -66,3 +77,16 @@ BAD_RECOMMENDATIONS += " \
 # above) via packagegroup-alp-camera.bb's own RDEPENDS -- see those two
 # files for the full rationale (issue #1176) and the vendor-bbappend
 # exclusions.
+
+# Production units keep CM33 SRAM secure (decision Q53).  ALP_V2N_CM33_SRAM_NS
+# = "1" is the dev-only flag that lets a Linux root process rewrite CM33 code
+# memory (non-secure TZC access + remoteproc stop/reload); refuse to build a
+# shipped image with it.  The TF-A it controls is a separate recipe, so also
+# keep the flag out of any local.conf used for production builds. Skip (not
+# bb.fatal) so a dev local.conf with the flag can still parse and build every
+# other recipe; `bitbake alp-image-prod` then reports this reason and stops.
+python () {
+    if d.getVar('ALP_V2N_CM33_SRAM_NS') == '1':
+        raise bb.parse.SkipRecipe('ALP_V2N_CM33_SRAM_NS = "1" makes CM33 code memory writable '
+                                  'from Linux: dev images only, never alp-image-prod')
+}

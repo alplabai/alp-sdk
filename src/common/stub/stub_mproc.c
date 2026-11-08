@@ -14,9 +14,12 @@
 #include "alp/mproc.h"
 #include "alp/peripheral.h"
 
+#include "stub_internal.h"
+
 alp_shmem_t *alp_shmem_open(const alp_shmem_config_t *cfg)
 {
 	(void)cfg;
+	z_last_error = ALP_ERR_NOSUPPORT;
 	return NULL;
 }
 alp_status_t alp_shmem_view(alp_shmem_t *s, void **b, size_t *o)

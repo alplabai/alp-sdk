@@ -1,0 +1,28 @@
+/*
+ * shield-fit/e1m_evk_rvt121hvdfwca0.overlay -- the Trace Runner on the Riverdi
+ * RVT121 shield (CMakeLists.txt applies a shield-fit overlay named after the
+ * shield automatically).
+ *
+ * Layer 1 is the shield's full-screen 1280 x 800 window: the game is rendered
+ * natively 800 wide (src/render/r3d.h TR_R3D_W) and the shield declares
+ * mount-rotation = <90>, so the A32 renderer writes the portrait frame rotated
+ * into it (src/render/panel_rot.h) with nothing cropped and no bars.
+ * 1280 * 800 * 2 B = 2,048,000 B is one framebuffer slot exactly
+ * (src/ipc/tr_mbox.h TR_FB_SLOT_SIZE), and fits the shield's 2 MiB lcd_fb.
+ * The HUD (layer 2, 720 wide) is centred on it (src/platform/hud_l2.c).
+ *
+ * The game does not use the ILI2511 touch controller (I2C1 0x41), and the HE
+ * hands I2C1 to the HP after the bridge is configured (alp,i2c-handover): no
+ * input driver may poll the bus afterwards.
+ */
+
+&touch {
+	status = "disabled";
+};
+
+/* The bridge is configured over I2C1 at boot: this shield needs the bus on the HE
+ * (i2c_handover_he.overlay switches it off for every shield), and the HE releases
+ * it to the HP once the bridge is up. */
+&i2c1 {
+	status = "okay";
+};

@@ -58,16 +58,32 @@ int main(void)
 		assert(power_mw == 520); /* 5.100 V * 0.102 A */
 	}
 
-	printf("PASS: test_ina236_math\n");
-	/* CONFIG: AVG 128 (100b), both conversion times 1.1 ms (100b),
-	 * continuous shunt + bus (111b), ADCRANGE 0, reserved 10b. */
-	assert(TR_INA236_CONFIG == (0x2u << 13 | 0x4u << 9 | 0x4u << 6 | 0x4u << 3 | 0x7u));
+	/* CONFIG, decoded field by field against TI SBOSA81D table 7-4 (tables written out here from
+	 * the datasheet, not read from the code under test): RST[15] 0, reserved[14:13] 10b,
+	 * ADCRANGE[12] 0, AVG[11:9], VBUSCT[8:6], VSHCT[5:3], MODE[2:0]. */
+	{
+		static const uint16_t ct_us[8]  = { 140, 204, 332, 588, 1100, 2116, 4156, 8244 };
+		static const uint16_t avg_n[8]  = { 1, 4, 16, 64, 128, 256, 512, 1024 };
+		unsigned              avg       = (TR_INA236_CONFIG >> 9) & 7u;
+		unsigned              vbusct    = (TR_INA236_CONFIG >> 6) & 7u;
+		unsigned              vshct     = (TR_INA236_CONFIG >> 3) & 7u;
+		uint32_t              window_us = (uint32_t)avg_n[avg] * (ct_us[vbusct] + ct_us[vshct]);
+
+		assert((TR_INA236_CONFIG >> 15) == 0u && ((TR_INA236_CONFIG >> 13) & 3u) == 2u);
+		assert(((TR_INA236_CONFIG >> 12) & 1u) == 0u); /* ADCRANGE 0: +-81.92 mV, 2.5 uV/LSB */
+		assert((TR_INA236_CONFIG & 7u) == 7u);         /* continuous shunt + bus */
+		assert(avg_n[avg] == 128 && ct_us[vbusct] == 204 && ct_us[vshct] == 588);
+		assert(window_us == 101376u); /* one result: ~100 ms, the graph's 10 Hz */
+		assert(TR_INA236_CONFIG == 0x485Fu);
+	}
 	assert(tr_ina236_config_ok(TR_INA236_CONFIG));
 	assert(tr_ina236_config_ok(TR_INA236_CONFIG | 0x8000u)); /* RST/reserved bits are not ours */
 	assert(!tr_ina236_config_ok(0x4127u));                   /* power-on reset: AVG 1 */
+	assert(!tr_ina236_config_ok(0x4927u)); /* the previous CONFIG: AVG 128 of 1.1 ms, 282 ms */
 	assert(
 	    !tr_ina236_config_ok(TR_INA236_CONFIG | 1u << 12)); /* ADCRANGE 1: a 4x shunt LSB error */
 	assert(!tr_ina236_config_ok(0xFFFFu));                  /* a bus reading all ones */
 
+	printf("PASS: test_ina236_math\n");
 	return 0;
 }

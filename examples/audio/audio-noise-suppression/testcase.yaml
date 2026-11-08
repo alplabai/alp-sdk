@@ -19,7 +19,7 @@ tests:
     # native_sim has no I2S controller / NPU -- this overlay keeps the
     # build host-only (DSP runs the CMSIS-DSP/C fallback; audio opens
     # return NULL and the loop tolerates it).
-    extra_args: EXTRA_CONF_FILE=native_sim.conf
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf;native_sim.conf
     tags:
       - alp-sdk
       - example
@@ -35,6 +35,7 @@ tests:
         - "\\[ns\\] done"
 
   alp_sdk.examples.audio_noise_suppression.e1m_x_evk_rzv2n:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     # Build-only until the alp_e1m_x_evk Zephyr board file lands

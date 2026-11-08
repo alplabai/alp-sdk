@@ -126,7 +126,7 @@ customers start integrating against a stable surface
 while the audit runs in parallel.
 
 If a finding is severe enough to break the v1.0 ABI, the
-release policy's pre-1.0 ABI-breaking provision (§A.6
-convention) applies until we ship v1.0; post-1.0 the
+release policy's pre-1.0 ABI-breaking provision applies
+until we ship v1.0; post-1.0 the
 finding ships as a v2.0 candidate via the MAJOR-bump
 rules in `docs/release-policy.md`.

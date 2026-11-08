@@ -35,6 +35,7 @@
 
 #include <alif/ensemble/ae612fa0e5597ls0.dtsi>
 #include <alif/ensemble/common/ensemble_rtss_hp.dtsi>
+#include <alif/ensemble_e4_e6_power.dtsi>
 #include "alp_e1m_aen601_m55_hp-pinctrl.dtsi"
 
 / {
@@ -107,6 +108,7 @@
 			storage_partition: partition@560000 {
 				label = "storage";
 				reg = <0x560000 DT_SIZE_K(96)>;
+				status = "disabled"; /* owned by the other M55 core (#2984) */
 			};
 
 			atoc_partition: partition@578000 {

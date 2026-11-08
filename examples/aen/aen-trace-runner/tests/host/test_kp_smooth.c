@@ -3,9 +3,10 @@
  * like jitter, judged where it matters -- the intents track.c derives:
  *   1. standing still: keypoint jitter drops to <= 60 % RMS, and no
  *      jump/duck/lane intent fires from noise;
- *   2. a jump, a duck and a lane step each still register within 2 frames
- *      (the smoothing's lag stays bounded), jitter and all, and the
- *      smoothed track settles on the new position within 3 frames;
+ *   2. a jump (both arms up), a duck and a lane step (one arm up) each still
+ *      register promptly (the smoothing's lag stays bounded, plus the arm
+ *      settle window for a lane), jitter and all, and the smoothed track
+ *      settles on the new position within 3 frames;
  *   3. an unsure keypoint is held, not jumped to its unsure decode; one gone
  *      past TR_KS_HOLD_MAX frames, or a stalled stream, re-seeds from raw. */
 #include <assert.h>
@@ -60,18 +61,32 @@ static tr_pose_t jitter(tr_pose_t p, int amp)
 static void settle(tr_kp_smooth_t *s, tr_track_t *t, tr_pose_t stand, int frames)
 {
 	tr_kp_smooth_reset(s);
-	tr_track_init(t, UW, UH);
+	tr_track_init(t, UH);
 	for (int i = 0; i < frames; i++) {
 		tr_pose_t p = jitter(stand, 5);
 
 		tr_kp_smooth_step(s, &p, DT_MS);
 		if (i == frames / 2) {
-			tr_track_calibrate(t, tr_pose_box(&p), UW);
+			tr_track_calibrate(t, tr_pose_box(&p));
 		} else if (i > frames / 2) {
 			(void)tr_track_update(t, tr_pose_box(&p));
 		}
 	}
 	assert(t->calibrated);
+}
+
+/* `p` with the label-LEFT / label-RIGHT wrist raised 1.2 shoulder widths over its shoulder. */
+static tr_pose_t arms_up(tr_pose_t p, bool left, bool right)
+{
+	int sw = abs(p.kp[TR_KP_LSHO].x - p.kp[TR_KP_RSHO].x);
+
+	if (left) {
+		p.kp[TR_KP_LWRI].y = (int16_t)(p.kp[TR_KP_LSHO].y - sw * 12 / 10);
+	}
+	if (right) {
+		p.kp[TR_KP_RWRI].y = (int16_t)(p.kp[TR_KP_RSHO].y - sw * 12 / 10);
+	}
+	return p;
 }
 
 /* Frames from a step (0 = the step frame itself) until `hit` holds. */
@@ -134,10 +149,9 @@ int main(void)
 		int f;
 
 		settle(&s, &t, stand, 40);
-		f = frames_to(
-		    &s, &t, figure(UW / 2, 100 - 100, 600 - 100), 0); /* jump: body up 20 % of stance */
+		f = frames_to(&s, &t, arms_up(stand, true, true), 0); /* jump: both arms up */
 		printf("kp_smooth: jump registers %d frame(s) after the step\n", f);
-		assert(f <= 1);
+		assert(f <= 2);
 
 		settle(&s, &t, stand, 40);
 		f = frames_to(
@@ -146,9 +160,9 @@ int main(void)
 		assert(f <= 1);
 
 		settle(&s, &t, stand, 40);
-		f = frames_to(&s, &t, figure(60, 100, 600), 2); /* lane: torso into the left third */
+		f = frames_to(&s, &t, arms_up(stand, true, false), 2); /* lane: one arm up */
 		printf("kp_smooth: lane step registers %d frame(s) after the step\n", f);
-		assert(f <= 1);
+		assert(f <= 2 + TR_ARM_SETTLE_POSES - 1); /* the smoothing, then the settle window */
 
 		/* lag: noise-free, the nose within 3 px of a 100 px step by the third frame */
 		tr_pose_t up = figure(UW / 2, 0, 500), p;

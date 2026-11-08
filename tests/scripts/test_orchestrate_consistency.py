@@ -621,16 +621,29 @@ def test_hawkbit_http_url_keeps_plaintext_and_derives_port(tmp_path: Path) -> No
     assert "CONFIG_HAWKBIT_USE_TLS" not in conf
 
 
-def test_hawkbit_bare_host_placeholder_passes_through(tmp_path: Path) -> None:
-    """A value with no scheme is already a bare host -- including a whole-value
-    ${VAR} placeholder the build system substitutes later.  Case preserved."""
+def test_hawkbit_bare_host_is_case_preserved(tmp_path: Path) -> None:
+    """A value with no scheme is already a bare host: emitted verbatim, case
+    preserved, with port and TLS left at Zephyr's defaults."""
     project = load_board_yaml(
-        _hawkbit_board(tmp_path, "${OTA_HOST}", 1800))
+        _hawkbit_board(tmp_path, "OTA.Example.lan", 1800))
     conf = _slice_alp_conf(project, project.cores["m55_hp"])
-    assert 'CONFIG_HAWKBIT_SERVER="${OTA_HOST}"' in conf
+    assert 'CONFIG_HAWKBIT_SERVER="OTA.Example.lan"' in conf
     for line in conf.splitlines():
         assert not line.startswith("CONFIG_HAWKBIT_PORT")
         assert not line.startswith("CONFIG_HAWKBIT_USE_TLS")
+
+
+def test_hawkbit_bare_host_placeholder_is_refused(tmp_path: Path) -> None:
+    """Issue #2696.  This used to pass `${OTA_HOST}` through on the claim that
+    the build system substitutes it later.  Nothing does: Zephyr's `.conf`
+    loader only unescapes a string value, so the firmware would carry the
+    literal text `${OTA_HOST}` as its server name."""
+    project = load_board_yaml(
+        _hawkbit_board(tmp_path, "${OTA_HOST}", 1800))
+    with pytest.raises(OrchestratorError) as exc:
+        _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "${OTA_HOST}" in str(exc.value)
+    assert "CONFIG_HAWKBIT_SERVER" in str(exc.value)
 
 
 def test_hawkbit_url_with_a_base_path_is_refused(tmp_path: Path) -> None:

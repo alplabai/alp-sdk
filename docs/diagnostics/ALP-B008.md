@@ -37,11 +37,11 @@ tan validate --board-yaml board.yaml
 error[ALP-B008]: chips: unknown chip 'bme208' (no metadata/chips/bme208.yaml)
 ```
 
-A `driver_status: planned` manifest reports the same code with different
+A `driver_status: planned` or `none` manifest reports the same code with different
 text -- the manifest is not missing, the driver just isn't built yet:
 
 ```
-error[ALP-B008]: chips: 'murata_lbee0zz2kl' has driver_status: planned -- no Alp SDK driver or ALP_SDK_CHIP_MURATA_LBEE0ZZ2KL symbol yet
+error[ALP-B008]: chips: 'dp83825' has driver_status: none -- no Alp SDK driver or ALP_SDK_CHIP_DP83825 symbol yet
 ```
 
 List every chip manifest this checkout actually ships (read-only):

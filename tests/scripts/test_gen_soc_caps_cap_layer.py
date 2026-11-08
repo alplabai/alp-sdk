@@ -64,9 +64,9 @@ def test_extract_unverified_peripherals_explicit_list_wins_over_pending_flag():
     """A file can carry BOTH `pending_reference_manual_ingestion: true` (the
     rest of the block is still unpopulated) AND its own `peripherals_unverified`
     (even `[]`) for the handful of keys it individually grounds (e.g.
-    i.MX93: mipi_dsi/lcdif cited from the pinned Zephyr dtsi). The explicit
+    a part where mipi_dsi/spi are cited from the pinned Zephyr dtsi). The explicit
     list -- not the wholesale fallback -- decides the outcome."""
-    soc = {"peripherals": {"mipi_dsi": 1, "lcdif": 1},
+    soc = {"peripherals": {"mipi_dsi": 1, "spi": 1},
            "pending_reference_manual_ingestion": True,
            "peripherals_unverified": []}
     assert gsc.extract_unverified_peripherals(soc) == []

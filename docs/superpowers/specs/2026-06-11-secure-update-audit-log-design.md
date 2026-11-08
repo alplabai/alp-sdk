@@ -8,6 +8,8 @@
 > that backend is silicon-proven. Cross-check the tree, but this is the
 > grounded design and should not be discarded.
 
+> **Note (2026-10-10):** E1M-NX9101 / the NXP i.MX 93 port was removed in #2781 / #2782 (67ed22d86); the i.MX 93 mention below is historical.
+
 Status: Approved (brainstorming) — 2026-06-11; hardware-seam update — 2026-07-06
 Author: alpCaner
 Scope: portable surface, software tier, and TF-M secure-service hardware seam.

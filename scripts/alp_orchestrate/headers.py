@@ -56,15 +56,16 @@ def emit_ipc_contract_h(project: BoardProject) -> str:
             # consumer fail with `<macro> undeclared` long before the
             # NOSUPPORT runtime check could even fire.  Emit safe-zero
             # stubs + a #warning so the build is green and the gap is
-            # surfaced via the alp_rpc_open() ALP_ERR_NOSUPPORT path
-            # the backend already returns when it sees a zero
-            # mailbox_channel or empty mailbox controller.
+            # surfaced at plan time by a `blocked-ipc-carveout` build-plan
+            # warning and at runtime via the alp_rpc_open()
+            # ALP_ERR_NOSUPPORT path the backend already returns when it
+            # sees a zero mailbox_channel or empty mailbox controller.
             lines.append(f"/* BLOCKED: {c.reason or 'unknown reason'} */")
             # Surface the gap as a structured comment block rather than
             # a `#warning` (the slice builds under -Werror=cpp and an
             # actual warning would trip it).  The same reason text is
-            # also written into the build manifest by the orchestrator's
-            # fan-out step so reviewers see it.
+            # also written into the build manifest and the build plan's
+            # warnings so reviewers see it.
             lines.append(f"/* IPC channel '{c.name}' is blocked; "
                          "fix the SoM metadata before depending on this "
                          "channel at runtime. */")
@@ -112,8 +113,8 @@ def emit_dts_reservations(project: BoardProject) -> str:
         for c in carve_outs:
             if c.status == "blocked":
                 # Blocked carve-outs land as a comment so reviewers see
-                # the gap; the slice build trips elsewhere (the C
-                # header carries an #error directive).
+                # the gap; the build plan carries a
+                # `blocked-ipc-carveout` warning for it.
                 lines.append(f"        /* BLOCKED: {c.name} -- "
                              f"{c.reason or 'unknown reason'} */")
                 lines.append("")
@@ -217,6 +218,17 @@ def emit_dts_partitions(project: BoardProject) -> str:
     return "\n".join(lines)
 
 
+def _mountable_partitions(project: BoardProject):
+    """Resolved storage partitions that get a row in the mount table."""
+    return [p for p in resolve_storage_partitions(project)
+            if p.status == "ok" and p.mount and p.fs != "raw"]
+
+
+def has_storage_mounts(project: BoardProject) -> bool:
+    """True when `emit_storage_mounts_c` would emit a non-empty table."""
+    return bool(_mountable_partitions(project))
+
+
 def emit_storage_mounts_c(project: BoardProject) -> str:
     """Generate storage_mount_table.c -- a static fs_mount_t[] array.
 
@@ -225,9 +237,7 @@ def emit_storage_mounts_c(project: BoardProject) -> str:
     `alp_storage_mount_all()` (or iterate the table manually).
     Partitions with no `mount:` declared are omitted from the table.
     """
-    partitions = resolve_storage_partitions(project)
-    mountable = [p for p in partitions
-                 if p.status == "ok" and p.mount and p.fs != "raw"]
+    mountable = _mountable_partitions(project)
 
     lines: list[str] = [
         "/*",
@@ -272,7 +282,7 @@ def emit_storage_mounts_c(project: BoardProject) -> str:
             lines.append(f"static struct fs_mount_t alp_mnt_{p.name} = {{")
             lines.append("    .type = FS_LITTLEFS,")
             lines.append(f"    .fs_data = &alp_lfs_{p.name},")
-            lines.append(f"    .storage_dev = (void *)FIXED_PARTITION_ID({p.name}_partition),")
+            lines.append(f"    .storage_dev = (void *)PARTITION_ID({p.name}_partition),")
             lines.append(f'    .mnt_point = "{p.mount}",')
             lines.append("};")
         elif p.fs == "fat":
@@ -280,13 +290,13 @@ def emit_storage_mounts_c(project: BoardProject) -> str:
             lines.append(f"static struct fs_mount_t alp_mnt_{p.name} = {{")
             lines.append("    .type = FS_FATFS,")
             lines.append(f"    .fs_data = &alp_fat_{p.name},")
-            lines.append(f"    .storage_dev = (void *)FIXED_PARTITION_ID({p.name}_partition),")
+            lines.append(f"    .storage_dev = (void *)PARTITION_ID({p.name}_partition),")
             lines.append(f'    .mnt_point = "{p.mount}",')
             lines.append("};")
         elif p.fs == "ext4":
             lines.append(f"static struct fs_mount_t alp_mnt_{p.name} = {{")
             lines.append("    .type = FS_EXT2,")
-            lines.append(f"    .storage_dev = (void *)FIXED_PARTITION_ID({p.name}_partition),")
+            lines.append(f"    .storage_dev = (void *)PARTITION_ID({p.name}_partition),")
             lines.append(f'    .mnt_point = "{p.mount}",')
             lines.append("};")
         lines.append("")

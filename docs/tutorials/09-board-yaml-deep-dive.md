@@ -63,7 +63,6 @@ for production SoMs plus placeholder presets for active bring-up:
 | Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`, `AEN803`       |
 | Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`, `V2N103`                                             |
 | RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`, `V2M103`                                             |
-| NXP i.MX 93       | `E1M-NX9101` (placeholder MPN; production `E1M-NX9xxx` TBD pending HW config) |
 
 `hw_rev` selects an entry from the family's `hw-revisions.yaml` to
 pick up its pad-routing overrides; an unrecognised value refuses the
@@ -144,7 +143,7 @@ of firmware projects all target one physical board.
 
 The SDK ships these shared presets:
 
-- `e1m-evk` -- 35×35 reference board for AEN + N93.
+- `e1m-evk` -- 35×35 reference board for AEN.
 - `e1m-x-evk` -- 45×65 reference board for V2N + V2N-M1.
 - `custom-example` -- copy-friendly template (use `cp` on the
   file contents into your own project's `board.yaml`).
@@ -280,7 +279,7 @@ cores:
 App-level inference tuning, scoped per-core.  There is **no `backend:` field** —
 the dispatcher set is silicon-determined from the SoM preset's
 `capabilities:` block.  The SDK compiles in every NPU the SoM
-declares (Ethos-U on AEN + N93, DRP-AI on V2N + V2M, DEEPX on
+declares (Ethos-U on AEN, DRP-AI on V2N + V2M, DEEPX on
 V2M) plus the TFLM CPU fallback as universal.  Apps pick which
 to run **per-handle at runtime** via `alp_inference_open(.backend = …)`
 — V2M101 can run independent models on DRP-AI3 and DEEPX
@@ -338,15 +337,14 @@ APIs):
 
 - `etl`         -- ETL (Embedded Template Library)
 - `fmt`         -- {fmt}
-- `nlohmann_json` -- JSON for Modern C++
+- `nlohmann-json` -- JSON for Modern C++
 - `doctest`     -- doctest unit-test framework
 - `lvgl`        -- LVGL
 - `mbedtls`     -- MbedTLS (exposed alongside `<alp/security.h>`)
-- `cmsis_dsp`   -- CMSIS-DSP (exposed alongside `<alp/dsp.h>`)
+- `cmsis-dsp`   -- CMSIS-DSP (exposed alongside `<alp/dsp.h>`)
 - `littlefs`    -- LittleFS
-- `tflite_micro`, `pid`, `modbus`, `nanopb`, ... -- see the
-  full enum in
-  [`metadata/schemas/board.schema.json`](../../metadata/schemas/board.schema.json).
+- `tflite-micro`, `pid`, `modbus`, `nanopb`, ... -- the valid
+  names are the manifests under `metadata/libraries/`.
 
 ### `cores.<id>.extra_libraries` -- open-set escape hatch (v0.6)
 
@@ -493,7 +491,7 @@ The build absorbs three outputs per project:
 * `build/generated/dts-partitions.dtsi` -- a DTS overlay decorating
   `&<dt_label>` with a `partitions { compatible = "fixed-partitions"; ... }`
   child node.  Apps reach individual partitions via Zephyr's
-  `FIXED_PARTITION_ID(<name>_partition)`.
+  `PARTITION_ID(<name>_partition)`.
 * `CONFIG_FILE_SYSTEM=y` + the per-fs Kconfig (`LITTLEFS` /
   `FAT_FILESYSTEM_ELM` / `FILE_SYSTEM_EXT2`) + per-partition
   `CONFIG_FS_LITTLEFS_PARTITION_<NAME>=y` in each Zephyr slice's
@@ -596,6 +594,6 @@ orchestrator consistency error.
 - [`metadata/templates/board.yaml`](../../metadata/templates/board.yaml)
   -- a heavily-commented template you can copy as a starting
   point.
-- Tutorial [12: Mender OTA on Yocto](12-mender-ota.md) (TBD)
+- Tutorial [12: Mender OTA on Yocto](12-mender-ota.md)
   for how `board.yaml`'s OTA-config block threads through to
   meta-alp-sdk.

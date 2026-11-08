@@ -40,6 +40,18 @@ internal write cycle between them. `eeprom_24c128_write()` handles the split and
 the ACK-polling; nothing here needs to know about it. A bare 128-byte I²C write
 would silently wrap inside one page and corrupt the manifest.
 
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+```
+
+Do not use `tan flash` for this tool: it must be RAM-run (Flow C) so nothing is written to MRAM. The bench recipe below is the SDK-internal path by design; it has no `tan` equivalent until RAM-run mode ships (tan-cli#1313).
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
 ## Run it
 
 Provisioning is a **RAM-run (Flow C)**. Nothing is written to MRAM, so the module
@@ -47,7 +59,7 @@ is left carrying whatever application the line intends — not this tool.
 
 ```sh
 # 0. Hold the bench reservation, as for any bench operation.
-export LG_COORDINATOR=100.64.0.1:20408
+export LG_COORDINATOR=<coordinator>
 labgrid-client -p <your-bench-place> acquire
 
 # 1. Pack this unit's identity on the host.  The serial must come from the
@@ -73,13 +85,10 @@ bash $B/ram-run.sh "$PWD/build/aen-eeprom-provision"
 labgrid-client -p <your-bench-place> release
 ```
 
-`<SERIAL>` and `<MFG-DATE>` are placeholders on purpose. An earlier revision of
-this file used the real allocated serial `2026W36-0001` with `sku=E1M-AEN801`,
-which is wrong twice over: that unit is an **E1M-AEN803** (alp-sdk#2001), and a
-worked example is not a provisioning record. The SKU below comes from this
-example's own `board.yaml` (`som.sku: E1M-AEN801`), not from any module -- keep
-it that way, and take the serial from the allocation ledger as step 1 already
-says.
+`<SERIAL>` and `<MFG-DATE>` are placeholders on purpose: a worked example is
+not a provisioning record. The SKU below comes from this example's own
+`board.yaml` (`som.sku: E1M-AEN801`), not from any module -- keep it that way,
+and take the serial from the allocation ledger as step 1 already says.
 
 Expected on a blank module:
 
@@ -124,8 +133,8 @@ provisioning it falls back to the board name; after, it prints the real identity
 read from the EEPROM:
 
 ```
-Alp SDK 0.16.0  |  alp_e1m_aen801_m55_he  |  (c) Alp Lab AB     <- before
-Alp SDK 0.16.0  |  E1M-AEN801 r2          |  (c) Alp Lab AB     <- after
+Alp SDK <version>  |  alp_e1m_aen801_m55_he  |  (c) Alp Lab AB     <- before
+Alp SDK <version>  |  E1M-AEN801 r2          |  (c) Alp Lab AB     <- after
 ```
 
 ## Order matters
@@ -143,7 +152,7 @@ Page** that can be permanently locked. This app also carries the write +
 lock tooling for it, as two build-time modes distinct from the array write
 above. Do this only after the array manifest has been written and verified
 (this file's default flow) and, per
-`docs/som-batch-provisioning-procedure.md` §7 (alp-sdk-internal), only after
+the internal batch-provisioning procedure (not part of this public tree), only after
 cold-cycling the board.
 
 ```sh

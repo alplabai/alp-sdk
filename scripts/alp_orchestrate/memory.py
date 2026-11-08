@@ -19,7 +19,7 @@ shapes the shipped derivation cannot fill):
   this SoC at all, which is every non-Alif SoM).
 
 * the authority field is `write_authority`, passed through verbatim with
-  som-preset-v1's six values. The issue's 3-value `owner` was replaced
+  som-preset-v2's six values. The issue's 3-value `owner` was replaced
   during review because one axis cannot separate flash-time from runtime
   authority: `customer_image` and `customer_runtime` would both collapse to
   `customer`, which is the exact distinction the AEN `storage`-vs-`he_slot0`
@@ -66,7 +66,7 @@ def resolve_memory_regions(project: BoardProject) -> list[dict[str, Any]]:
     """Project the SoM's memory regions into the manifest's `memory[]` pane.
 
     Returns `[]` when the SoM resolves no regions at all (an unresolvable
-    `silicon_variant`, e.g. NX9101's `TBD`). The caller must then OMIT the
+    `silicon_variant`, e.g. `TBD`). The caller must then OMIT the
     key rather than emit `memory: []` -- the schema draws a load-bearing
     distinction between an absent pane ("this producer does not emit it
     yet") and an empty one, and collapsing the two would tell every

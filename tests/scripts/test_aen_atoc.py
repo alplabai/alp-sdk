@@ -594,3 +594,60 @@ def test_cli_package_map_refuses_then_allows(aen_atoc, tmp_path) -> None:
     assert aen_atoc.main(['--package-map', str(m)]) == 1
     assert aen_atoc.main(['--package-map', str(m), '--allow-over-storage']) == 0
     assert aen_atoc.main(['--package-map', str(m), '--bogus']) == 2
+
+
+# ---------------------------------------------------------------------
+# alp-sdk#2538 step 1: measured `gettoc` truncation shapes (E1M-AEN803,
+# SES A1 v1.110.0). The host prints the closing `+---+` only when the
+# 0xa8 end packet arrives, so a stalled read can exit 0 with no closing
+# line; a closed port exits 1.
+# ---------------------------------------------------------------------
+
+_GETTOC_HEAD = (
+    "+----------+--------+\n"
+    "|   Name   |  CPU   |\n"
+    "+----------+--------+\n"
+)
+_GETTOC_ROWS = [
+    "|    DEVICE|   CM0+ |\n",
+    "|    DEVICE|   CM0+ |\n",
+    "|  * SERAM0|   CM0+ |\n",
+    "|    SERAM1|   CM0+ |\n",
+    "|  BOOTLOAD|   CM0+ |\n",
+    "|   A32_APP|   A32  |\n",
+    "|    HP_APP| M55-HP |\n",
+    "|    HE_APP| M55-HE |\n",
+]
+_GETTOC_CLOSE = "+----------+--------+\n"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _GETTOC_HEAD + "".join(_GETTOC_ROWS[:4]),
+        _GETTOC_HEAD + "".join(_GETTOC_ROWS[:7]),
+        _GETTOC_HEAD,
+        _GETTOC_HEAD + "".join(_GETTOC_ROWS),
+    ],
+    ids=["4-rows-no-close", "7-rows-no-close", "header-only", "8-rows-no-close"],
+)
+def test_compute_query_status_unverified_on_stalled_read_exit_zero(aen_atoc, text):
+    assert aen_atoc.compute_query_status(
+        True, "SES A1 v1.110.0\n", 0, text, 0) == "unverified"
+
+
+def test_compute_query_status_unverified_on_complete_table_then_disconnect_exit_one(aen_atoc):
+    # Exit-code-only: the table is structurally complete, so only the
+    # non-zero exit code (1) makes this unverified.
+    text = (
+        _GETTOC_HEAD + "".join(_GETTOC_ROWS) + _GETTOC_CLOSE
+        + "[ERROR] readSerial reporting disconnected\n"
+    )
+    assert aen_atoc.compute_query_status(
+        True, "SES A1 v1.110.0\n", 0, text, 1) == "unverified"
+
+
+def test_compute_query_status_ok_on_complete_8_row_table_exit_zero(aen_atoc):
+    text = _GETTOC_HEAD + "".join(_GETTOC_ROWS) + _GETTOC_CLOSE
+    assert aen_atoc.compute_query_status(
+        True, "SES A1 v1.110.0\n", 0, text, 0) == "ok"

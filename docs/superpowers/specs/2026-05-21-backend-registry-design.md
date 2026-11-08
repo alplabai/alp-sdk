@@ -1,5 +1,7 @@
 # Backend Registry + Capability Negotiation Architecture
 
+> **Note (2026-10-10):** E1M-NX9101 / NXP i.MX 93 was removed in #2781 / #2782 (67ed22d86; the module was never produced): the `ethos_u_n93` backend named below is deleted.
+
 **Date:** 2026-05-21
 **Status:** **LANDED.** Verified against the tree: `include/alp/backend.h`
 + `src/backend.c` (the registry + selector) exist, and every

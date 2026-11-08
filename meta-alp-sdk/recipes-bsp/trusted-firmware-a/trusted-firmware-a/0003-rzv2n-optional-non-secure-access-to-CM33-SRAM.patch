@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Sat, 3 Oct 2026 12:00:00 +0200
+Subject: [PATCH] rzv2n: optional non-secure access to CM33 SRAM (ALP_CM33_SRAM_NS)
+
+Dev-image knob for Linux remoteproc stop/reload of the CM33 (decision Q53).
+BL2 loads the CM33 image into SRAM 0/1, which TZC-400 region 0 leaves
+secure-privileged only, so a non-secure write (remoteproc loading the ELF,
+or zeroing the carveout on stop) is rejected.
+
+With ALP_CM33_SRAM_NS=1 the SRAM 0/1 default region also admits the
+non-secure accessors (PLAT_TZC_REGION_ACCESS_NS_UNPRIV).  Secure access is
+unchanged.  Default 0 leaves the generated code identical to before.
+
+WARNING: with 1, any Linux root process can rewrite CM33 code memory.
+Never set it in a production image.
+
+Written from the public TF-A tree (tag 2.10.5/rzv2n_1.2.0) and the TZC-400
+access model, not from the Renesas Multi-OS Package.
+
+Upstream-Status: Inappropriate [ALP E1M-V2N/V2M SoM configuration]
+Signed-off-by: Alp Lab AB
+---
+diff --git a/plat/renesas/rz/common/v2n_common.mk b/plat/renesas/rz/common/v2n_common.mk
+index d9d90f5..2c8e4a5 100644
+--- a/plat/renesas/rz/common/v2n_common.mk
++++ b/plat/renesas/rz/common/v2n_common.mk
+@@ -40,6 +40,11 @@ $(eval $(call add_define,PLAT_M33_BOOT_SUPPORT))
+ $(eval $(call add_define,PLAT_EMMC_WRITE_ENABLE))
+ $(eval $(call add_define,BOOT_TFA_USING_CM33))
+ 
++# Alp: 1 = TZC-400 SRAM 0/1 region 0 also admits non-secure masters, so Linux
++# remoteproc can stop/reload the CM33 (dev images only; default 0 = secure only).
++ALP_CM33_SRAM_NS ?= 0
++$(eval $(call add_define,ALP_CM33_SRAM_NS))
++
+ # This option gets enabled automatically if the TRUSTED_BOARD_BOOT
+ # is set via root Makefile, but Renesas support Trusted-Boot without
+ # Crypto module.
+diff --git a/plat/renesas/rz/soc/v2n/plat_security.c b/plat/renesas/rz/soc/v2n/plat_security.c
+index 6e4afb9..114dac1 100644
+--- a/plat/renesas/rz/soc/v2n/plat_security.c
++++ b/plat/renesas/rz/soc/v2n/plat_security.c
+@@ -309,7 +309,12 @@ static void plat_tzc_sram_setup(void)
+ 			.base = 0,	/* Not Used by Region 0*/
+ 			.end  = 0,	/* Not Used by Region 0*/
+ 			.sec_attr = TZC_REGION_S_RDWR,
++#if ALP_CM33_SRAM_NS
++			/* Dev builds only: let non-secure Linux rewrite CM33 SRAM */
++			.nsaid_permissions = PLAT_TZC_REGION_ACCESS_NS_UNPRIV
++#else
+ 			.nsaid_permissions = PLAT_TZC_REGION_ACCESS_S_PRIV
++#endif
+ 		},
+ 		{}
+ 	};
+-- 
+2.43.0

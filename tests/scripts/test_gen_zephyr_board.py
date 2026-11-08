@@ -104,8 +104,9 @@ PARITY_COVERED: dict[str, tuple[str, str]] = {
 NOT_EMITTABLE: dict[str, str] = {
     "e1m_aen401_m55_hp":
         "metadata/socs/alif/ensemble/e4.json has no `zephyr_peripherals_dtsi`; "
-        "alp-sdk ships no zephyr/dts/alif/ensemble_e4_peripherals.dtsi for the "
-        "E4's own peripheral/NPU node set (the E8 overlay is different silicon)",
+        "the AEN401 board tree stays hand-written (its E4 camera, power and "
+        "xHCI nodes have no generator path). Its on-module dtsi IS generator "
+        "output, pinned by test_aen401_on_module_dtsi_is_generator_output",
     "e1m_aen601_m55_hp":
         "metadata/socs/alif/ensemble/e6.json has no `zephyr_peripherals_dtsi`; "
         "alp-sdk ships no zephyr/dts/alif/ensemble_e6_peripherals.dtsi for the "
@@ -168,6 +169,13 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
     def test_aen801_m55_he_full_tree(self) -> None:
         self._parity("e1m_aen801_m55_he")
 
+    def test_every_aen_som_lists_all_four_ospi_pads_as_wired(self) -> None:
+        # AEN801 has no ext-flash / ext-ram domain node, so P15_6 / P15_7 are claimed
+        # only through this property (alp_som_power_lpgpio_claimed() must be 0xFF).
+        for board_dir in ("e1m_aen801_m55_he", "e1m_aen803_m55_he"):
+            dts = next((BOARDS_ROOT / board_dir).glob("*_rtss_he.dts")).read_text(encoding="utf-8")
+            self.assertIn("alp,wired-lpgpio-pads = <2 3 6 7>;", dts, board_dir)
+
     def test_aen803_m55_hp_full_tree(self) -> None:
         self._parity("e1m_aen803_m55_hp")
 
@@ -176,6 +184,52 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
 
     def test_v2n101_m33_sm_family_agnostic_files(self) -> None:
         self._parity("e1m_v2n101_m33_sm")
+
+    def test_v2n_gd32_pads_are_a_dedicated_node_not_alp_pins_entries(self) -> None:
+        # P71 (SWCLK / bridge ATTN), P70 (SWDIO) and P74 (NRST) must NEVER be
+        # entries of the positional alp,pin-array: its index 0 is the GD32 SPI
+        # chip-select (P97 = GD32 PA8), so a drifted shared index would drive
+        # it.  They are published as the dedicated alp,gd32-pads node.
+        for sku in ("E1M-V2N101", "E1M-V2M101"):
+            files = emit_zephyr_board(sku, "m33_sm", METADATA_ROOT)
+            dts = next(c for r, c in files.items() if r.endswith(".dts"))
+            pins = re.search(r"alp_pins: alp-pins \{(.*?)\n\t\};", dts, re.S)
+            self.assertIsNotNone(pins, sku)
+            self.assertEqual(
+                re.findall(r"<&gpio\d+ \d+ [A-Z_]+>", pins.group(1)),
+                ["<&gpio9 7 GPIO_ACTIVE_LOW>"],
+                f"{sku}: alp_pins must still hold only the SPI chip-select")
+            node = re.search(r"gd32_pads: gd32-pads \{(.*?)\n\t\};", dts, re.S)
+            self.assertIsNotNone(node, f"{sku}: no alp,gd32-pads node")
+            self.assertIn('compatible = "alp,gd32-pads"', node.group(1))
+            for prop, spec in (("swdio", "<&gpio7 0 GPIO_ACTIVE_HIGH>"),
+                               ("swclk", "<&gpio7 1 GPIO_ACTIVE_HIGH>"),
+                               ("nrst", "<&gpio7 4 GPIO_ACTIVE_HIGH>"),
+                               ("attn", "<&gpio7 1 GPIO_ACTIVE_HIGH>")):
+                self.assertIn(f"{prop}-gpios = {spec};", node.group(1))
+            self.assertIn("&gpio7 {", dts)
+
+    def test_v2n_attn_pad_is_routed_to_a_tint_slot(self) -> None:
+        # Without `irqs` on the port the RZ GPIO driver has no TINT route for P71
+        # and alp_gpio_irq_enable(ATTN) returns NOSUPPORT.
+        for sku in ("E1M-V2N101", "E1M-V2M101"):
+            files = emit_zephyr_board(sku, "m33_sm", METADATA_ROOT)
+            dts = next(c for r, c in files.items() if r.endswith(".dts"))
+            self.assertIn('&tint31 {\n\tstatus = "okay";\n};', dts, sku)
+            self.assertIn(
+                '&gpio7 {\n\tstatus = "okay";\n\tirqs = <&tint31 1>;\n};', dts, sku)
+
+    def test_attn_tint_slot_refused_when_pads_block_is_skipped(self) -> None:
+        # swdio on CS0's gpio node skips the whole pads block, which would drop
+        # the TINT route silently; the generator must refuse instead.
+        real = gzb._load_supervisor_links(METADATA_ROOT)
+        links = copy.deepcopy(real)
+        links["gd32_pads"]["swdio"]["gpio_node"] = (
+            links["gd32_spi"]["gpio_chip_select"]["gpio_node"])
+        self.assertIsNotNone(links["gd32_pads"]["attn"].get("tint_slot"))
+        with mock.patch.object(gzb, "_load_supervisor_links", return_value=links):
+            with self.assertRaisesRegex(SystemExit, "pads block is skipped"):
+                emit_zephyr_board("E1M-V2N101", "m33_sm", METADATA_ROOT)
 
     def test_v2m101_m33_sm_family_agnostic_files(self) -> None:
         self._parity("e1m_v2m101_m33_sm")
@@ -255,6 +309,25 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
             },
         )
 
+    def test_v2n_family_dts_declares_the_cm33_watchdog(self) -> None:
+        """Both V2N-family CM33 boards emit `wdt0` DISABLED (an expiry resets
+        the whole SoM) with alias `alp-wdt0`, taking base/size/clock from the
+        SoC spec's `m33_sm` `watchdog` block instead of a generator literal."""
+        wdt = gzb._find_core(
+            json.loads((METADATA_ROOT / "socs/renesas/rzv2n/n44.json")
+                       .read_text(encoding="utf-8")), "m33_sm")["watchdog"]
+        for sku in ("E1M-V2N101", "E1M-V2M101"):
+            with self.subTest(sku=sku):
+                dts = next(c for r, c in emit_zephyr_board(
+                    sku, "m33_sm", METADATA_ROOT).items() if r.endswith(".dts"))
+                self.assertIn("alp-wdt0 = &wdt0;", dts)
+                node = dts.split("wdt0: watchdog@", 1)[1].split("};", 1)[0]
+                self.assertTrue(node.startswith(wdt["base"][2:] + " {"))
+                self.assertIn('compatible = "renesas,rzv-wdt";', node)
+                self.assertIn(f"reg = <{wdt['base']} {wdt['size']}>;", node)
+                self.assertIn(f"clock-freq = <{wdt['counting_clock_hz']}>;", node)
+                self.assertIn('status = "disabled";', node)
+
     def test_v2m_dts_carries_the_openamp_block(self) -> None:
         """E1M-V2M101 is the same RZ/V2N die as E1M-V2N101, so it sets
         `topology.m33_sm.openamp_ipc: true` too (#1948) and its `.dts`
@@ -263,6 +336,56 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
         dts = files["alp_e1m_v2m101_m33_sm/alp_e1m_v2m101_m33_sm_r9a09g056n48gbg_cm33.dts"]
         self.assertIn("openamp_shm: memory@9f700000", dts)
         self.assertIn("mbox1: mhu@", dts)
+
+    def test_v2n_v2m_audit_cm33_outputs(self) -> None:
+        """Pin the CM33 audit outputs (CM33-01/14/M2) on both SKUs: sci0 RXD
+        pull-up, enabled-only `supported:`, and the RAM console (node is a
+        `zephyr,memory-region`, size matches CONFIG_RAM_CONSOLE_BUFFER_SIZE)."""
+        for sku, d in (("E1M-V2N101", "e1m_v2n101_m33_sm"),
+                       ("E1M-V2M101", "e1m_v2m101_m33_sm")):
+            files = emit_zephyr_board(sku, "m33_sm", METADATA_ROOT)
+            base = f"alp_{d}/alp_{d}"
+            dts = files[f"{base}_r9a09g056n48gbg_cm33.dts"]
+            cfg = files[f"{base}_r9a09g056n48gbg_cm33_defconfig"]
+            yml = files[f"{base}_r9a09g056n48gbg_cm33.yaml"]
+            pin = files[f"{base}-pinctrl.dtsi"]
+            self.assertIn("bias-pull-up;", pin)
+            self.assertRegex(yml, r"supported:\s*- gpio\s*- spi\s")
+            self.assertNotRegex(yml, r"-\s*(i2c|uart)\b")
+            self.assertNotRegex(cfg, r"(?m)^CONFIG_UART_INTERRUPT_DRIVEN=")
+            self.assertIn("CONFIG_RAM_CONSOLE=y", cfg)
+            self.assertIn("zephyr,ram-console = &ram_console;", dts)
+            m = re.search(r"ram_console: memory@9f710000 \{(.*?)\};", dts, re.S)
+            self.assertIsNotNone(m)
+            node = m.group(1)
+            self.assertIn('compatible = "zephyr,memory-region";', node)
+            self.assertIn('zephyr,memory-region = "RAM_CONSOLE";', node)
+            self.assertIn("reg = <0x9f710000 0x4000>;", node)
+            self.assertIn("CONFIG_RAM_CONSOLE_BUFFER_SIZE=16384", cfg)
+            self.assertRegex(cfg, r"(?m)^CONFIG_LOG_PRINTK=n$")
+
+    def test_v2n_ram_console_inside_openamp_window_and_clear_of_ipc(self) -> None:
+        """The RAM console must sit inside `openamp_shm` and overlap none of
+        the rsctbl / mhu1_shm / vring_* regions (parsed from the same dts,
+        so a moved IPC region fails here, not on silicon)."""
+        for sku, d in (("E1M-V2N101", "e1m_v2n101_m33_sm"),
+                       ("E1M-V2M101", "e1m_v2m101_m33_sm")):
+            dts = emit_zephyr_board(sku, "m33_sm", METADATA_ROOT)[
+                f"alp_{d}/alp_{d}_r9a09g056n48gbg_cm33.dts"]
+            regs = {
+                label: (int(base, 16), int(base, 16) + int(size, 16))
+                for label, base, size in re.findall(
+                    r"(\w+): memory@\w+ \{[^}]*?reg = <(0x[0-9a-f]+) (0x[0-9a-f]+)>;",
+                    dts)
+            }
+            lo, hi = regs.pop("ram_console")
+            win_lo, win_hi = regs.pop("openamp_shm")
+            self.assertTrue(win_lo <= lo and hi <= win_hi, sku)
+            ipc = {k: v for k, v in regs.items()
+                   if k in ("rsctbl", "mhu1_shm") or k.startswith("vring_")}
+            self.assertEqual(len(ipc), 6, f"{sku}: {sorted(ipc)}")
+            for label, (a, b) in ipc.items():
+                self.assertTrue(hi <= a or b <= lo, f"{sku}: ram_console overlaps {label}")
 
     def test_openamp_ipc_false_drops_the_block(self) -> None:
         """No committed board sets `openamp_ipc: false` any more, so the
@@ -562,6 +685,36 @@ class _MutatedMetadata:
                          encoding="utf-8")
 
 
+class TestAen401OnModuleDtsi(unittest.TestCase):
+    """The hand-written AEN401 board includes
+    `alp_e1m_aen401_m55_hp-on-module.dtsi`: the BRD_I2C bus and the
+    `alp,som-power` node for that SKU (#2876).  Its body must stay exactly what
+    the generator emits for the E1M-AEN401 preset, so a change to
+    on-module-links.yaml reaches this board too."""
+
+    def test_aen401_on_module_dtsi_is_generator_output(self) -> None:
+        import yaml
+        links = gzb._load_aen_on_module_links(METADATA_ROOT)
+        preset = yaml.safe_load(
+            (METADATA_ROOT / "e1m_modules" / "E1M-AEN401.yaml").read_text(
+                encoding="utf-8"))
+        body = "\n".join(
+            gzb._aen_brd_i2c_dts(links, "E4")
+            + gzb._aen_e1m_i2c0_dts(links)
+            + gzb._aen_som_power_dts(
+                preset, gzb._load_aen_power_domains(METADATA_ROOT), links,
+                gzb._load_aen_wired_lpgpio_pads(METADATA_ROOT)))
+        committed = (BOARDS_ROOT / "e1m_aen401_m55_hp"
+                     / "alp_e1m_aen401_m55_hp-on-module.dtsi").read_text(
+                         encoding="utf-8")
+        marker = "#include <zephyr/dt-bindings/gpio/gpio.h>\n\n"
+        self.assertIn(marker, committed)
+        self.assertEqual(committed.split(marker, 1)[1].rstrip("\n"),
+                         body.rstrip("\n"),
+                         "regenerate alp_e1m_aen401_m55_hp-on-module.dtsi "
+                         "from scripts/gen_zephyr_board.py")
+
+
 class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
     """Every SKU, part designator, pin name and base address in a generated
     AEN board tree must be transcribed from metadata, never inherited from
@@ -596,6 +749,20 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
             self.assertNotIn("Ensemble E8", emitted)
             self.assertNotIn("Alif E8", emitted)
             self.assertNotIn("AE822 DFP", emitted)
+
+    def test_watchdog_include_is_scoped_to_the_parts_it_was_checked_against(
+            self) -> None:
+        """`ensemble_rtss_{role}_wdog.dtsi` carries a watchdog address checked
+        against the E4 and E8 DFPs only (#2877): an E8 board includes it, a
+        board mutated to another part does not."""
+        files = emit_zephyr_board("E1M-AEN801", "m55_he", METADATA_ROOT)
+        dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        self.assertIn("#include <alif/ensemble_rtss_he_wdog.dtsi>", dts)
+        with _MutatedMetadata() as mm:
+            mm.json_set(E8_SOC, "part", "E9")
+            files = emit_zephyr_board("E1M-AEN801", "m55_he", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        self.assertNotIn("_wdog.dtsi", dts)
 
     def test_rtc_alarm_risk_is_scoped_to_the_part_it_was_evidenced_against(
             self) -> None:
@@ -1318,6 +1485,61 @@ class TestAenLogModeDefault(unittest.TestCase):
                     f"{defconfig} assigns the LOG_MODE choice symbol "
                     f"directly; use the Kconfig.defconfig `choice LOG_MODE / "
                     f"default LOG_MODE_MINIMAL` form instead (#1373)")
+
+
+class TestEveryAenBoardSharesTheSomLevelDefaults(unittest.TestCase):
+    """Facts of the shared E1M-AEN SoM PCB must hold on every AEN board tree,
+    not only the generated E8 ones (the hand-written AEN401 / AEN601 trees
+    drifted from them: MRAM MPU table, flex-IO 1.8 V, TMP112 guard, I2C0,
+    power-domain GPIO ports)."""
+
+    def _aen_board_dirs(self) -> list[Path]:
+        dirs = sorted(p for p in BOARDS_ROOT.glob("e1m_aen*") if p.is_dir())
+        self.assertTrue(dirs)
+        return dirs
+
+    def test_every_aen_board_sets_the_mram_mpu_table_and_flex_io_default(self) -> None:
+        for board_dir in self._aen_board_dirs():
+            text = (board_dir / "Kconfig").read_text(encoding="utf-8")
+            for sym in ("CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS", "ALIF_FLEX_IO_1V8"):
+                self.assertRegex(
+                    text, rf"config {sym}\n\tdefault y\n",
+                    f"{board_dir.name}/Kconfig does not default {sym} on")
+
+    def test_every_board_with_a_tmp112_node_guards_the_duplicate_driver(self) -> None:
+        for board_dir in self._aen_board_dirs():
+            nodes = "".join(p.read_text(encoding="utf-8")
+                            for p in list(board_dir.glob("*.dts")) + list(board_dir.glob("*.dtsi")))
+            if "ti,tmp112" not in nodes:
+                continue
+            text = (board_dir / "Kconfig.defconfig").read_text(encoding="utf-8")
+            self.assertIn("config TMP112\n\tdefault n\n", text,
+                          f"{board_dir.name} lacks the CONFIG_TMP112 duplicate-link guard (#2043)")
+
+    def test_every_board_with_som_power_enables_its_gpio_ports_and_i2c0(self) -> None:
+        for board_dir in self._aen_board_dirs():
+            for p in list(board_dir.glob("*.dts")) + list(board_dir.glob("*.dtsi")):
+                text = p.read_text(encoding="utf-8")
+                if "alp,som-power-domain" not in text:
+                    continue
+                for port in ("gpio5", "gpio11"):
+                    if f"<&{port} " in text:
+                        self.assertRegex(
+                            text, rf"&{port} \{{\n\tstatus = \"okay\";",
+                            f"{p.name} uses {port} for a power domain but never enables it")
+                self.assertIn("alp-i2c0 = &i2c2;", text, f"{p.name} lacks alp-i2c0")
+
+    def test_mpu_table_cmake_gate_keeps_the_ensemble_family_guard(self) -> None:
+        """Upstream selects CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS on many non-Alif
+        SoCs; the symbol alone must never compile mpu_regions_e8.c (it reads MRAM
+        DT labels and defines a second mpu_config)."""
+        text = (REPO / "zephyr" / "CMakeLists.txt").read_text(encoding="utf-8")
+        m = re.search(
+            r"if\((?P<cond>[^)]*)\)\s*zephyr_sources_ifdef\(CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS"
+            r"\s*\$\{ZEPHYR_CURRENT_MODULE_DIR\}/zephyr/soc-bridge/alif/mpu_regions_e8\.c\)",
+            text)
+        self.assertIsNotNone(m, "mpu_regions_e8.c is not wrapped in an if() family guard")
+        self.assertIn("CONFIG_SOC_FAMILY_ENSEMBLE", m.group("cond"))
 
 
 if __name__ == "__main__":

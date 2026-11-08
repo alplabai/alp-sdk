@@ -32,7 +32,8 @@ def test_models_compile_block_validates():
         "name": "person_detect", "source": "models/p.onnx",
         "compile": {
             "deepx_dxm1": {"config": "models/p.deepx.json", "calibration": "models/calib/"},
-            "drpai": {"spec": "models/p.drpai.yaml"},
+            "drpai": {"input_shape": "1,3,224,224", "input_name": "images",
+                      "images": "models/calib/"},
         },
     }], _MODELS_SCHEMA)
 

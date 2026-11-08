@@ -33,6 +33,10 @@
 
 #include <alif/ensemble/ae402fa0e5597le0.dtsi>
 #include <alif/ensemble/common/ensemble_rtss_hp.dtsi>
+#include <alif/ensemble_rtss_hp_wdog.dtsi>
+#include <alif/ensemble_e4_e6_power.dtsi>
+#include <alif/ensemble_e4_camera.dtsi>
+#include <alif/ensemble_e4_peripherals.dtsi>
 #include "alp_e1m_aen401_m55_hp-pinctrl.dtsi"
 
 / {
@@ -111,6 +115,7 @@
 			storage_partition: partition@560000 {
 				label = "storage";
 				reg = <0x560000 DT_SIZE_K(96)>;
+				status = "disabled"; /* owned by the other M55 core (#2984) */
 			};
 
 			atoc_partition: partition@578000 {
@@ -147,3 +152,9 @@
 		};
 	};
 };
+
+/* ------------------------------------------------------------------ */
+/* On-module devices: BRD_I2C (RV-3028, TMP112) and SoM power domains */
+/* ------------------------------------------------------------------ */
+
+#include "alp_e1m_aen401_m55_hp-on-module.dtsi"

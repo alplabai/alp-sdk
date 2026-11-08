@@ -213,29 +213,37 @@ def test_multi_entry_chips_list_does_not_underline_a_valid_entry(tmp_path: Path)
 
 
 def test_planned_driver_chip_emits_ALP_B008(tmp_path: Path):
-    """A manifest with `driver_status: planned` (e.g.
-    metadata/chips/murata_lbee0zz2kl.yaml) ships no chips/<id>/ driver and
-    declares no ALP_SDK_CHIP_<NAME> Kconfig symbol -- naming it in `chips:`
-    must still be rejected as ALP-B008, the same way a made-up name is,
-    rather than silently passing because a manifest file happens to exist
-    (review round 3, #1224)."""
+    """A manifest with `driver_status: planned` ships no chips/<id>/ driver
+    and declares no ALP_SDK_CHIP_<NAME> Kconfig symbol -- naming it in
+    `chips:` must still be rejected as ALP-B008, the same way a made-up name
+    is, rather than silently passing because a manifest file happens to
+    exist (review round 3, #1224).  No shipped manifest is `planned`, so the
+    test plants one in a copy of metadata/."""
+    metadata_root = tmp_path / "metadata-copy"
+    shutil.copytree(REPO / "metadata", metadata_root)
+    (metadata_root / "chips" / "planned_part_1224.yaml").write_text(
+        "schema_version: 1\n"
+        "chip_id: planned_part_1224\n"
+        "driver_status: planned\n",
+        encoding="utf-8",
+    )
     board = tmp_path / "board.yaml"
     board.write_text(
         "som:\n  sku: E1M-AEN801\n"
         "preset: e1m-evk\n"
         "cores:\n  m55_hp:\n    app: .\n"
-        "chips:\n  - murata_lbee0zz2kl\n",
+        "chips:\n  - planned_part_1224\n",
         encoding="utf-8",
     )
-    c = validate_board_yaml(board)
+    c = validate_board_yaml(board, metadata_root=metadata_root)
     diags = [d for d in c if d.code == "ALP-B008"]
     assert diags, "ALP-B008 expected for a driver_status: planned manifest"
-    assert "murata_lbee0zz2kl" in diags[0].message
-    # The manifest IS committed (metadata/chips/murata_lbee0zz2kl.yaml
-    # exists) -- the message must say driver_status: planned, never claim
-    # the manifest is missing (review round 3 major).
+    assert "planned_part_1224" in diags[0].message
+    # The manifest exists (planted above) -- the message must say
+    # driver_status: planned, never claim the manifest is missing (review
+    # round 3 major).
     assert "driver_status: planned" in diags[0].message
-    assert "no metadata/chips/murata_lbee0zz2kl.yaml" not in diags[0].message
+    assert "no metadata/chips/planned_part_1224.yaml" not in diags[0].message
     # No "did you mean" against an unrelated chip for an entry that was
     # spelled correctly.
     assert diags[0].hint is None

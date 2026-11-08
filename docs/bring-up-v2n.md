@@ -90,7 +90,7 @@ header at [`<alp/chips/gd32_swd.h>`](../include/alp/chips/gd32_swd.h):
 
 ```c
 gd32_swd_t swd;
-gd32_swd_init(&swd, /*swdio*/ pin_swdio, /*swclk*/ pin_swclk, /*nrst*/ pin_nrst);
+gd32_swd_init(&swd);               /* opens P70/P71/P74 itself; asserts NRST first */
 gd32_swd_connect(&swd);            /* line-reset + JTAG-to-SWD + IDCODE read */
 gd32_swd_halt(&swd);               /* halt Cortex-M33 cleanly */
 gd32_swd_flash_erase(&swd, GD32_SWD_FMC_FLASH_BASE, image_size);
@@ -235,6 +235,58 @@ Expected: PHYID1 reads `0x001C` (Realtek OUI).  After ~3-5 s with a
   Kconfig `CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` is set to its
   default `-1`.  Wire the right bus id (ALP_E1M_I2C0 on V2N) and the
   EEPROM address (`0x50` strap default) in `prj.conf`.
+
+## 7a. U-Boot environment and microSD card-detect (bench checks)
+
+Design in [`soms/v2n.md`](soms/v2n.md#uboot-environment). Not yet run on
+silicon; do them in order on a unit flashed with the new FIP and image.
+
+1. **Boot partition size.** From Linux: `cat /sys/block/mmcblk0boot1/size`
+   (512-byte sectors). Expect at least `0x1200` (the environment ends at
+   byte `0x240000`). If smaller, stop: the offsets do not fit this eMMC.
+2. **Which partition the ROM boots.** `mmc extcsd read /dev/mmcblk0 |
+   grep PARTITION_CONFIG` -> `0x08` (boot partition 1 = `mmcblk0boot0`).
+   Then compare `md5sum` of the first FIP-sized span of `mmcblk0boot0`
+   and `mmcblk0boot1` against the bundle's FIP: record which one holds
+   the running bootloader (open question: `write_emmc_boot` writes
+   `mmcblk0boot1`).
+3. **First boot.** Serial console on the first boot of the new FIP: expect
+   one `bad CRC, using default environment`, then
+   `ALP: environment initialised` and `Saving Environment to
+   MMC... Writing to redundant MMC(0)... OK`.
+4. **Second boot is silent.** Reboot: no `bad CRC` line, no `initialised`
+   line, `Loading Environment from MMC... OK`.
+5. **An allowlisted variable survives a reboot.** At the U-Boot prompt:
+   `setenv bootcount 3; saveenv`, `reset`, then `printenv bootcount` ->
+   `bootcount=3`. A variable not on the allowlist must NOT come back:
+   `setenv scratch 1; saveenv`, `reset`, `printenv scratch` -> not defined.
+6. **Redundancy.** After `saveenv`, corrupt copy 2 from Linux
+   (`echo 0 > /sys/block/mmcblk0boot1/force_ro`, `dd if=/dev/zero
+   of=/dev/mmcblk0boot1 bs=1 seek=$((0x230000)) count=16`,
+   `echo 1 > /sys/block/mmcblk0boot1/force_ro`), reboot: U-Boot still
+   loads `bootcount`; the next `saveenv` repairs the copy.
+7. **Linux -> U-Boot.** In Linux: `fw_printenv bootcount` -> `3`;
+   `fw_setenv bootcount 4`; reboot; U-Boot `printenv bootcount` -> `4`. If
+   `fw_setenv` fails with a read-only error, the `force_ro` of `mmcblk0boot1`
+   is set and the tool did not clear it; record it (the image then needs a
+   udev rule or the OTA client must clear it).
+8. **Boot control is the firmware's.** `fw_setenv bootcmd "echo old"`,
+   `fw_setenv bootdelay 5`, reboot: the unit still boots Linux and
+   `printenv bootcmd bootdelay` shows the binary's values (on a production
+   build the console stays locked). Clean up with `fw_setenv bootcmd` and
+   `fw_setenv bootdelay` (unset).
+9. **Provisioning does not clobber it.** Run the provisioning step
+   named `write_emmc_boot` on this unit, reboot, and confirm that
+   `printenv bootcount` is still set.
+10. **Empty SD slot.** No card inserted, power-cycle, serial console: no
+    `Card did not respond to voltage select! : -110` and no `mmc1`
+    output; Linux boots from the eMMC.
+11. **Card inserted.** Card with `boot/Image` and the dtb on partition 2:
+    boots from the card (`root=/dev/mmcblk1p2`). Data-only card (no
+    `boot/Image`): boots from the eMMC. Remove the card, power-cycle:
+    step 10 again.
+12. **Card-detect level.** At the U-Boot prompt with a card inserted:
+    `alp_sd_present; echo $?` -> `0`; with the slot empty -> `1`.
 
 ## 8. Next steps
 

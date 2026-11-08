@@ -35,8 +35,8 @@ static void sim_init(sim_t *s, bool attract)
 {
 	tr_presence_init(&s->pr);
 	tr_attract_init(&s->a);
-	tr_track_init(&s->t, FRAME_W, FRAME_H);
-	tr_track_calibrate(&s->t, tr_pose_box(&tr_sil_stand[0]), FRAME_W);
+	tr_track_init(&s->t, FRAME_H);
+	tr_track_calibrate(&s->t, tr_pose_box(&tr_sil_stand[0]));
 	s->seq     = 0u;
 	s->present = false;
 	if (attract) {
@@ -64,7 +64,7 @@ static tr_attract_ev_t sim_tick(sim_t *s, const tr_pose_t *p)
 	tr_box_t b = sim_box(s, p);
 
 	(void)tr_track_update(&s->t, b);
-	return tr_attract_step(&s->a, &s->t, s->present, 1u);
+	return tr_attract_step(&s->a, &s->t, s->present);
 }
 
 /* A synthetic empty room: every keypoint at 40, except a LONE shoulder at

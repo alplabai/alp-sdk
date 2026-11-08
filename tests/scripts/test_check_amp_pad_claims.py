@@ -117,3 +117,84 @@ def test_stale_exemption_fails(tmp_path: Path) -> None:
     problems = gate.find_problems(root)
     assert len(problems) == len(gate.EXEMPT)
     assert all("matches no" in p for p in problems)
+
+
+# --- both directions + assignable defaults ---------------------------------
+
+def _ownership(root: Path, default: str) -> None:
+    f = root / "metadata" / "e1m_modules" / "v2n" / "core-ownership.yaml"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(yaml.safe_dump({"core_ownership": [], "assignable": {"e1m_uart0": {
+        "default": default, "candidates": ["a55", "m33"],
+        "rows": [{"peripheral": "UART0_TXD0", "pad": "P50"}]}}}), encoding="utf-8")
+
+
+def _cm33_board(root: Path, status: str) -> None:
+    d = root / gate.CM33_BOARDS / "e1m_v2n101_m33_sm"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "b-pinctrl.dtsi").write_text(
+        "&pinctrl {\n\tsci0_pins: sci0 {\n\t\tsci0-pinmux {\n"
+        "\t\t\tpinmux = <RZV_PINMUX(PORT_05, 0, 1)>;\n\t\t};\n\t};\n};\n", encoding="utf-8")
+    (d / "b.dts").write_text(
+        f'&sci0 {{\n\tpinctrl-0 = <&sci0_pins>;\n\tstatus = "{status}";\n}};\n', encoding="utf-8")
+
+
+def test_real_cm33_board_claims_only_m33_pads() -> None:
+    pads = {pad for _, _, pad in gate._cm33_claims(REPO)}
+    assert {"P76", "P77", "P96"} <= pads  # the GD32 SCI7 link is a real, enabled claim
+    assert not pads & set(gate._pads_by_core(REPO, "a55"))
+
+
+def test_cm33_enabled_claim_on_a55_default_pad_fails(tmp_path: Path) -> None:
+    root = _root(tmp_path, "", [_pad("UART0_TXD0", "P50")])
+    _ownership(root, "a55")
+    _cm33_board(root, "okay")
+    problems = gate.find_problems(root)
+    assert len(problems) == 1
+    assert "b.dts:1" in problems[0] and "P50" in problems[0] and "A55" in problems[0]
+
+
+def test_cm33_disabled_node_is_not_a_claim(tmp_path: Path) -> None:
+    root = _root(tmp_path, "", [_pad("UART0_TXD0", "P50")])
+    _ownership(root, "a55")
+    _cm33_board(root, "disabled")
+    assert gate.find_problems(root) == []
+
+
+def test_linux_claim_on_assignable_pad_defaulting_to_m33_fails(tmp_path: Path) -> None:
+    root = _root(tmp_path, "&pinctrl { g { pinmux = <RZV2N_PORT_PINMUX(5, 0, 1)>; }; };\n",
+                 [_pad("UART0_TXD0", "P50")])
+    _ownership(root, "m33")
+    problems = gate.find_problems(root)
+    assert len(problems) == 1 and "P50" in problems[0] and "CM33" in problems[0]
+    _ownership(root, "a55")  # same claim, a55 default: clean
+    assert gate.find_problems(root) == []
+
+
+def test_project_override_makes_a_carrier_claim_fail(tmp_path: Path) -> None:
+    """A carrier dtsi claims UART0's pad (P50).  Clean at the SoM default
+    (a55); a board.yaml `ownership: {e1m_uart0: m33}` moves the pad to the CM33,
+    so the real pass over carrier dtsi + generated fragment must fail.  No
+    patching: the project fragment comes from the real emitter."""
+    import shutil
+    from alp_orchestrate import load_board_yaml
+    root = tmp_path / "metadata"
+    shutil.copytree(REPO / "metadata", root)
+    f = root / "e1m_modules" / "v2n" / "core-ownership.yaml"
+    doc = yaml.safe_load(f.read_text(encoding="utf-8"))
+    doc["assignable"]["e1m_uart0"].update(
+        candidates=["a55", "m33"], m33={"dt_label": "sci0", "alias": "alp-uart9"})
+    f.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    dt = tmp_path / gate.LINUX_DT_DIR / "linux-renesas"
+    dt.mkdir(parents=True)
+    (dt / "e1m-x-evk.dtsi").write_text(
+        "&pinctrl { g { pinmux = <RZV2N_PORT_PINMUX(5, 0, 1)>; }; };\n", encoding="utf-8")
+    shutil.copytree(REPO / "examples" / "multicore" / "rpmsg-v2n", tmp_path / "p")
+    b = tmp_path / "p" / "board.yaml"
+    base = b.read_text(encoding="utf-8")
+    assert gate.find_project_problems(load_board_yaml(b, metadata_root=root)) == []
+    b.write_text(base + "\nownership:\n  e1m_uart0: m33\n", encoding="utf-8")
+    proj = load_board_yaml(b, metadata_root=root)
+    assert "P50" in gate._pads_by_core(tmp_path, "m33", proj.ownership)
+    problems = gate.find_project_problems(proj)
+    assert len(problems) == 1 and "e1m-x-evk.dtsi:1" in problems[0] and "P50" in problems[0]

@@ -37,7 +37,6 @@ families:
   - aen
   - v2n
   - v2n-m1
-  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
@@ -79,3 +78,5 @@ physical:
     - { role: decouple, value: 100nF, net: VDDIO, refdes_prefix: C }
     - { role: decouple, value: 100nF, net: DVDD,  refdes_prefix: C }
     - { role: decouple, value: 100nF, net: AVDD,  refdes_prefix: C }
+tracking:
+  blocker: "ADR 0017 tier decision pending"

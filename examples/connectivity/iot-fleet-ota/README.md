@@ -5,7 +5,7 @@ SKU (apply is DEFERRED, #1069 -- see [STATUS] in `board.yaml`). The
 production-readiness proof for "how do we update 10 000 units in
 the field?".
 
-Targets every E1M-X SoM family. native_sim build verified; HiL
+Forkable to V2N (a `som.sku` + `cores:` edit). native_sim build verified; HiL
 verification gates on a staged Mender server (separate repo).
 
 > **TLS randomness on AEN comes from the Secure Enclave TRNG (#2192).**
@@ -18,17 +18,27 @@ verification gates on a staged Mender server (separate repo).
 > has no such source and still sets `CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y`
 > on its own scenario.
 
-## What lands declaratively in v0.6
+## Build
 
-This example is the SDK's reference for the v0.6 `boot:` + `ota:`
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+## What lands declaratively
+
+This example is the SDK's reference for the `boot:` + `ota:`
 declarative blocks. The relevant fragments of `board.yaml`:
 
 ```yaml
 boot:
   method: mcuboot
-  signing:
-    algorithm: ecdsa_p256
-    key_file:  keys/mcuboot_shared_dev_ecdsa_p256.pem
+  # signing: intentionally omitted -- the SDK-anchored default dev key
+  # `keys/mcuboot_shared_dev_ecdsa_p256.pem` applies (ECDSA-P256).
   # swap_algorithm: intentionally omitted -- E1M-AEN801's disjoint-slot0
   # `memory_map:` (#1069, #1413) has no slot1/scratch partition, so the
   # per-target default resolves to single-app boot.  Setting
@@ -77,16 +87,21 @@ OTA wiring; the board.yaml is the single source of truth.
 
 Four pieces fit together:
 
-- **OPTIGA Trust M** -- on-SoM secure element. Holds the
-  ECDSA-P256 private key in tamper-resistant NVM (slot 0xE0F0).
-  The private half is generated *inside* the chip at SoM-mfg
-  time and never leaves. Without physical access to a
-  provisioned OPTIGA, no attacker can produce a signature this
-  device will accept. See [`docs/secure-boot.md`](../../../docs/secure-boot.md).
-- **ECDSA-P256** -- the signing algorithm. The public half is
-  read out of the OPTIGA once at provisioning, signed by the
+- **OPTIGA Trust M** -- on-SoM secure element on the SKUs that fit it
+  (E1M-AEN501/601/701). There it holds the ECDSA-P256 private key in
+  tamper-resistant NVM (slot 0xE0F0): the private half is generated
+  *inside* the chip at SoM-mfg time and never leaves, so without physical
+  access to a provisioned OPTIGA no attacker can produce a signature this
+  device will accept. **OPTIGA is DNP on E1M-AEN801** (`assembled: false`
+  in `metadata/e1m_modules/E1M-AEN801.yaml`), the SKU this example
+  builds for, so here the key is the SDK's shared development PEM,
+  `keys/mcuboot_shared_dev_ecdsa_p256.pem`, applied by default because
+  `boot.signing` is not set. See [`docs/secure-boot.md`](../../../docs/secure-boot.md).
+- **ECDSA-P256** -- the signing algorithm. On an OPTIGA-fitted SKU the
+  public half is read out of the OPTIGA once at provisioning, signed by the
   manufacturing CA, and compiled into the MCUboot bootloader
-  (driven by `boot.signing.key_file:`). Same key gates both
+  (the SDK-anchored default dev key applies; `boot.signing.key_file:`
+  would override it). Same key gates both
   secure boot and OTA acceptance -- one trust root, fewer
   surfaces.
 - **MCUboot boot chain** -- on this SKU (E1M-AEN801), MCUboot boots
@@ -134,11 +149,12 @@ contract stays portable.
 `${MENDER_TENANT_TOKEN}` is intentionally a placeholder. Real
 tokens never live in the repo:
 
-- Yocto: expanded by the build host's environment when the
-  orchestrator-emitted `local.conf` is sourced.
+- Yocto: the orchestrator-emitted `local.conf` skips the placeholder
+  (BitBake does not expand it); set `MENDER_TENANT_TOKEN` in
+  `conf/local.conf` (see the Mender section of
+  [`meta-alp-sdk/README.md`](../../../meta-alp-sdk/README.md)).
 - Zephyr: written into device-provisioning storage at first boot.
 
-See [`docs/ota.md`](../../../docs/ota.md) "Secrets handling".
 
 ## References
 

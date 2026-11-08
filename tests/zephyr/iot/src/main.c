@@ -42,7 +42,7 @@ ZTEST(alp_iot, test_wifi_connect_null_handle_errors)
 {
 	alp_status_t s =
 	    alp_wifi_connect(NULL, &(alp_wifi_credentials_t){ .ssid = "alp-lab", .psk = NULL }, 1000);
-	zassert_equal(s, ALP_ERR_NOT_READY, "got %d", (int)s);
+	zassert_equal(s, ALP_ERR_INVAL, "got %d", (int)s);
 }
 
 ZTEST(alp_iot, test_wifi_disconnect_null_handle_errors)

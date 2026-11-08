@@ -17,8 +17,9 @@
 # CONFIG_SDHC_DWC_ADMA=y (default) used to place the ADMA descriptor table
 # in an empty-named linker section (CONFIG_SDHC_DESCRIPTOR_SECTION default
 # ""), which is a hard orphan-section link error under
-# -Wl,--fatal-warnings. Building that scenario proves the link still
-# succeeds.
+# -Wl,--fatal-warnings. Since #2858 Ensemble defaults the section to
+# "SRAM0", so this scenario now proves the SRAM0 placement links; the
+# empty-name case is caught by a BUILD_ASSERT in sdhc_dwc.c.
 
 sample:
   name: aen-sdhc-probe

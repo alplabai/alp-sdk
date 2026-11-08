@@ -6,7 +6,7 @@ Subject: [PATCH] rzv2n-dev: ALP E1M release GD32_NRST from the ACT88760 at
 
 On early units the ACT88760 PMIC (BRD_I2C, 7-bit 0x25) powers up with
 GPIO register 0x10 = 0x88: that OTP revision drives GPIO4, which is wired
-to the GD32 supervisor's NRST, so the GD32 stays in reset and the
+to the GD32 supervisor NRST, so the GD32 stays in reset and the
 gpio-gd32-bridge driver finds nothing at probe ("bridge not answering
 (-6)"). Production units carry the fixed OTP and read 0x08 at power-on.
 Clearing bit 7 (0x88 -> 0x08) releases the GD32 on an early unit. The
@@ -20,17 +20,25 @@ clock-generator fixup, MAC and DEEPX rail steps, so the GD32 boots while
 U-Boot is still running and answers when Linux probes the bridge. Only
 bit 7 is changed (read-modify-write). A production unit, whose register
 already reads bit 7 clear, is left alone: the step is a no-op there and
-prints "already released". Each outcome prints one "ALP:" line.
+prints "already released".
+
+The ACT88760 has no documented device-ID register, so the register
+value is the identity check: the write happens only when reg 0x10 reads
+exactly the early-OTP value 0x88. Any other value is left untouched and
+reported. The patch is applied on the whole rzv2n family (later patches use
+its code as context), so a plain Renesas EVK is only ever read from, never
+written. Each outcome prints one "ALP:" line.
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- 1 file changed, 53 insertions(+)
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 66 ++++++++++++++++++++++++++++
+ 1 file changed, 66 insertions(+)
 
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
-index 219eb219..49567d4a 100644
+index 669b86ee..8aac493a 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
 +++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
-@@ -1172,11 +1172,64 @@ U_BOOT_CMD(alp_eth_mac, 1, 0, do_alp_eth_mac,
+@@ -1172,11 +1172,77 @@ U_BOOT_CMD(alp_eth_mac, 1, 0, do_alp_eth_mac,
  	   ""
  );
  
@@ -45,11 +53,19 @@ index 219eb219..49567d4a 100644
 + * before the kernel: the gpio-gd32-bridge driver then finds the GD32
 + * answering at probe.  Only bit 7 is touched; any other bit keeps its
 + * OTP value.
++ *
++ * The ACT88760 has no documented device-ID register, so the register
++ * itself is the identity check: the write happens only when reg 0x10
++ * reads exactly the known early-OTP value 0x88.  Any other value (a
++ * different part answering at 0x25, or an unexpected OTP image) is left
++ * untouched and only reported, so a plain Renesas EVK (no ACT88760 at
++ * RIIC8 0x25) is read from but never written to.
 + */
 +#define ALP_ACT88760_I2C_BUS   8	/* DM I2C bus for RIIC8 / BRD_I2C */
 +#define ALP_ACT88760_I2C_ADDR  0x25
 +#define ALP_ACT88760_GPIO_REG  0x10
 +#define ALP_ACT88760_GPIO4_HOLD BIT(7)	/* set: GD32_NRST held low */
++#define ALP_ACT88760_GPIO_OTP_EARLY 0x88	/* early-unit OTP power-up value */
 +
 +static void alp_gd32_nrst_release(void)
 +{
@@ -70,6 +86,11 @@ index 219eb219..49567d4a 100644
 +	}
 +	if (!(before & ALP_ACT88760_GPIO4_HOLD)) {
 +		printf("ALP: ACT88760 GD32_NRST already released (0x%02x=0x%02x)\n",
++		       ALP_ACT88760_GPIO_REG, before);
++		return;
++	}
++	if (before != ALP_ACT88760_GPIO_OTP_EARLY) {
++		printf("ALP: ACT88760 reg 0x%02x reads unexpected 0x%02x; GD32_NRST not released\n",
 +		       ALP_ACT88760_GPIO_REG, before);
 +		return;
 +	}
@@ -96,5 +117,5 @@ index 219eb219..49567d4a 100644
  
  	v2n_m1 = alp_som_is_v2n_m1();
 -- 
-2.43.0
+2.53.0
 

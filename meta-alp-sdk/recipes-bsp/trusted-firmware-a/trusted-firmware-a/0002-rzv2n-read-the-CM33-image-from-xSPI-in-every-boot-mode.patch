@@ -1,0 +1,246 @@
+From: Alp Lab AB
+Subject: [PATCH] rzv2n: read the CM33 image from xSPI in every boot mode
+
+With PLAT_M33_BOOT_SUPPORT=1 (patch 0001) BL2 starts the CM33 in every boot
+mode, but the vendor BL22 source follows the boot device: xSPI 0x200000 for
+xSPI boot, byte 0x200000 (sector 0x1000) of the enabled eMMC boot partition
+for eMMC boot, byte 0x200000 of the card for eSD boot. The ALP flow keeps the
+CM33 image only in xSPI (mtd1 + 0x1a0000) and never writes the eMMC boot
+partition there, so under eMMC boot (DSW1 mode 1, bl2_bp_mmc) BL2 loaded
+unwritten boot-partition bytes to SRAM 0x08000000 and released the CM33 at
+0x08003000 into them (#2658).
+
+Read BL22 from the memory-mapped xSPI window in every boot mode, and for
+eMMC/eSD boot also set up the xSPI controller and open the memmap device,
+which the vendor code did only for xSPI boot. cpg_setup() already releases the
+xSPI clock, reset and MSTOP in every boot mode, the BL2 MMU maps the xSPI
+window, and the xSPI TZC region is set in every boot mode.
+
+BL2 logs the result of xspi_setup() as "BL2: xSPI for BL22, id 0x%x": the
+flash device id (low 24 bits), 0 or 0xffffff when no device answered, or
+0xffffffff when the xSPI reset command failed. A bench log therefore shows
+whether xSPI came up in eMMC/eSD boot.
+
+The boot ROM configures the xSPI0 pins only for xSPI boot. The expected cause
+of the id 0 (bench 2026-10-03, E1M-V2M103, SYS_LSI_MODE 0x3c05) is PFC_OEN
+(PFC_BASE + 0x3C40): per RZ/V2N UM 4.2.2.31 its reset value is 0x3f, i.e. the
+xSPI0 CKP (bit 5), CS0N (bit 3) and RESET0N (bit 2) output enables are OFF, so
+in eMMC/eSD boot xSPI0 would never reach the flash. To be confirmed by the
+`md.l 0x10413c40 1` read in U-Boot. Before xspi_setup() BL2 now clears exactly those three
+OEN bits under PFC_PWPR REGWE_B (PFC_BASE + 0x3C04, bit 5), restoring PFC_PWPR
+afterwards, then waits 1 ms for the flash to leave reset. OEN_ET0/OEN_ET1
+(bits 0/1, ET0/ET1 TXC direction) and OEN_XSPI_CLKN (bit 4) are not touched.
+
+When no flash answers (id 0, 0xffffff, 0xffffffff, or a first RDID byte of
+0x00/0xff) BL2 prints a NOTICE,
+skips loading BL22 and does not release the CM33, instead of starting it into
+bus garbage.
+
+Verification status:
+- Build-verified: the original patch compiles into bl2.bin for e1m-v2m103-a55
+  (bitbake, alplab-gw); both bl2_bp_spi and bl2_bp_mmc are cut from that one
+  bl2.bin. This revision is syntax-checked (aarch64 gcc -fsyntax-only), not yet
+  bitbake-built.
+- NOT bench-verified: the PFC_OEN fix, the CM33 running under eMMC boot
+  (DSW1 mode 1) and under eSD boot, and that xSPI boot (DSW1 mode 2) still
+  starts the CM33. The first bench log showed id 0x0 (before this fix).
+
+Upstream-Status: Inappropriate [ALP E1M-V2N/V2M SoM configuration]
+Signed-off-by: Alp Lab AB
+---
+diff --git a/plat/renesas/rz/soc/v2n/bl2_plat_setup.c b/plat/renesas/rz/soc/v2n/bl2_plat_setup.c
+index 594da83..a42930c 100644
+--- a/plat/renesas/rz/soc/v2n/bl2_plat_setup.c
++++ b/plat/renesas/rz/soc/v2n/bl2_plat_setup.c
+@@ -8,6 +8,7 @@
+ #include <arch.h>
+ #include <arch_helpers.h>
+ #include <assert.h>
++#include <stdbool.h>
+ #include <common/bl_common.h>
+ #include <common/desc_image_load.h>
+ #include <drivers/generic_delay_timer.h>
+@@ -39,6 +40,11 @@ static uint32_t bl2_plat_get_boot_mode(void)
+ 	return RZ_COLD_BOOT;
+ }
+ 
++#if PLAT_M33_BOOT_SUPPORT
++/* Set false by plat_storage.c when eMMC/eSD boot finds no xSPI flash */
++extern bool rzv2n_bl22_xspi_ok;
++#endif
++
+ int bl2_plat_handle_pre_image_load(unsigned int image_id)
+ {
+ 	bl_mem_params_node_t *bl_mem_params = get_bl_mem_params_node(image_id);
+@@ -50,7 +56,7 @@ int bl2_plat_handle_pre_image_load(unsigned int image_id)
+ 
+ 	if (image_id == BL22_IMAGE_ID) {
+ #if PLAT_M33_BOOT_SUPPORT
+-		if (cpg_is_m33_core_booted())
++		if (cpg_is_m33_core_booted() || !rzv2n_bl22_xspi_ok)
+ 			bl_mem_params->image_info.h.attr |= IMAGE_ATTRIB_SKIP_LOADING;
+ #endif
+ 	} else {
+@@ -195,7 +201,10 @@ void bl2_platform_setup(void)
+ void bl2_el3_plat_prepare_exit(void)
+ {
+ #if PLAT_M33_BOOT_SUPPORT
+-	if (!cpg_is_m33_core_booted()) {
++	if (!rzv2n_bl22_xspi_ok) {
++		/* plat_storage.c found no xSPI flash: never start the CM33 into garbage */
++		INFO("BL2: skipping the Cortex-M33 release (no xSPI flash)\n");
++	} else if (!cpg_is_m33_core_booted()) {
+ 		INFO("Booting Cortex-M33\n");
+ 		bl_mem_params_node_t *bl22_mem_params = get_bl_mem_params_node(BL22_IMAGE_ID);
+ 
+diff --git a/plat/renesas/rz/soc/v2n/plat_storage.c b/plat/renesas/rz/soc/v2n/plat_storage.c
+index 1d111da..7bf93d1 100644
+--- a/plat/renesas/rz/soc/v2n/plat_storage.c
++++ b/plat/renesas/rz/soc/v2n/plat_storage.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <assert.h>
++#include <stdbool.h>
+ #include <common/tbbr/tbbr_img_def.h>
+ #include <drivers/io/io_driver.h>
+ #include <drivers/io/io_storage.h>
+@@ -13,8 +14,10 @@
+ #include <io_common.h>
+ #include <io_emmcdrv.h>
+ #include <io_sddrv.h>
++#include <drivers/delay_timer.h>
+ #include <lib/mmio.h>
+ #include <tools_share/firmware_image_package.h>
++#include <pfc_regs.h>
+ #if (PLAT_SYSTEM_SUSPEND || PLAT_M33_BOOT_SUPPORT)
+ /* plat_tbbr_img_def.h defines BL22_IMAGE_ID, needed by the M33 boot path too */
+ #include <plat_tbbr_img_def.h>
+@@ -162,36 +165,23 @@ static const struct plat_io_policy sd_ddr_config_policy = {
+ #endif /* PLAT_SYSTEM_SUSPEND */
+ 
+ #if PLAT_M33_BOOT_SUPPORT
++bool rzv2n_bl22_xspi_ok = true;
+ static const io_block_spec_t spirom_bl22_image_spec = {
+ 	.offset = RZV2N_SPIROM_M33_FW_BASE,
+ 	.length = RZV2N_M33_FW_SIZE,
+ };
+ 
+-static const io_block_spec_t emmc_bl22_image_spec = {
+-	.offset = RZV2N_EMMC_M33_FW_BASE,
+-	.length = RZV2N_M33_FW_SIZE,
+-};
+-
+-static const io_block_spec_t sd_bl22_image_spec = {
+-	.offset = RZV2N_SD_M33_FW_BASE,
+-	.length = RZV2N_M33_FW_SIZE,
+-};
+-
+-static const struct plat_io_policy emmc_bl22_image_policy = {
+-	&emmcdrv_dev_handle,
+-	(uintptr_t) &emmc_bl22_image_spec,
+-	&open_emmcdrv
+-};
++/*
++ * The CM33 image has one home in every boot mode: xSPI 0x200000. The vendor
++ * eMMC/eSD policies read RZV2N_EMMC/SD_M33_FW_BASE (0x200000 of the boot
++ * device), which the ALP provisioning flow never writes, so BL2 released the
++ * CM33 into whatever bytes were there.
++ */
+ static const struct plat_io_policy spirom_bl22_image_policy = {
+ 	&memdrv_dev_handle,
+ 	(uintptr_t) &spirom_bl22_image_spec,
+ 	&open_memmap
+ };
+-static const struct plat_io_policy sd_bl22_image_policy = {
+-	&sddrv_dev_handle,
+-	(uintptr_t) &sd_bl22_image_spec,
+-	&open_sddrv
+-};
+ #endif /* PLAT_M33_BOOT_SUPPORT */
+ 
+ static struct plat_io_policy policies[MAX_NUMBER_IDS] = {
+@@ -313,7 +303,7 @@ static void update_dev_policies(uint16_t boot_mode)
+ 		policies[V2N_DDR_CONFIG_ID]	= emmc_ddr_config_policy;
+ #endif
+ #if PLAT_M33_BOOT_SUPPORT
+-		policies[BL22_IMAGE_ID]		= emmc_bl22_image_policy;
++		policies[BL22_IMAGE_ID]		= spirom_bl22_image_policy;
+ #endif
+ 		break;
+ 	case SYS_BOOT_MODE_ESD:
+@@ -322,7 +312,7 @@ static void update_dev_policies(uint16_t boot_mode)
+ 		policies[V2N_DDR_CONFIG_ID]	= sd_ddr_config_policy;
+ #endif
+ #if PLAT_M33_BOOT_SUPPORT
+-		policies[BL22_IMAGE_ID]		= sd_bl22_image_policy;
++		policies[BL22_IMAGE_ID]		= spirom_bl22_image_policy;
+ #endif
+ 		break;
+ 	default:
+@@ -385,6 +375,65 @@ void rz_io_setup(void)
+ 		panic();
+ 	}
+ 
++#if PLAT_M33_BOOT_SUPPORT
++	/*
++	 * eMMC/eSD boot: bring up the xSPI memory-mapped window for the BL22
++	 * read. cpg_setup() already released the xSPI clock, reset and MSTOP
++	 * in every boot mode; only the controller set-up was SPI-boot only.
++	 */
++	if (boot_mode != SYS_BOOT_MODE_SPI_1_8 &&
++		boot_mode != SYS_BOOT_MODE_SPI_3_3) {
++		unsigned int xspi_id;
++		uint32_t pwpr;
++
++		/*
++		 * The boot ROM configures the xSPI0 pins only for xSPI boot. In
++		 * eMMC/eSD boot PFC_OEN (PFC_BASE + 0x3C40, reset value 0x3f) still
++		 * has the xSPI0 CKP/CS0N/RESET0N output enables OFF, so xSPI0 never
++		 * reached the flash and BL2 read an id of 0. OEN: 1 = output OFF.
++		 * Clear ONLY those three bits; OEN_ET0/OEN_ET1 (ET0/ET1 TXC
++		 * direction) must stay untouched or the Ethernet clocks break.
++		 * OEN_XSPI_CLKN (bit 4) is left as the ROM/reset state: the flash
++		 * is single-ended-clocked in this mode.
++		 */
++		pwpr = mmio_read_32(PFC_PWPR);
++		mmio_write_32(PFC_PWPR, pwpr | PWPR_REGWE_B);
++		mmio_clrbits_32(PFC_OEN, OEN_XSPI_CLKP | OEN_XSPI_CS0N |
++					 OEN_XSPI_RESET0_N);
++		mmio_write_32(PFC_PWPR, pwpr);
++
++		/*
++		 * RESET0N may have been held low until now: give the flash a
++		 * conservative 1 ms to leave reset before the first command. This
++		 * is a safe margin, not a datasheet value (reset recovery of
++		 * SPI NOR is tens of us; the GD25 datasheet is not in the repo).
++		 */
++		udelay(1000);
++
++		/* xspi_setup() returns the device id (low 24 bits), or -1 if the reset failed */
++		xspi_id = (unsigned int)xspi_setup();
++
++		NOTICE("BL2: xSPI for BL22, id 0x%x\n", xspi_id);
++		register_io_dev_memmap(&memmap);
++		io_dev_open(memmap, 0, &memdrv_dev_handle);
++
++		/*
++		 * No flash answered (id 0, 0xffffff, or -1 after a failed reset),
++		 * or the first RDID byte (JEDEC manufacturer, low byte) is 0x00 or
++		 * 0xff: the vendor xspi_read_identification() returns the last
++		 * read after 1000 retries even if it never became stable. BL22
++		 * would read bus garbage, so do not load it and do not release
++		 * the CM33 (bl2_plat_setup.c checks this flag).
++		 */
++		if ((xspi_id & 0xffffffU) == 0U ||
++			(xspi_id & 0xffffffU) == 0xffffffU ||
++			(xspi_id & 0xffU) == 0x00U || (xspi_id & 0xffU) == 0xffU) {
++			NOTICE("BL2: no xSPI flash answered, CM33 NOT started\n");
++			rzv2n_bl22_xspi_ok = false;
++		}
++	}
++#endif /* PLAT_M33_BOOT_SUPPORT */
++
+ 	update_dev_policies(boot_mode);
+ }
+ 

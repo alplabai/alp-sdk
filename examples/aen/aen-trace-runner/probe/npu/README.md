@@ -2,7 +2,7 @@
 
 DIAGNOSTIC, NOT PRODUCT CODE. This probe proves the NPU body-control pipeline on silicon
 before the camera comes back to the game board. Design:
-`docs/superpowers/specs/2026-09-24-npu-body-control-design.md`.
+`../../docs/superpowers/specs/2026-09-24-npu-body-control-design.md`.
 
 The M55-HP runs the cut MoveNet (`tools/movenet_cut.py`) on its Ethos-U55-256 through
 `<alp/inference.h>`. It runs three canned 640x400 GREY8 frames (empty, standing, crouching)
@@ -49,7 +49,7 @@ PYTHONPATH=.venv/flatc/gen .venv/bin/python tools/movenet_cut.py \
 .venv/bin/python tools/npu_probe_payload.py --cut /tmp/tr-npu-models/movenet_cut.tflite \
   --out /tmp/tr-npu-probe/payload.bin \
   --vela-config <Alif sdk-alif>/samples/modules/executorch/ensemble_vela.ini
-# 2. the HP image (ITCM, 0x50000000)
+# 2. the HP image (ITCM, 0x50000000); bench probe, no board.yaml, so no `tan build` (alp-sdk checkout only)
 ZEPHYR_BASE=$ZEPHYR_BASE ZEPHYR_SDK_INSTALL_DIR=$ZEPHYR_SDK_INSTALL_DIR \
 west build -p always -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp -d /tmp/tr-npu-probe/build probe/npu -- \
   -DEXTRA_ZEPHYR_MODULES="<alp-sdk>;<hal_alif>;<tflite-micro module>" \

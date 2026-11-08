@@ -69,7 +69,9 @@ DIVERGENT_COPIES = {
     "examples/aen/aen-trace-runner/sound/src": (
         "the game's sound image runs on the M55-HP, so the LP-pad output "
         "enable is compiled for CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP as well "
-        "as the HE (issue #2446)"
+        "as the HE (issue #2446), and it leases I2C2 around the proxy attach "
+        "(BRIDGE_EMBED); the warm-aware final reset matches the canonical "
+        "copy (issue #2797)"
     ),
 }
 

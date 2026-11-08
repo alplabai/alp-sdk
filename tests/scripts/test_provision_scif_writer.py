@@ -79,6 +79,34 @@ def test_load_writer_times_out_without_banner(tmp_path):
     assert con.written == []    # nothing streamed at a unit that never asked for it
 
 
+def test_load_writer_waits_for_full_prompt_line_before_streaming(tmp_path):
+    mot = tmp_path / "writer.mot"
+    mot.write_bytes(b"S0030000FC\r\n")
+    con = FakeConsole([(None, "SCI Download mode (Normal SCI boot)\r\n-- Load Program to SRAM")])
+    with pytest.raises(ExpectTimeout):
+        sw.load_writer(con, mot, timeout=0.05)
+    assert con.written == []    # prompt line unfinished: ROM still printing
+
+
+def test_load_writer_streams_lf_only_mot_as_crlf(tmp_path):
+    mot = tmp_path / "writer.mot"
+    mot.write_bytes(b"S0030000FC\nS70500000000FA\n")
+    banner = "SCI Download mode (Normal SCI boot)\r\n-- Load Program to SRAM ---------------\r\n"
+    con = FakeConsole([(None, banner), (r"(?s).", "\r\n>")])
+    sw.load_writer(con, mot, timeout=1)
+    assert _written_blob(con, 0) == b"S0030000FC\r\nS70500000000FA\r\n"
+
+
+def test_load_writer_names_the_cause_when_the_rom_rejects_the_load_address(tmp_path):
+    mot = tmp_path / "writer.mot"
+    mot.write_bytes(b"S0030000FC\nS70500000000FA\n")
+    banner = "SCI Download mode (Normal SCI boot)\r\n-- Load Program to SRAM ---------------\r\n"
+    con = FakeConsole([(None, banner), (r"(?s).", "\r\nAddress Error!!!\r\n")])
+    with pytest.raises(BenchError, match="boot ROM rejected the Flash Writer load address") as e:
+        sw.load_writer(con, mot, timeout=1)             # a 1 s timeout: it must not be what ends this
+    assert "CA55" in str(e.value) and "around 50 mA at 15 V instead of ~90 mA" in str(e.value)
+
+
 # --- EM_W ------------------------------------------------------------------
 
 def _em_w_script(image: bytes, start: int, sector: int, done: str):
@@ -218,7 +246,8 @@ def test_bootstrap_sequence_on_one_console(tmp_path):
     mot = tmp_path / "writer.mot"
     mot.write_bytes(b"S0030000FC\r\n")
     bl2, fip = b"\x11" * 100, b"\x22" * 5000
-    script = [(None, "SCI Download mode\r\n"), (r"(?s).", "Flash writer for RZ/V2N" + PROMPT)]
+    script = [(None, "SCI Download mode (Normal SCI boot)\r\n-- Load Program to SRAM ---------------\r\n"),
+              (r"(?s).", "Flash writer for RZ/V2N" + PROMPT)]
     done = "SAVE -FLASH.......\r\nEM_W Complete!" + PROMPT
     script += _em_w_script(bl2, 0x8101E00, sw.BL2_MMC_SECTOR, done)
     script += _em_w_script(fip, 0x44000000, sw.FIP_SECTOR, done)

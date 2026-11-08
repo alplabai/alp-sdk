@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/linux-kernel-drivers-v1.schema.json",
+  "title": "alp-sdk Linux kernel driver availability (v1)",
+  "description": "Which Linux sensor drivers a BSP kernel carries, so a camera module can be checked against the kernel it will run on: a driver is either NATIVE to the kernel or provided by an alp kernel patch under meta-alp-sdk/recipes-kernel/linux/.  Keyed by the exact kernel version string.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kernels"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "kernels": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[0-9]+[.][0-9]+[.][0-9]+(-[a-z0-9.]+)?$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["bsp", "drivers"],
+        "properties": {
+          "bsp": { "type": "string", "description": "BSP the kernel belongs to, e.g. the RZ/V2N BSP." },
+          "drivers": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["compatible", "kconfig", "native"],
+              "properties": {
+                "compatible": { "type": "string", "pattern": "^[a-z0-9]+,[a-z0-9._-]+$", "description": "Linux compatible the driver matches (a chip's `drivers.linux.compatible`)." },
+                "kconfig": { "type": "string", "pattern": "^CONFIG_[A-Z0-9_]+$" },
+                "native": { "type": "boolean", "description": "true = the stock kernel already contains the driver; false = it exists only through `patches`." },
+                "native_lanes": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 1, "maximum": 4 }, "description": "CSI-2 data-lane counts the NATIVE driver accepts, when it is restricted.  Omit for no restriction." },
+                "patches": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[0-9]{4}-[a-zA-Z0-9._-]+[.]patch$" }, "description": "alp patch filenames (in meta-alp-sdk/recipes-kernel/linux/linux-renesas/) that add the driver or extend it (extra lane counts, modes)." },
+                "notes": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

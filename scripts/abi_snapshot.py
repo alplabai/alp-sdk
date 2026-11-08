@@ -177,6 +177,8 @@ _DEFINE_RE = re.compile(
 # logical line BEFORE `_DEFINE_RE` runs -- the way the C preprocessor
 # does, collapsing the join to a single space -- fixes that at the
 # source instead of trying to patch the regex to span lines.
+_HW_REV_BLOCK_RE = re.compile(r"^#ifdef ALP_\w+_HW_REV_\w+$.*?^#endif$", re.MULTILINE | re.DOTALL)
+
 _LINE_CONTINUATION_RE = re.compile(r"\\[ \t]*\r?\n[ \t]*")
 
 
@@ -413,14 +415,14 @@ _TYPEDEF_ALIAS_RE = re.compile(
     r"^typedef\s+(?P<body>[A-Za-z_][\w\s*]*?)\s+(?P<name>[A-Za-z_]\w*)\s*;$"
 )
 
-# _Static_assert(...) / static_assert(...);  -- a compile-time-only
+# _Static_assert(...) / static_assert(...) / ALP_STATIC_ASSERT(...);  -- a compile-time-only
 # guard (e.g. hw_info.h's packing check on alp_hw_info_eeprom_t).  It
 # emits no symbol and isn't part of the callable/linkable surface, so
 # it is recognised and deliberately excluded from every category
 # rather than falling through to _FUNC_RE and being mis-recorded as a
 # bogus function (its "name" would be whatever token follows the
 # leading underscore).
-_STATIC_ASSERT_RE = re.compile(r"^(?:_Static_assert|static_assert)\s*\(.*\)\s*;$")
+_STATIC_ASSERT_RE = re.compile(r"^(?:_Static_assert|static_assert|ALP_STATIC_ASSERT)\s*\(.*\)\s*;$")
 
 # extern <type> <name>[<size>];  -- a public extern variable / array
 # declaration (e.g. a board-provided route table the app is expected to
@@ -546,6 +548,10 @@ def extract(header_path: Path) -> dict[str, dict[str, Any]]:
     text = header_path.read_text(encoding="utf-8")
 
     macros: dict[str, dict[str, str]] = {}
+    # Per-revision route overrides (`#ifdef ALP_<BOARD>_HW_REV_<REV>` ...
+    # `#endif`, emitted by gen_board_header.py) are opt-in.  The snapshot
+    # records the default build's values, not the last `#define` seen.
+    text = _HW_REV_BLOCK_RE.sub("", text)
     for m in _DEFINE_RE.finditer(_join_line_continuations(text)):
         name = m["name"]
         value = (m["value"] or "").strip()
@@ -1032,6 +1038,16 @@ def load_removed_allowlist(path: Path) -> dict[tuple[str, str, str], dict[str, A
     return out
 
 
+def _allowed_msg(entry: dict[str, Any], header: str, cat: str, sym: str) -> str:
+    """The `ALLOWED` line for one allowlisted removal (`cat` is the plural
+    snapshot key, e.g. `macros`)."""
+    replacement = entry["replacement"] or "no replacement"
+    return (
+        f"ALLOWED {cat[:-1]} {header}::{sym} "
+        f"(intentional removal, #{entry['issue']} -> {replacement})"
+    )
+
+
 def diff(
     prev: dict[str, Any],
     curr: dict[str, Any],
@@ -1132,7 +1148,20 @@ def diff(
 
     for name in sorted(set(prev_h) | set(curr_h)):
         if name not in curr_h:
-            msgs.append(f"REMOVED header {name}")
+            # A whole header deleted on purpose: if EVERY symbol it
+            # carried has a removed-symbols.json entry, report each as
+            # ALLOWED; one unexplained symbol keeps the single
+            # `REMOVED header` line (and so blocks the gate).
+            gone = [
+                (cat, sym)
+                for cat in ("functions", "typedefs", "macros", "variables")
+                for sym in sorted(prev_h[name].get(cat, {}))
+            ]
+            if gone and all((name, cat[:-1], sym) in removed_allowlist for cat, sym in gone):
+                msgs.extend(_allowed_msg(removed_allowlist[(name, cat[:-1], sym)], name, cat, sym)
+                            for cat, sym in gone)
+            else:
+                msgs.append(f"REMOVED header {name}")
             continue
         if name not in prev_h:
             msgs.append(f"ADDED   header {name}")
@@ -1235,11 +1264,7 @@ def diff(
             continue
         allow_entry = removed_allowlist.get((r_header, r_cat[:-1], r_sym))
         if allow_entry is not None:
-            replacement = allow_entry["replacement"] or "no replacement"
-            msgs.append(
-                f"ALLOWED {r_cat[:-1]} {r_header}::{r_sym} "
-                f"(intentional removal, #{allow_entry['issue']} -> {replacement})"
-            )
+            msgs.append(_allowed_msg(allow_entry, r_header, r_cat, r_sym))
         else:
             msgs.append(f"REMOVED {r_cat[:-1]} {r_header}::{r_sym}")
 

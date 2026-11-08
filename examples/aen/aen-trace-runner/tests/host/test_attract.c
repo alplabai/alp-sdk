@@ -17,14 +17,13 @@ int main(void)
 		tr_track_t   t;
 
 		tr_attract_init(&a);
-		tr_track_init(&t, 640, 400);
+		tr_track_init(&t, 400);
 
 		for (uint32_t k = 0; k < TR_ATTRACT_ENTER_TICKS - 1; k++) {
-			assert(tr_attract_step(&a, &t, /*player_present=*/false, 1u) == TR_ATTRACT_STAY);
+			assert(tr_attract_step(&a, &t, /*player_present=*/false) == TR_ATTRACT_STAY);
 			assert(!a.active);
 		}
-		assert(tr_attract_step(&a, &t, false, 1u) ==
-		       TR_ATTRACT_ENTERED); /* the caller ends the run */
+		assert(tr_attract_step(&a, &t, false) == TR_ATTRACT_ENTERED); /* the caller ends the run */
 		assert(a.active);
 	}
 
@@ -36,45 +35,47 @@ int main(void)
 		tr_track_t   t;
 
 		tr_attract_init(&a);
-		tr_track_init(&t, 640, 400);
+		tr_track_init(&t, 400);
 
 		for (uint32_t k = 0; k < TR_ATTRACT_ENTER_TICKS; k++) {
-			(void)tr_attract_step(&a, &t, false, 1u);
+			(void)tr_attract_step(&a, &t, false);
 		}
 		assert(a.active);
 
 		for (uint32_t k = 0; k < TR_ATTRACT_JOIN_TICKS - 1; k++) {
-			assert(tr_attract_step(&a, &t, /*player_present=*/true, 1u) == TR_ATTRACT_STAY);
+			assert(tr_attract_step(&a, &t, /*player_present=*/true) == TR_ATTRACT_STAY);
 			assert(a.active && tr_attract_joining(&a));
 		}
-		assert(tr_attract_step(&a, &t, true, 1u) == TR_ATTRACT_LEFT);
+		assert(tr_attract_step(&a, &t, true) == TR_ATTRACT_LEFT);
 		assert(!a.active && !tr_attract_joining(&a));
 	}
 
-	/* 3. Leaving attract mode calls tr_track_resync() with the lane the
-	 * game is actually showing -- not whatever the tracker itself last
-	 * drifted to. Same technique as test_mode.c case 3: pass a lane
-	 * deliberately different from the tracker's own state. */
+	/* 3. Leaving attract mode calls tr_track_resync(): the arm edges are
+	 * forgotten (the tracker is primed again), so an arm still up from the
+	 * lobby does not step a lane in the new run. Entering attract and the
+	 * lobby leave the tracker alone. */
 	{
 		tr_attract_t a;
 		tr_track_t   t;
+		const int16_t down[2] = { 0, 0 };
 
 		tr_attract_init(&a);
-		tr_track_init(&t, 640, 400);
-		t.lane = 2u; /* drifted/leftover state, never touched by tr_attract_step()'s entry path */
+		tr_track_init(&t, 400);
+		(void)tr_arms_step(&t.arms, down); /* primed: a pose has been seen */
+		assert(tr_arms_primed(&t.arms));
 
 		for (uint32_t k = 0; k < TR_ATTRACT_ENTER_TICKS; k++) {
-			(void)tr_attract_step(&a, &t, false, 1u);
+			(void)tr_attract_step(&a, &t, false);
 		}
 		assert(a.active);
-		assert(t.lane == 2u); /* entry path never touches the tracker */
+		assert(tr_arms_primed(&t.arms)); /* entry path never touches the tracker */
 
 		for (uint32_t k = 0; k < TR_ATTRACT_JOIN_TICKS - 1; k++) {
-			(void)tr_attract_step(&a, &t, /*player_present=*/true, /*game_lane=*/0u);
-			assert(t.lane == 2u); /* the lobby leaves the tracker alone */
+			(void)tr_attract_step(&a, &t, /*player_present=*/true);
+			assert(tr_arms_primed(&t.arms)); /* the lobby leaves the tracker alone */
 		}
-		assert(tr_attract_step(&a, &t, true, 0u) == TR_ATTRACT_LEFT);
-		assert(t.lane == 0u); /* resynced to game_lane, not left at 2 */
+		assert(tr_attract_step(&a, &t, true) == TR_ATTRACT_LEFT);
+		assert(!tr_arms_primed(&t.arms)); /* resynced */
 	}
 
 	/* 4. The synthetic input actually plays: over a run of many ticks the
@@ -127,11 +128,11 @@ int main(void)
 		tr_track_t   t;
 
 		tr_attract_init(&a);
-		tr_track_init(&t, 640, 400);
+		tr_track_init(&t, 400);
 
 		for (int cycle = 0; cycle < 4; cycle++) {
 			for (uint32_t k = 0; k < TR_ATTRACT_ENTER_TICKS; k++) {
-				tr_attract_ev_t ev = tr_attract_step(&a, &t, false, 1u);
+				tr_attract_ev_t ev = tr_attract_step(&a, &t, false);
 
 				assert(ev ==
 				       ((k + 1 < TR_ATTRACT_ENTER_TICKS) ? TR_ATTRACT_STAY : TR_ATTRACT_ENTERED));
@@ -142,14 +143,14 @@ int main(void)
 			tr_attract_ev_t ev = TR_ATTRACT_STAY;
 
 			for (uint32_t k = 0; k < TR_ATTRACT_JOIN_TICKS; k++) {
-				ev = tr_attract_step(&a, &t, true, 1u);
+				ev = tr_attract_step(&a, &t, true);
 			}
 			assert(ev == TR_ATTRACT_LEFT);
 			assert(!a.active);
 
 			/* One tick of "still present": neither counter may have
 			 * survived the cycle. */
-			assert(tr_attract_step(&a, &t, true, 1u) == TR_ATTRACT_STAY);
+			assert(tr_attract_step(&a, &t, true) == TR_ATTRACT_STAY);
 			assert(!a.active);
 			assert(a.idle_ticks == 0u && a.join_ticks == 0u);
 		}

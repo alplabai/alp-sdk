@@ -18,10 +18,11 @@ from typing import Any, Optional
 
 import yaml
 
+from . import cameras as _cameras
 from .models import BoardProject, OrchestratorError, Slice
 from .paths import REPO
 from .secure import (emit_sysbuild_conf, emit_tfm_sysbuild_conf,
-                      sysbuild_family_base_conf)
+                      sysbuild_default_signing_key, sysbuild_family_base_conf)
 
 
 def iter_buildable_slices(project: BoardProject):
@@ -115,8 +116,8 @@ def _slice_flash_recipe(
 
 
 # M-core "stock shim" app token (Zephyr side).  Accepted by the SoM-preset
-# schema and defaulted into M-core slots (AEN m55_hp/he, V2N m33_sm,
-# NX91 m33).  The token resolves to the SDK-owned app below rather than a
+# schema and defaulted into M-core slots (AEN m55_hp/he, V2N m33_sm).
+# The token resolves to the SDK-owned app below rather than a
 # project-local path.
 STOCK_SHIM_APP = "alp-stock-shim"
 STOCK_SHIM_DIR = REPO / "firmware" / "alp-stock-shim"
@@ -353,6 +354,9 @@ def _slice_command(
     matter where the emitting process happens to be invoked from
     (issue #596).
     """
+    # `cameras:` unbuildable for this core (none/ambiguous owner, missing
+    # shield or overlay): block the command, whatever the OS.
+    _cameras.check(project, slice_)
     if slice_.os == "zephyr":
         if not slice_.app or not slice_.board:
             return None
@@ -471,6 +475,37 @@ def _slice_command(
                     if family_base else [_tokenize(sb_conf, base_dir, REPO)]
                 )
                 defines.append(f"-DSB_CONF_FILE={';'.join(sb_conf_files)}")
+                # The curated base carries no signing key (a conf file
+                # cannot hold an absolute path; a relative one resolves
+                # against MCUBOOT_DIR / WEST_TOPDIR, #2950), so pass the
+                # shared dev key as an absolute, SDK-anchored -D.
+                user_key = ((project.boot or {}).get("signing") or {}).get(
+                    "key_file")
+                default_key = sysbuild_default_signing_key(project)
+                if user_key:
+                    # board.schema.json: key_file is relative to the project
+                    # root.  Resolve it against the board.yaml directory and
+                    # pass an anchored absolute -D (never a bare-relative
+                    # path, which MCUboot/the signer resolve elsewhere).
+                    key_path = Path(user_key)
+                    if not key_path.is_absolute():
+                        key_path = base_dir / key_path
+                    if not key_path.is_file():
+                        raise OrchestratorError(
+                            "boot.signing.key_file resolves to "
+                            f"{key_path.as_posix()}, which is not a file; "
+                            "key_file is relative to the board.yaml "
+                            "directory (or give an absolute path)")
+                    try:
+                        key_val = _tokenize(key_path, base_dir, REPO)
+                    except UnrootedPathError:
+                        key_val = key_path.as_posix()
+                    defines.append(
+                        f'-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="{key_val}"')
+                elif default_key is not None:
+                    defines.append(
+                        "-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="
+                        f'"{_tokenize(default_key, base_dir, REPO)}"')
         # Wire the slice's materialised per-core Kconfig fragment
         # (`_slice_config_artefact` -> build_dir/alp.conf, carried in the
         # plan's `configArtefacts`) into the build command via
@@ -479,23 +514,41 @@ def _slice_command(
         # `base_dir` (issue #596), never Path.cwd(), so the plan is
         # byte-identical wherever it is emitted.
         #
-        # NOT on a --sysbuild build: a bare -DEXTRA_CONF_FILE there lands
-        # on the SYSBUILD image, not the default application image
-        # (sysbuild scopes per-image as -D<image>_VAR), so it would NOT
-        # reach the app -- silently dropping the per-core alp.conf on
-        # boot:/OTA projects. The app-image name is not derivable from
-        # board.yaml (it is the app CMakeLists `project()` name), so the
-        # image-prefixed form cannot be emitted here. Sysbuild slices
-        # still get the per-core alp.conf via the app's own --core-scoped
-        # CMakeLists.txt bridge (#870); a plan-native per-image sysbuild
-        # wiring is the remaining half of #866.
-        if not is_sysbuild:
-            alp_conf = Path(slice_.build_dir) / "alp.conf"
-            if not alp_conf.is_absolute():
-                alp_conf = Path(base_dir) / alp_conf
-            alp_conf = alp_conf.resolve()
-            defines.append(
-                f"-DEXTRA_CONF_FILE={_tokenize(alp_conf, base_dir, REPO)}")
+        # A --sysbuild build scopes per-image variables as
+        # -D<image>_VAR: a bare -DEXTRA_CONF_FILE would land on the
+        # SYSBUILD image, not the application, silently dropping the
+        # per-core alp.conf on boot:/OTA projects. The application image's
+        # name IS derivable: sysbuild names it after the basename of the
+        # app directory (`get_filename_component(app_name ${APP_DIR}
+        # NAME)` in share/sysbuild/CMakeLists.txt), i.e. the directory
+        # `west build` is handed above -- so emit the image-prefixed form
+        # (#866, the plan-native replacement for the per-example
+        # CMakeLists.txt bridge #870).
+        #
+        # CAVEAT: the prefix is the app directory's real basename, but the
+        # command's app dir is a `${PROJECT_ROOT}` token. When the app dir
+        # IS the project root (`app: ./src` falls back to the example
+        # root), the image name is the project root's directory name, so a
+        # tokened plan materialised under a differently-named root names a
+        # stale image and Zephyr silently ignores the arg. A consumer that
+        # relocates the project root must re-derive the prefix from the
+        # substituted app dir (documented in docs/heterogeneous-builds.md).
+        alp_conf = Path(slice_.build_dir) / "alp.conf"
+        if not alp_conf.is_absolute():
+            alp_conf = Path(base_dir) / alp_conf
+        alp_conf = alp_conf.resolve()
+        extra_var = "EXTRA_CONF_FILE"
+        if is_sysbuild:
+            image = _zephyr_app_dir(slice_.app, base_dir).name
+            extra_var = f"{image}_EXTRA_CONF_FILE"
+        defines.append(
+            f"-D{extra_var}={_tokenize(alp_conf, base_dir, REPO)}")
+        # `cameras:` -> ONE -DSHIELD (carrier + module shields), shared with
+        # the cmake-args listing via cameras.zephyr_shield_define.
+        # Sysbuild: `-D<image>_SHIELD` so MCUboot does not get the shields.
+        shield = _cameras.shield_define_for_build(project, slice_, base_dir)
+        if shield:
+            defines.append(f"-D{shield}")
         cmd += ["--", *defines]
         return cmd
     if slice_.os == "yocto":

@@ -30,7 +30,7 @@
 #include "../../a32/common/crc32.c"
 #include "../../a32/renderer/render.c"
 
-static uint16_t fb[720 * 1280] __attribute__((aligned(16)));
+static uint16_t fb[TR_R3D_W * TR_R3D_H] __attribute__((aligned(16)));
 
 #define GLYPH_MAX_PX \
 	(5 * 4 * 5 * 4) /* generous: >= 5*scale rows x 5*scale cols (M) for any scale used here */
@@ -44,7 +44,9 @@ static uint16_t fb[720 * 1280] __attribute__((aligned(16)));
  * (5*scale * 5*scale). */
 static int render_glyph_bits(char c, int scale, bool *out)
 {
-	const vcv_t cv = { fb, 0, TR_R3D_W, 0, TR_R3D_H };
+	const vcv_t cv = {
+		fb, 0, TR_R3D_W, 0, TR_R3D_H, -1, 0, TR_R3D_W
+	}; /* -1: a scratch buffer, not the turned framebuffer */
 
 	memset(fb, 0, sizeof(fb));
 	video_glyph(&cv, 0, 0, c, scale, 0xFFFFu);
@@ -83,11 +85,11 @@ int main(void)
 		/* Every string the video area actually draws (render.c
 		 * draw_strips(): "CAMERA", the upright size "400x640" / "640x400",
 		 * "NPU", tr_cam_pip_format_hz()'s "NN.NHz" or "--", and the four
-		 * lamp captions), concatenated -- not a hand-picked char list that
+		 * lamp captions, lamp_cap[]), concatenated -- not a hand-picked char list that
 		 * could itself miss one. */
 		static const char chars[] = "CAMERA 640x400 400x640 NPU -- "
 		                            "0123456789.Hz"
-		                            "LEFTRIGHTJUMPDUCK";
+		                            "LEFT ARM RIGHT ARM BOTH ARMS DUCK";
 
 		for (size_t i = 0; i < sizeof(chars) - 1; i++) {
 			char c = chars[i];

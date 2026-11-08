@@ -4,13 +4,11 @@ Common issues firmware engineers hit when working with the SDK,
 organised by where the symptom shows up.  Each entry includes the
 exact error text and a fix.
 
-> **Didn't find your issue here?**  Ask on
-> [**community.alplab.ai**](https://community.alplab.ai/) — most
-> questions get answered there before they become tracked issues,
-> and the community search often surfaces a peer who hit the same
-> thing first.  If you have a concrete reproducer, file a bug
-> directly on
-> [github.com/alplabai/alp-sdk/issues](https://github.com/alplabai/alp-sdk/issues).
+> **Didn't find your issue here?**  File an
+> issue on
+> [github.com/alplabai/alp-sdk/issues](https://github.com/alplabai/alp-sdk/issues),
+> with the exact error text and a reproducer if you have one.  For
+> anything not suited to a public issue, email contact@alplab.ai.
 
 ## Build-time errors
 
@@ -22,7 +20,7 @@ for the catalogue):
 
 ```yaml
 som:
-  sku: E1M-V2N101    # or E1M-AEN801, E1M-V2M101, E1M-NX9101, etc.
+  sku: E1M-V2N101    # or E1M-AEN801, E1M-V2M101, etc.
 ```
 
 ### `alp_project: schema violation at <loc>: ...`
@@ -37,7 +35,7 @@ third entry).  Common slip-ups:
   `uart`, `usb`, `watchdog`).  Note: under v2 `peripherals:` lives
   per-core under `cores.<id>:`, not at top level; and `watchdog`
   (not `wdt`) is the canonical name.
-* `som.sku` follows `E1M-{AEN,V2N,V2M,NX9}\d{3}` (case-sensitive).
+* `som.sku` follows `E1M-{AEN,V2N,V2M}\d{3}` (case-sensitive).
 * the `preset:` (or use an inline board) must point at a preset under
   `metadata/boards/<name>.yaml` OR carry an inline
   `board.populated:` block.
@@ -150,8 +148,8 @@ chips:
 
 ## Runtime errors (return codes)
 
-The SDK returns negative `alp_status_t` values; positive 0 is
-success.  Decode tips:
+The SDK returns negative `alp_status_t` values on failure; 0 is
+success (`ALP_OK`).  Decode tips:
 
 | Return                  | Meaning                                                            | First thing to check                                  |
 |-------------------------|--------------------------------------------------------------------|-------------------------------------------------------|

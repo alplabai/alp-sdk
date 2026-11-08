@@ -54,7 +54,7 @@ from alp_orchestrate.partition import (  # noqa: E402
 
 def _preset(region: dict) -> dict:
     """A single-region preset with NO `silicon:` -- `resolve_aperture()`
-    returns `None` for it, so this is the OFF-Alif shape (V2N/V2M/NX9101
+    returns `None` for it, so this is the OFF-Alif shape (V2N/V2M
     today): the deferred-to-required absent-write_authority leniency
     applies here, and the composite-consult completeness walk in
     `TestCompositeConsultsContainedRows` below never runs against it."""
@@ -178,7 +178,7 @@ class TestAbsentWriteAuthority:
         assert "ADR-0034" in reason, reason
 
     def test_absent_write_authority_stays_legal_with_no_aperture(self):
-        """The non-Alif case (V2N/V2M/NX9101 today): no `silicon:` on
+        """The non-Alif case (V2N/V2M today): no `silicon:` on
         this synthetic preset, so `resolve_aperture()` returns `None`
         and the absent-value refusal never applies -- mirrors
         `carveout.py`'s own `aperture is None` short-circuit."""

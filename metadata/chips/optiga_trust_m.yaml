@@ -40,7 +40,6 @@ kconfig:
 
 families:
   - aen
-  - imx93
   - v2n
   - v2n-m1
 
@@ -67,3 +66,5 @@ physical:
     - { pad: "08", signal: "SCL" }
     - { pad: "09", signal: "RST" }
     - { pad: "10", signal: "VCC" }
+tracking:
+  blocker: "vendor library licence review pending"

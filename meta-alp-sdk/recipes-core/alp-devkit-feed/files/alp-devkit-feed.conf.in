@@ -1,0 +1,11 @@
+# Alp dev-kit package feed (alp-sdk #2841). DEV KITS ONLY -- not a field-update
+# channel; field devices update by image (Mender A/B).
+#
+#   opkg update && opkg upgrade alp-sdk
+#
+# One feed per image release line and per machine; keep the image and the feed
+# on the same line (shared-library ABI is only guaranteed within a line).
+# Signature checking is on: opkg refuses an index whose Packages.sig does not
+# verify against the key in /usr/share/opkg/keyrings.
+src/gz alp-devkit @ALP_DEVKIT_FEED_URL@
+option check_signature 1

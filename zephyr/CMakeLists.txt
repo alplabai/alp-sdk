@@ -5,6 +5,12 @@
 # Plain-CMake (add_subdirectory) consumers don't reach this file —
 # they use the repo root CMakeLists.txt instead.
 
+# Patch guard (#2766): fail configure when a feature this build enables needs a
+# zephyr/patches.yml patch the workspace lacks (opt-out -DALP_SKIP_PATCH_CHECK=ON).
+# Before the CONFIG_ALP_SDK early-return: the vendored CSI driver below builds
+# without it.
+include(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/cmake/alp_patch_guard.cmake)
+
 # Alif Ensemble build-bridge -- applied BEFORE the CONFIG_ALP_SDK early-return
 # because it is needed for *any* Ensemble Zephyr build, not just alp-feature
 # builds.  Upstream Zephyr v4.4's (minimal) Alif SoC layer omits
@@ -12,7 +18,7 @@
 # drivers/dma_event_router/src/dma_event_router.c *unconditionally* for the
 # Ensemble family and that TU does `#include <soc_common.h>`.  Supply our
 # bridge copy ONLY for Ensemble builds, so it cannot shadow another vendor's
-# soc_common.h (e.g. NXP's on i.MX93).  See zephyr/soc-bridge/alif/soc_common.h.
+# soc_common.h.  See zephyr/soc-bridge/alif/soc_common.h.
 if(CONFIG_SOC_FAMILY_ENSEMBLE OR CONFIG_SOC_FAMILY_ENSEMBLE_RTSS)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif)
 endif()
@@ -50,8 +56,9 @@ zephyr_sources_ifdef(CONFIG_DMA_PL330_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_pl330_alif.c)
 zephyr_sources_ifdef(CONFIG_DMA_ALIF_EVENT_ROUTER
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_alif_event_router.c)
-# Tier-1.5 glue: the M55-HE PL330 DMA2 boot-manager security latch the fork does
-# in its soc_init (self-gates on the alif,dma-pl330 node being present).
+# Tier-1.5 glue: the PL330 boot-manager security latch the fork does in its
+# soc_init (DMA0 on any core; the M55-HE-local DMA2 half self-gates on
+# the enabled HE-local &dma2 node; the whole file self-gates on an alif,dma-pl330 node).
 zephyr_sources_ifdef(CONFIG_DMA_PL330_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_alif_boot_latch.c)
 
@@ -63,7 +70,10 @@ zephyr_sources_ifdef(CONFIG_DMA_PL330_ALIF
 # Ensemble family.  Needed for any Ensemble-E8 build that uses a DW GPIO port,
 # not just alp-feature builds, so this is applied before the CONFIG_ALP_SDK
 # early-return (the soc-bridge / MRAM-flash precedent above).
-if(CONFIG_SOC_SERIES_E8)
+# E4 (AE402FA0E5597) carries the same gate: AE402FA0E5597/include/soc_features.h:108
+# SOC_FEAT_GPIO_HAS_CLOCK_ENABLE (1), and its DFP rtss_hp/soc.h:2477 has the same
+# GPIO_CTRL[15] at CLKCTL_PER_SLV+0x80 (CLKCTL_PER_SLV_BASE 0x4902F000, :3639).
+if(CONFIG_SOC_SERIES_E8 OR CONFIG_SOC_SERIES_E4)
     zephyr_sources_ifdef(CONFIG_GPIO_DW
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/gpio/gpio_clk_alif.c)
 endif()
@@ -94,17 +104,22 @@ if(CONFIG_SOC_SERIES_E8)
     zephyr_compile_definitions(CONFIG_FLASH_ADDRESS_IN_SINGLE_FIFO_LOCATION)
 endif()
 
-# Custom fixed MPU region table for the Ensemble E8 (mpu_regions_e8.c),
+# Custom fixed MPU region table for the AEN boards (mpu_regions_e8.c),
 # REPLACING arm_mpu_regions.c's generic FLASH_0/SRAM_0 fallback -- restores
 # the fork's MRAM exec/device split without the DT-node-append overlap bug
-# (see the file header for the full root cause). Gated on
-# CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS, which the E8 HE/HP boards'
-# hand-maintained `Kconfig` (not the generated Kconfig.alp_<board> /
-# Kconfig.defconfig) selects. Needed for ANY Ensemble-E8 build -- including
-# MCUboot itself, which never sets CONFIG_ALP_SDK -- so this is applied
-# before the CONFIG_ALP_SDK early-return, mirroring the GPIO clock-enable /
-# OSPI_XIP_SER precedents above.
-if(CONFIG_SOC_SERIES_E8)
+# (see the file header for the full root cause). Gated on the Ensemble SoC
+# family AND CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS, which the AEN401 /
+# AEN601 / AEN801 / AEN803 boards' hand-maintained `Kconfig` (not the generated
+# Kconfig.alp_<board> / Kconfig.defconfig) sets: every one of them retargets
+# the MRAM flash controller and carries the same boot/slot0/storage/atoc
+# partition labels the table reads. The family guard is load-bearing: upstream
+# selects CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS on many non-Alif SoCs (stm32h7,
+# imxrt, nrf54h, rp2xxx, ...) whose trees have no MRAM labels and carry their
+# own mpu_config, so the symbol alone must never pull this file in. Needed for
+# ANY such Ensemble build -- including MCUboot itself, which never sets
+# CONFIG_ALP_SDK -- so this is applied before the CONFIG_ALP_SDK early-return,
+# mirroring the GPIO clock-enable / OSPI_XIP_SER precedents above.
+if(CONFIG_SOC_FAMILY_ENSEMBLE OR CONFIG_SOC_FAMILY_ENSEMBLE_RTSS)
     zephyr_sources_ifdef(CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mpu_regions_e8.c)
 endif()
@@ -114,6 +129,12 @@ endif()
 # CONFIG_ALP_SDK early-return like the MPU table above.
 zephyr_sources_ifdef(CONFIG_ALIF_FLEX_IO_1V8
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/flex_io_1v8_e8.c)
+
+# Ensemble I2C controller handover between the M55 cores (alp,i2c-handover DT
+# node): pure SoC glue, needed by a build that has the node whether or not it
+# sets CONFIG_ALP_SDK, so applied before the early-return.
+zephyr_sources_ifdef(CONFIG_ALIF_I2C_HANDOVER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/i2c_handover.c)
 
 if(NOT CONFIG_ALP_SDK)
     return()
@@ -199,6 +220,11 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BANNER
 zephyr_library_sources_ifdef(CONFIG_DISPLAY
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/panel_init_retry.c)
 
+# Display backlight default brightness (alp,display-backlight DT node ->
+# led_set_brightness() at APPLICATION init): compiles to nothing without a node.
+zephyr_library_sources_ifdef(CONFIG_LED
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/display_backlight.c)
+
 # Alp SoM console (CONFIG_ALP_SDK_CONSOLE) -- the `alp` Zephyr-shell command
 # tree.  Each group is its own TU attaching to the `alp` root via the
 # decentralized SHELL_SUBCMD_ADD section mechanism, so they list here flat.
@@ -226,21 +252,23 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION
 # The dispatcher compiles unconditionally so apps that depend on the
 # <alp/storage.h> ABI always link cleanly; each backend gates on its
 # own Kconfig so builds that don't enable a path don't pay its code
-# size.  Vendor-ext bodies under src/backends/ext/{alif,nxp}/storage.c
-# compile unconditionally -- the NXP OTFAD surface still only emits
-# NOSUPPORT + parameter validation (zero vendor dependencies), and the
-# Alif SecAES key-provision body (issue #224) internally #ifdefs its
-# one vendor include (<se_service.h>) behind
-# CONFIG_ALP_SDK_STORAGE_ALIF_SECAES, so both files still link on every
+# size.  The vendor-ext body src/backends/ext/alif/storage.c compiles
+# unconditionally -- the Alif SecAES key-provision body (issue #224)
+# internally #ifdefs its one vendor include (<se_service.h>) behind
+# CONFIG_ALP_SDK_STORAGE_ALIF_SECAES, so the file still links on every
 # board regardless of which vendor Kconfig is on.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/storage_dispatch.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/storage.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/nxp/storage.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/storage.c)
 
 if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_FLASH)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/zephyr_flash.c)
+endif()
+
+if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_DISK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/zephyr_disk.c)
 endif()
 
 if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_LITTLEFS)
@@ -296,10 +324,12 @@ if(CONFIG_USE_RZ_FSP_SCI_B_SPI)
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/r_sci_b_spi)
     # SCI7 DMA fast path: the rzv FSP DMAC-B transfer driver.  hal_renesas
     # ships it for rzv2n (src/rzv/r_dmac_b + the SCI7 RXI/TXI trigger events in
-    # bsp/mcu/rzv2n/bsp_dmac.h) but its rzv CMake does not compile it and the
+    # bsp/mcu/rzv2n/bsp_dmac.h) and does compile it under
+    # CONFIG_USE_RZ_FSP_DMAC_B, but that option is not selected here and the
     # rzv2n devicetree has no dmac node, so the glue driver hand-instantiates
-    # the transfer_instance_t pair and we build the FSP module here.  Its
-    # r_dmac_b_cfg.h shim lives in the r_sci_b_spi include dir above.
+    # the transfer_instance_t pair and we build the FSP module ourselves.  Its
+    # r_dmac_b_cfg.h shim lives in the r_sci_b_spi include dir above.  The DMA
+    # path stays gated off until the Renesas ER on SCI7+DMAC-B is answered.
     zephyr_library_sources(
         ${ZEPHYR_HAL_RENESAS_MODULE_DIR}/drivers/rz/fsp/src/rzv/r_dmac_b/r_dmac_b.c)
     zephyr_library_include_directories(
@@ -331,6 +361,34 @@ if(CONFIG_USE_RZ_FSP_MHU_B)
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/r_mhu_b_ns)
 endif()
 
+# ipc_service backend for the V2N/V2M CM33 <-> A55 rpmsg link, so <alp/rpc.h>
+# (src/backends/rpc/zephyr_drv.c) runs on the CM33; the resource table + beacon
+# are shared with examples/multicore/rpmsg-v2n/m33_sm.  Config:
+# IPC_SERVICE_BACKEND_ALP_V2N_RPMSG (zephyr/kconfigs/ipc-v2n-rpmsg.kconfig).
+if(CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipc/ipc_alp_v2n_rpmsg.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipc/alp_v2n_beacon.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipc/resource_table.c)
+    zephyr_library_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipc)
+endif()
+
+# Renesas RZ/V2N CM33 watchdog (WDT0) -- vendored+adapted FSP r_wdt module.
+# hal_renesas ships r_wdt for rza/rzn/rzt only and upstream Zephyr's
+# wdt_renesas_rz.c cannot bind RZ/V2N (see wdt_renesas_rzv.c's header), so the rzt
+# r_wdt.c is carried here, adapted for the CM33's WDT0, under
+# zephyr/drivers/watchdog/r_wdt/ (gated by USE_RZ_FSP_WDT_RZV) with the Zephyr glue
+# zephyr/drivers/watchdog/wdt_renesas_rzv.c (compatible `renesas,rzv-wdt`, gated
+# by WDT_RENESAS_RZV).  BENCH-UNVERIFIED.
+zephyr_library_sources_ifdef(CONFIG_WDT_RENESAS_RZV
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/watchdog/wdt_renesas_rzv.c)
+if(CONFIG_USE_RZ_FSP_WDT_RZV)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/watchdog/r_wdt/r_wdt.c)
+    zephyr_library_include_directories(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/watchdog/r_wdt)
+endif()
+
 # Alif Ensemble ARM MHUv2 inter-core mailbox driver -- vendor-ext,
 # BENCH-UNVERIFIED.  Carried here (not upstream Zephyr) so it survives a
 # `west update`.  Standard Zephyr MBOX-class driver (DT_DRV_COMPAT
@@ -346,6 +404,11 @@ zephyr_library_sources_ifdef(CONFIG_MBOX_ALIF_MHUV2
 # zephyr/dts/bindings/entropy/alif,se-trng.yaml.
 zephyr_library_sources_ifdef(CONFIG_ENTROPY_ALIF_SE
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/entropy/entropy_alif_se.c)
+
+# GD32G553 supervisor TRNG entropy driver (#2951), chosen as zephyr,entropy on
+# the V2N/V2M CM33 boards. Binding: zephyr/dts/bindings/entropy/alp,gd32-trng.yaml.
+zephyr_library_sources_ifdef(CONFIG_ENTROPY_ALP_GD32_TRNG
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/entropy/entropy_alp_gd32_trng.c)
 
 # Alif Ensemble hardware-semaphore (HWSEM) driver -- vendor-ext, BENCH-UNVERIFIED.
 # AMP request/release latch shared between the two RTSS cores (M55-HE <-> M55-HP).
@@ -452,6 +515,28 @@ if(CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION)
     endif()
 endif()
 
+# HAZARD GUARD (#2858), same class as the ethernet one above: the SDHC bounce
+# buffer and ADMA descriptor table default to the "SRAM0" memory-region on
+# Ensemble. An app that ALSO moves main RAM there with `chosen { zephyr,sram =
+# &sram0; }` (the pre-#2858 SD workaround) gets .data/.bss and the DMA
+# buffers linked into the same window with no warning, and every descriptor
+# write lands on live data. Refuse at configure time.
+if(CONFIG_SDHC_DWC_BOUNCE_BUFFER OR CONFIG_SDHC_DESCRIPTOR_USE_SECTION)
+    dt_chosen(alif_sdhc_chosen_sram PROPERTY "zephyr,sram")
+    dt_nodelabel(alif_sdhc_sram0 NODELABEL "sram0")
+    if(DEFINED alif_sdhc_chosen_sram AND alif_sdhc_sram0
+       AND alif_sdhc_chosen_sram STREQUAL alif_sdhc_sram0
+       AND (CONFIG_SDHC_DWC_BOUNCE_BUFFER_SECTION STREQUAL "SRAM0"
+            OR CONFIG_SDHC_DESCRIPTOR_SECTION STREQUAL "SRAM0"))
+        message(FATAL_ERROR
+            "chosen zephyr,sram is sram0 and the SDHC bounce buffer / ADMA "
+            "descriptor table are placed in the SRAM0 memory-region: the linker "
+            "would put main RAM and the SD DMA buffers in the SAME window. Drop "
+            "the `zephyr,sram = &sram0` override -- since #2858 the driver "
+            "bounces DTCM buffers itself, so main RAM can stay in DTCM.")
+    endif()
+endif()
+
 # Alif Ensemble GMAC embedded Clause-22 MDIO (compatible snps,designware-mdio);
 # driver: zephyr/drivers/ethernet/mdio/mdio_dwmac_alif.c, binding:
 # zephyr/dts/bindings/mdio/snps,designware-mdio.yaml.  Reuses eth_dwmac_priv.h's
@@ -483,9 +568,10 @@ endif()
 # zephyr_include_directories(include) fires when USE_ALIF_HAL_OSPI pulls the
 # subdirectory in), so no extra include path is needed here.  See the
 # OSPI_ALIF Kconfig help + flash_ospi_alif.c's own header for the current
-# read/write/erase coverage (#915: read/read_jedec_id/sfdp_read only, write/
-# erase are fail-closed stubs); examples/aen/aen-ospi-regcheck exercises the
-# controller-register path only and makes no flash_driver_api call.
+# read/write/erase coverage (#915: read, read_jedec_id, sfdp_read, write and
+# erase are implemented and bench-verified); examples/aen/aen-ospi-regcheck
+# proves the controller-register path by default and its opt-in #915
+# self-test erases, programs and restores one sector through flash_driver_api.
 zephyr_library_sources_ifdef(CONFIG_OSPI_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_ospi_alif.c)
 
@@ -780,14 +866,40 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_MIPI_DSI_DW
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mipi_dsi/dsi_dw.c)
 
+# TI SN65DSI83 single-channel MIPI DSI-to-FlatLink(LVDS) bridge (compatible
+# "ti,sn65dsi83") -- a maintainer-built adapter-PCB bridge chip that lets an
+# E1M-EVK DSI connector drive the Riverdi RVT121HVDFWCA0-B native-LVDS panel.
+# Authored clean-room against the TI datasheet (SLLSEC1); no upstream Zephyr
+# driver, no hal_alif library, and no sdk-alif fork driver exists for this
+# part class.  ADR-0017-ADJACENT.  BENCH-UNVERIFIED.
+if(CONFIG_SN65DSI83)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+endif()
+zephyr_library_sources_ifdef(CONFIG_SN65DSI83
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/display/display_sn65dsi83.c)
+# The init's I2C half + the health pass: the driver's own recovery and the
+# bus-owning core's recovery agent (DT node alp,sn65dsi83-recovery) both use it.
+if(CONFIG_SN65DSI83 OR CONFIG_SN65DSI83_RECOVERY_AGENT)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/display/sn65dsi83_recovery.c)
+endif()
+zephyr_library_sources_ifdef(CONFIG_SN65DSI83_RECOVERY_AGENT
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/display/sn65dsi83_recovery_agent.c)
+
 # ADR-0017-ADJACENT glue: the Alif E8 SoC-level setup the MIPI D-PHY and the
 # display chain need and no driver performs -- D-PHY clock sources + analog
 # power (CGU / VBAT), the CDC200 pixel-clock divider, and the DSI panel
-# backlight pad mux.  E8-only (the gate mirrors the GPIO clock-enable glue
-# above) and only when the D-PHY, DSI or CDC200 driver is configured, so a
-# CSI-camera build gets the D-PHY power-up too; each hook inside is further
+# backlight pad mux.  E8 and E4 (the gate mirrors the GPIO clock-enable glue
+# above).  E4: the CGU CLK_ENA (+0x14, DFP AE402FA0E5597 rtss_hp/soc.h:1090) and
+# VBAT PWR_CTRL (+0x08, :1151) registers exist at the same CGU_BASE 0x1A602000 /
+# VBAT_BASE 0x1A609000, but no E4 source backs the BIT POSITIONS (the DFP header
+# has no bitfields): UNVERIFIED-ON-E4 assumption that they match the E8's.
+# Customer bench evidence on an E1M-AEN401: the identical local workaround reads
+# back CGU CLK_ENA 0x1a602014 = 0xfeb3fff1 and VBAT PWR_CTRL 0x1a609008 =
+# 0x03030000, same as the E8 readback.  Only when the D-PHY, DSI or CDC200
+# driver is configured, so a CSI-camera build gets the D-PHY power-up too; each hook inside is further
 # gated on its DT node being okay.
-if(CONFIG_SOC_SERIES_E8 AND (CONFIG_MIPI_DPHY_DW OR CONFIG_MIPI_DSI_DW OR CONFIG_DISPLAY_CDC200))
+if((CONFIG_SOC_SERIES_E8 OR CONFIG_SOC_SERIES_E4) AND (CONFIG_MIPI_DPHY_DW OR CONFIG_MIPI_DSI_DW OR CONFIG_DISPLAY_CDC200))
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mipi_display_e8.c)
 endif()
@@ -807,58 +919,70 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_CAN_ALIF_CAST
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/can/can_cast.c)
 
-zephyr_library_sources(
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_STORAGE_SW_FALLBACK
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
-# unconditionally; sw_fallback gated on the native_sim opt-in.
+# unconditionally; sw_fallback gated on CONFIG_ALP_SDK_<CLASS>_SW_FALLBACK
+# (native_sim default only: the fallback fakes success, so silicon
+# builds must opt in explicitly).
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/usb_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/usb/zephyr_drv.c)
 
-zephyr_library_sources(
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_USB_SW_FALLBACK
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/usb/sw_fallback.c)
 # BLE registry sources.  Dispatcher + portable Zephyr backend ship
-# unconditionally; sw_fallback gated on the native_sim opt-in.
+# unconditionally; sw_fallback gated on CONFIG_ALP_SDK_<CLASS>_SW_FALLBACK
+# (native_sim default only: the fallback fakes success, so silicon
+# builds must opt in explicitly).
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/ble_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/zephyr_drv.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BLE_CC3501E
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/cc3501e.c)
 
-zephyr_library_sources(
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BLE_SW_FALLBACK
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/sw_fallback.c)
 # Wi-Fi registry sources.  Dispatcher + portable Zephyr backend ship
-# unconditionally; sw_fallback gated on the native_sim opt-in.
+# unconditionally; sw_fallback gated on CONFIG_ALP_SDK_<CLASS>_SW_FALLBACK
+# (native_sim default only: the fallback fakes success, so silicon
+# builds must opt in explicitly).
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/wifi_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/zephyr_drv.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_WIFI_CC3501E
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/cc3501e.c)
 
-zephyr_library_sources(
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_WIFI_SW_FALLBACK
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/sw_fallback.c)
 # MQTT registry sources.  Dispatcher + portable Zephyr backend ship
-# unconditionally; sw_fallback gated on the native_sim opt-in.
+# unconditionally; sw_fallback gated on CONFIG_ALP_SDK_<CLASS>_SW_FALLBACK
+# (native_sim default only: the fallback fakes success, so silicon
+# builds must opt in explicitly).
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/mqtt_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mqtt/zephyr_drv.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mqtt/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MQTT_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mqtt/sw_fallback.c)
 # mproc registry sources.  The dispatcher owns three handle pools
 # (shmem + mbox + hwsem) keyed off the same class registry; the
 # portable Zephyr backend covers all three primitives via
 # DT_ALIAS(alp_shmemN) / DT_ALIAS(alp_mboxN) / intra-core k_sem
 # fallback.  Dispatcher + Zephyr backend ship unconditionally;
-# sw_fallback gated on the native_sim opt-in.
+# sw_fallback gated on CONFIG_ALP_SDK_MPROC_SW_FALLBACK
+# (default y on native_sim only).
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/mproc_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/zephyr_drv.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MPROC_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/sw_fallback.c)
 # mproc_boot class (alp_mproc_boot_core -- portable peer-core release).
 # The dispatcher body + the wildcard NOSUPPORT fallback ride in
-# mproc_dispatch.c / mproc/sw_fallback.c above (unconditional, keeps
-# the class section populated on every build).  The Alif SE-service
+# mproc_dispatch.c / mproc/sw_fallback.c above (so it follows
+# CONFIG_ALP_SDK_MPROC_SW_FALLBACK; with that off the class section is
+# empty and alp_mproc_boot_core reports NOSUPPORT).  The Alif SE-service
 # boot authority gates on its Kconfig (HAS_ALIF_SE_SERVICES).
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/alif_se_boot.c)
@@ -867,14 +991,16 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE
 # alp_random_bytes fast path; the portable Zephyr backend uses
 # PSA Crypto (PSA picks the active SoC's HW accelerator
 # transparently via MbedTLS's driver layer).  Dispatcher + Zephyr
-# backend ship unconditionally; sw_fallback gated on the
-# native_sim opt-in.
+# backend ship unconditionally; sw_fallback gated on
+# CONFIG_ALP_SDK_SECURITY_SW_FALLBACK (default y on every target: the
+# stub returns NOSUPPORT from every op, it never fakes success).
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/security_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_MBEDTLS
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/zephyr_drv.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_SECURITY_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/sw_fallback.c)
 # SE-CryptoCell hardware-crypto backend (silicon_ref alif:ensemble:e8,
 # priority 110 -- outranks the priority-100 "*" PSA zephyr_drv).  Rides the
 # hal_alif SE-service MHUv2 -> SE mailbox the read-only se_service client
@@ -894,6 +1020,7 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log_boot_metadata.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/engine.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/sha256.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/boot_providers.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/sw_tier.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/tfm_psa.c)
 if(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT OR CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
@@ -902,27 +1029,39 @@ if(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT OR CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55
 endif()
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG_TFM_PSA_OWNER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/tfm_psa_secure_owner.c)
+# Real boot-metadata providers (issue #263). Mutually exclusive choice in
+# gpu2d-update-log.kconfig -- at most one of these compiles the strong
+# alp_update_log_boot_metadata_read() that overrides the weak default in
+# src/update_log_boot_metadata.c above.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG_BOOT_MCUBOOT
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/mcuboot_boot_metadata.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/alif_se_boot_metadata.c)
 # Audio registry sources.  The dispatcher owns two handle pools
 # (alp_audio_in_t + alp_audio_out_t) keyed off the same class
 # registry; the portable Zephyr backend wires DMIC input +
 # alp_i2s_*-delegated output.  Dispatcher + Zephyr backend ship
-# unconditionally; sw_fallback gated on the native_sim opt-in.
+# unconditionally; sw_fallback gated on CONFIG_ALP_SDK_<CLASS>_SW_FALLBACK
+# (native_sim default only: the fallback fakes success, so silicon
+# builds must opt in explicitly).
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/audio_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/audio/zephyr_drv.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/audio/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_AUDIO_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/audio/sw_fallback.c)
 # RPC registry sources.  The dispatcher owns one alp_rpc_channel_t
 # pool keyed off the same class registry; the portable Zephyr
 # backend carries the ipc_service / RPMsg body + the per-channel
 # subscription table + the synchronous-call slot.  Dispatcher +
-# Zephyr backend ship unconditionally; sw_fallback gated on the
-# native_sim opt-in.
+# Zephyr backend ship unconditionally; sw_fallback gated on
+# CONFIG_ALP_SDK_<CLASS>_SW_FALLBACK (native_sim default).
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/rpc_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rpc/zephyr_drv.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rpc/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_RPC_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rpc/sw_fallback.c)
 # Inference class dispatcher + backends.
 # The dispatcher compiles unconditionally so apps that depend on
 # the <alp/inference.h> ABI always link cleanly; each backend
@@ -946,11 +1085,6 @@ if(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/ethos_u_aen.cpp)
 endif()
 
-if(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/ethos_u_n93.cpp)
-endif()
-
 # No Zephyr-side DRP-AI / DEEPX DX-M1 backends -- deliberately.  Both
 # engines are driven from the A55/Linux side only (DRP-AI3 via the
 # MERA/TVM runtime, DX-M1 via libdxrt over the A55's PCIe); an M-class
@@ -958,7 +1092,8 @@ endif()
 # removed instead of blocking TFLM at priority 100 (issues #58/#59).
 # The real bodies live in src/yocto/inference_{drpai,deepx}.cpp.
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_INFERENCE_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/sw_fallback.c)
 # Camera real backends.  Gate each on its own Kconfig
 # opt-in so builds that don't need the Zephyr video subsystem or
 # the V2N N44 ISP skeleton don't pay their code size.  The
@@ -979,7 +1114,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAMERA_ALIF_ISP
 # backend registry.  Backends register under .alp_backends_dac and
 # ship from src/backends/dac/*.c.  The dispatcher compiles
 # unconditionally (mirrors rtc_dispatch); the zephyr_drv backend
-# guards its DT-alias body on CONFIG_DAC internally.
+# guards its DT-alias body on CONFIG_DAC internally.  sw_fallback
+# is gated on CONFIG_ALP_SDK_DAC_SW_FALLBACK (native_sim default).
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/dac_dispatch.c)
 zephyr_library_sources(
@@ -990,26 +1126,30 @@ if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dac/gd32_bridge.c)
 endif()
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dac/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DAC_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dac/sw_fallback.c)
 
 # I3C class dispatcher.  Owns the alp_i3c_* API surface (alp_i3c_open /
 # write / read / write_read / close) and routes through the backend
 # registry.  Backends register under .alp_backends_i3c and ship from
 # src/backends/i3c/*.c.  The dispatcher compiles unconditionally (mirrors
 # dac_dispatch); the zephyr_drv backend guards its DT-alias body on
-# CONFIG_I3C internally.
+# CONFIG_I3C internally.  sw_fallback is gated on
+# CONFIG_ALP_SDK_I3C_SW_FALLBACK (native_sim default).
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/i3c_dispatch.c)
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i3c/zephyr_drv.c)
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i3c/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_I3C_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i3c/sw_fallback.c)
 
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/rtc_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_RTC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/zephyr_drv.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_RTC_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/sw_fallback.c)
 
 # E8 LPRTC counter -> calendar shim: backs the alp_rtc_* surface over the
 # always-on snps,dw-apb-rtc COUNTER device (lprtc@42000000) -- the E8 has no
@@ -1024,7 +1164,8 @@ zephyr_library_sources(
 zephyr_library_sources_ifdef(CONFIG_WATCHDOG
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wdt/zephyr_drv.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wdt/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_WDT_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wdt/sw_fallback.c)
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/counter_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_COUNTER
@@ -1035,7 +1176,8 @@ if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/counter/gd32_bridge.c)
 endif()
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/counter/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_COUNTER_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/counter/sw_fallback.c)
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/qenc_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_GPIO
@@ -1052,11 +1194,13 @@ if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/gd32_bridge.c)
 endif()
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_QENC_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/sw_fallback.c)
 # TMU registry sources.  TMU is handle-less; the dispatcher caches
 # the selected backend's ops vtable on first call instead of owning
-# a handle pool.  Dispatcher + portable Zephyr/bridge backend ship
-# unconditionally; sw_fallback gated on the native_sim opt-in.
+# a handle pool.  The dispatcher + portable Zephyr/bridge backend ship
+# with CONFIG_ALP_SDK_PERIPH_TMU; the libm sw_fallback additionally needs
+# CONFIG_ALP_SDK_TMU_SW_FALLBACK (native_sim default).
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_TMU
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/tmu_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/tmu/zephyr_drv.c)
@@ -1127,6 +1271,37 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_PM_POLICY
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/zephyr_pm_policy.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_EXT_RENESAS
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/power.c)
+# SoM power-domain runtime (#2784): registry + quiesce/restore + the BKRAM
+# record store, and the thin adapters that route a domain through the driver
+# that owns it.  The adapters build only with the driver they wrap.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_SOM_POWER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_record.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_pinctrl.c)
+if(CONFIG_ALP_SDK_SOM_POWER AND CONFIG_ALP_SDK_CHIP_CC3501E)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_cc3501e.c)
+endif()
+if(CONFIG_ALP_SDK_SOM_POWER AND CONFIG_ALP_SDK_CHIP_TMP112)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_tmp112.c)
+endif()
+if(CONFIG_ALP_SDK_SOM_POWER AND CONFIG_ALP_SDK_CHIP_RV3028C7)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_rv3028.c)
+endif()
+if(CONFIG_ALP_SDK_SOM_POWER AND CONFIG_OSPI_ALIF)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_flash.c)
+endif()
+
+# Alif Secure Enclave STOP / STANDBY backend for the E8 M55-HE and M55-HP (#2784, U7),
+# registered for alif:ensemble:e8 in the "power" class.  EXPERIMENTAL, off by
+# default; alif_se_power_hw.c is the only file that touches registers.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_ALIF_SE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/alif_se_power.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/alif_se_power_hw.c)
+
 # Operating-point-profile class ("power_profile", handle-less).  The
 # dispatcher body + the wildcard NOSUPPORT stub ride in
 # power_dispatch.c / power/zephyr_stub.c above (same ALP_SDK_POWER
@@ -1168,9 +1343,7 @@ zephyr_library_sources(
 # does real CPU fill/blit/blend) is gated on its own opt-in so it
 # always builds on native_sim.  The Alif D/AVE 2D real backend is
 # gated on the proprietary Dave2D pack being on the include path
-# (BENCH-UNVERIFIED, never built on native_sim).  No NXP/Vivante
-# backend exists: i.MX 93's 2D engine is PXP, not Vivante -- see
-# docs/adr/0008-gpu2d-portable-shim.md.
+# (BENCH-UNVERIFIED, never built on native_sim).
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpu2d_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D_SW_FALLBACK
@@ -1199,8 +1372,9 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO
 # `alp-temp0` DT alias's own status, so it ships unconditionally on
 # Zephyr (issue #2066) and every build without that alias just takes the
 # ALP_ERR_NOSUPPORT branch.  Zephyr-ONLY -- it binds through Zephyr's own
-# devicetree/sensor API with no portable fallback, so baremetal/Yocto get
-# src/common/stub/stub_temperature.c instead (see that file + this one's
+# devicetree/sensor API with no portable fallback, so baremetal gets
+# src/common/stub/stub_temperature.c and Yocto gets
+# src/yocto/temperature_yocto.c instead (see that file + this one's
 # header comment for why this differs from hw_info_zephyr.c above, which
 # IS shared with plain CMake).
 zephyr_library_sources(
@@ -1275,14 +1449,14 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TCAL9538
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tcal9538/tcal9538.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TAS2563
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tas2563/tas2563.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_INA228
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ina228/ina228.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_INA236
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ina236/ina236.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ACT8760
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/act8760/act8760.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_DA9292
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/da9292/da9292.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PCA9451A
-    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/pca9451a/pca9451a.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TPS628640
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tps628640/tps628640.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PI3DBS12212
@@ -1303,7 +1477,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_MURATA_LBEE5HY2FY
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_DEEPX_DXM1
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/deepx_dxm1/deepx_dxm1.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GD32_SWD
-    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gd32_swd/gd32_swd.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gd32_swd/gd32_swd.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/gd32_swd_pads.c)
 
 # v0.5 §D.AI batch -- 18 vision / display / accelerator chips.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_OV2640
@@ -1534,6 +1709,19 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_U8G2_VENDORED_CORE
     ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_intersection.c
 )
 
+# AWS IoT / Azure IoT embedded-C SDKs: west-pinned sources (group
+# `extras-cloud`), in-tree glue under vendors/{aws-iot,azure-iot}/.  Each is
+# its own zephyr library in a subdirectory so zephyr_library_named() does not
+# redirect this file's later zephyr_library_sources() calls.
+if(CONFIG_ALP_AWS_IOT)
+    add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/aws-iot
+                     ${CMAKE_CURRENT_BINARY_DIR}/vendors/aws-iot)
+endif()
+if(CONFIG_ALP_AZURE_IOT)
+    add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/azure-iot
+                     ${CMAKE_CURRENT_BINARY_DIR}/vendors/azure-iot)
+endif()
+
 # Catch2's amalgamated single-TU distribution (vendors/catch2/README.md
 # -- no zephyr/module.yml upstream, same case as u8g2 above). Gated on
 # CONFIG_ALP_SDK_CATCH2_VENDORED, NOT CONFIG_ALP_CATCH2_SW (see the
@@ -1587,6 +1775,12 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MODEL_READER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/alp_model_loader.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/alp_model_select.c
 )
+# SoM inference.auto_order (string Kconfig emitted by the orchestrator) ->
+# the one define name every OS build uses for the .alpmodel AUTO tiebreak.
+if(CONFIG_ALP_SDK_MODEL_READER AND CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER)
+    zephyr_library_compile_definitions(
+        ALP_SDK_INFERENCE_AUTO_ORDER="${CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER}")
+endif()
 
 # Backend registry selector (<alp/backend.h>).  Walks the per-class
 # linker sections emitted by ALP_BACKEND_REGISTER + ALP_BACKEND_DEFINE_CLASS
@@ -1617,7 +1811,8 @@ zephyr_library_sources_ifdef(CONFIG_I2C
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/i2c_regfile.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_I2C_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/sw_fallback.c)
 # SPI class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_SPI_SW_FALLBACK.
@@ -1626,7 +1821,8 @@ zephyr_library_sources(
 zephyr_library_sources_ifdef(CONFIG_SPI
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/spi/zephyr_drv.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/spi/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_SPI_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/spi/sw_fallback.c)
 # UART class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_UART_SW_FALLBACK.
@@ -1635,7 +1831,8 @@ zephyr_library_sources(
 zephyr_library_sources_ifdef(CONFIG_SERIAL
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/zephyr_drv.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UART_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/sw_fallback.c)
 # GPIO class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_GPIO_SW_FALLBACK.
@@ -1643,6 +1840,12 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpio_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_GPIO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/zephyr_drv.c)
+# Tier-1.5 glue: pad input-buffer (REN) enable for portable GPIO / qenc inputs on
+# Alif Ensemble (#2808).  Ensemble only; native_sim tests supply their own.
+if(CONFIG_ALP_GPIO_PAD_INPUT AND (CONFIG_SOC_FAMILY_ENSEMBLE OR CONFIG_SOC_FAMILY_ENSEMBLE_RTSS))
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/gpio_pad_alif.c)
+endif()
 # CC3501E GPIO proxy: routes proxied IOs through the inter-chip bridge,
 # delegates the rest to zephyr_drv.  AEN-only (CONFIG_ALP_SDK_GPIO_CC3501E_PROXY).
 # cc3501e_proxy_routes_weak.c is the WEAK empty route-table default, split
@@ -1657,7 +1860,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_proxy_routes_weak.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_rev_dependent_pins.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPIO_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/sw_fallback.c)
 # PWM class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_PWM_SW_FALLBACK.
@@ -1671,7 +1875,8 @@ zephyr_library_sources_ifdef(CONFIG_PWM
 zephyr_library_sources_ifdef(CONFIG_ALP_SOC_RENESAS_RZV2N_N44
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/gd32_bridge.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PWM_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/sw_fallback.c)
 # I2S class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_I2S_SW_FALLBACK.
@@ -1680,7 +1885,8 @@ zephyr_library_sources(
 zephyr_library_sources_ifdef(CONFIG_I2S
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2s/zephyr_drv.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2s/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_I2S_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2s/sw_fallback.c)
 # CAN class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_CAN_SW_FALLBACK.
@@ -1689,7 +1895,8 @@ zephyr_library_sources(
 zephyr_library_sources_ifdef(CONFIG_CAN
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/can/zephyr_drv.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/can/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAN_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/can/sw_fallback.c)
 # ADC class dispatcher.  Owns the one-shot alp_adc_* API surface
 # (alp_adc_open / read_raw / read_uv / close / capabilities) and
 # routes through the backend registry.  Backends register under
@@ -1738,6 +1945,16 @@ zephyr_library_sources_ifdef(CONFIG_UHC_XHCI_ALIF
 if(CONFIG_UHC_XHCI_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/usb/uhc)
 endif()
+
+# Ilitek ILI251x capacitive touch controller (compatible "ilitek,ili251x"),
+# ILI2511 on the Riverdi RVT121HVDFWCA0-B panel -- ADR-0017-ADJACENT, no
+# upstream/fork/HAL driver to consume, clean-room from protocol facts, see
+# zephyr/drivers/input/input_ili251x.c for the full STATUS block. Board-unique
+# carrier driver, not part of the portable <alp/*> surface. The report parser
+# lives in a sibling header (input_ili251x_report.h) so it is host-testable
+# without a devicetree-instantiated device -- see tests/unit/input_ili251x_report.
+zephyr_library_sources_ifdef(CONFIG_INPUT_ILI251X
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/input/input_ili251x.c)
 
 # Weak-RNG refusal for mbedTLS' PSA crypto core (issues #2173, #2192).
 # CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG is y when this build compiles the PSA core

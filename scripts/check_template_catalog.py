@@ -7,7 +7,7 @@ every record against the real tree.
 
 The catalog is the single source of truth for "what starter project
 archetypes does the SDK ship, and what does each one need" -- a frontend
-(alp-sdk-vscode, Alp Studio, a future `alp new`) reads THIS instead of
+(alp-sdk-vscode, Alp Studio, a future `tan new`) reads THIS instead of
 guessing from directory listings under examples/. Each record maps to a
 CANONICAL existing example; nothing here is a copy of that example, so
 nothing here may silently drift from it. This gate fails when:

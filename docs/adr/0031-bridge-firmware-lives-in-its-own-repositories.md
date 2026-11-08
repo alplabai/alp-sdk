@@ -89,3 +89,11 @@ belongs to the firmware repo.
   self-contained and is the obvious way to split. Rejected: it re-creates
   exactly the forkable wire contract 0015 existed to prevent, and the drift
   would be silent — a mirrored header that is merely *stale* still compiles.
+
+## Amendment (2026-10-08)
+
+The removal sequenced in the Consequences above is complete: `firmware/cc3501e/`
+and `firmware/gd32-bridge/` were deleted from alp-sdk in 00627b88a (#1370,
+#1805), after the west projects, the fuzz harness's
+`ALP_GD32_BRIDGE_FIRMWARE_DIR`, the metadata `helper_firmware` pins and the doc
+links had moved to the firmware repositories.

@@ -1,12 +1,13 @@
 # board.yaml -- per-app project configuration for the
 # v2n-power-monitor example.
 #
-# Reads the E1M-X EVK's on-board INA236 power monitors from a
+# Reads the E1M-X EVK's on-board INA236 power monitors and its INA228
+# +5V input monitor from a
 # Linux/Yocto user-space app on the V2N Cortex-A55 cluster.
 #
 # Customer workflow: copy this directory, then build against a
 # Yocto SDK that includes meta-alp-sdk (libalp_sdk.so +
-# libalp_chips.a) -- see README.md.  The INA236 monitors are an
+# libalp_chips.a) -- see README.md.  The INA236 / INA228 monitors are an
 # EVK-only instrumentation feature, so this app targets the
 # e1m-x-evk board only.
 som:
@@ -22,8 +23,8 @@ pins:
 cores:
   a55_cluster:
     app: ./src
-    # Linux/Yocto user-space C app; links libalp_chips.a (INA236
-    # driver) ahead of libalp_sdk.so (alp_i2c backend).
+    # Linux/Yocto user-space C app; links libalp_chips.a (INA236 +
+    # INA228 drivers) ahead of libalp_sdk.so (alp_i2c backend).
     #
     # No meta-alp-sdk recipe packages this app yet, so `--emit
     # build-plan` / `tan build` block this slice with a
@@ -33,7 +34,8 @@ cores:
       - i2c
 
 chips:
-  - ina236  # Five on-board high-side rail monitors (EVK-only).
+  - ina236  # Three on-board high-side rail monitors (EVK-only).
+  - ina228  # +5V input monitor; answers only on carriers with the bus-pin rework.
 
 diagnostics:
   log_level: info

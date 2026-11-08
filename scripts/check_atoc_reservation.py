@@ -139,7 +139,7 @@ _ATOC_NAMES = {"atoc"}
 # top-anchors the ATOC there and grows it DOWNWARD -- so checking the
 # top-of-window row already covers the whole-device-alias case too. Per
 # `write_authority`'s description
-# (metadata/schemas/som-preset-v1.schema.json), `customer_runtime` is THE
+# (metadata/schemas/som-preset-v2.schema.json), `customer_runtime` is THE
 # ONLY value meaning "writable by the application at runtime" -- every
 # other declared value (`customer_image`/`vendor_image`: flash-tool only;
 # `secure_enclave`: SE at provisioning; `none`: nobody; `composite`: a

@@ -30,7 +30,10 @@ properties:
   clock-frequency:
     type: int
     required: true
-    description:  Clock frequency the CAN controller is being driven at, in Hz.
+    description: |
+      CAN core clock in Hz. The driver programs CANFD_CTRL.CKDIV (bits [7:0]) =
+      160 MHz / clock-frequency (integer divisor 2..255), so the value should divide
+      160 MHz exactly (bench-verified at 20 MHz, CKDIV 8).
 
   can-fd:
     type: boolean

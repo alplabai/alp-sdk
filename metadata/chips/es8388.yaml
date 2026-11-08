@@ -95,8 +95,9 @@ families:
   - aen
   - v2n
   - v2n-m1
-  - imx93   # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested
   smoke_tests:    null_arg_guard
+tracking:
+  blocker: "ADR 0017 tier decision pending"

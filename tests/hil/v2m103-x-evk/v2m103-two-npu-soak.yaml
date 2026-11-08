@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103: 10-MINUTE SOAK of both NPUs busy at once in one process
+# (examples/v2n/v2n-two-models, mode `both`).  FPS drifting down over the
+# run, or the end temperatures, indicate thermal throttling.
+#
+# NOT BENCH-VERIFIED.  Nothing in this spec has run on hardware: the DRP-AI3
+# and DX-M1 backends have never run together.  Needs an image with BOTH NPU
+# stacks and a RUHMI-enabled libalp_sdk (RUHMI_DRPAI_TVM_DIR; see
+# docs/bring-up-drpai-v2n.md section 8), plus a DRP-AI `drpai_dir` bundle
+# tar and a DEEPX `.dxnn` -- neither is checked in (alp-sdk#2236), so
+# whoever runs this places them under --artifact-dir.
+#
+# SUPPLY CURRENT IS NOT MEASURED.  This harness has no PSU sampling (see
+# tests/hil/README.md, pending_hardware_support).  Reading the 15 V input
+# current with idle / DRP-AI only / DX-M1 only / both busy needs a bench PSU
+# sampler that does not exist yet; this spec only records SoC thermal zones
+# (the example prints them at start and end).
+
+schema_version: 1
+name: v2m103-two-npu-soak
+description: |
+  DRP-AI3 + DX-M1 both busy for 600 s: per-NPU latency/FPS, combined FPS,
+  and SoC thermal zones before and after.
+pending_hardware_support: supply-current-sampling
+
+example: examples/v2n/v2n-two-models
+flash_method: ssh-run
+
+ssh_args:
+  - "/tmp/drpai-model.tar"
+  - "/tmp/drpai-frame.bin"
+  - "/tmp/model.dxnn"
+  - "/tmp/dxnn-frame.bin"
+  - "600"
+  - "both"
+ssh_files:
+  - local: drpai-model.tar
+    remote: /tmp/drpai-model.tar
+  - local: drpai-frame.bin
+    remote: /tmp/drpai-frame.bin
+  - local: model.dxnn
+    remote: /tmp/model.dxnn
+  - local: dxnn-frame.bin
+    remote: /tmp/dxnn-frame.bin
+
+serial:
+  duration_s: 660
+  expect_contains:
+    - "[two-npu] drpai: handle open"
+    - "[two-npu] deepx: handle open"
+    - "[two-npu] phase: both"
+    - "[two-npu] temp start:"
+    - "[two-npu] combined:"
+    - "[two-npu] temp end:"
+    - "[two-npu] done"
+  expect_absent:
+    - "open failed"
+    - "invoke failed"
+    - "IOCTL FAILED"
+    - "DRPAI_START failed"
+    - "Failed to set NPU bound"
+    - "PANIC"
+    - "ASSERT"

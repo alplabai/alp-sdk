@@ -55,7 +55,7 @@ MENDER_TENANT_TOKEN ?= ""
 MENDER_ARTIFACT_NAME ?= "alp-${DISTRO_VERSION}-${MACHINE}-${PV}"
 
 # U-Boot is the standard bootloader integration point for Mender
-# on i.MX + Renesas.  Each machine .conf picks the matching
+# on Renesas.  Each machine .conf picks the matching
 # `u-boot-mender` provider when this include is used.
 PREFERRED_PROVIDER_virtual/bootloader ?= "u-boot"
 
@@ -64,3 +64,41 @@ PREFERRED_PROVIDER_virtual/bootloader ?= "u-boot"
 # ssh once their bootstrap flow is in place.
 IMAGE_FEATURES:append = " ssh-server-openssh"
 IMAGE_INSTALL:append = " mender-client mender-connect"
+
+# U-Boot keeps its environment as a redundant pair in eMMC boot partition 2
+# (the SoM preset's on_module.emmc_boot.uboot_env; uboot-env-emmc.cfg has
+# CONFIG_SYS_MMC_ENV_DEV=0, CONFIG_SYS_MMC_ENV_PART=2;
+# tests/scripts/test_uboot_env_layout.py holds all of them equal to the
+# preset).  meta-mender builds U-Boot's CONFIG_ENV_* from these variables and
+# writes /etc/fw_env.config from the same ones, so setting them is what makes
+# fw_setenv (the Mender client's upgrade_available / mender_boot_part writes)
+# and U-Boot use ONE store:
+#   MENDER_UBOOT_CONFIG_SYS_MMC_ENV_PART = "2"  -> device is
+#       ${MENDER_STORAGE_DEVICE}boot1 = /dev/mmcblk0boot1 (the default "0"
+#       is the user area /dev/mmcblk0, which U-Boot never reads),
+#   MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_1/_2 -> the two copies,
+#   BOOTENV_SIZE = 0x10000 = CONFIG_ENV_SIZE (meta-mender checks they match).
+# mender-full generates /etc/fw_env.config itself; alp-uboot-env (installed by
+# alp-image-common.inc) ships one too and would conflict, so it is removed.
+MENDER_UBOOT_CONFIG_SYS_MMC_ENV_PART ?= "2"
+MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_1 ?= "0x220000"
+MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_2 ?= "0x230000"
+BOOTENV_SIZE ?= "0x10000"
+IMAGE_INSTALL:remove = "alp-uboot-env"
+
+# U-Boot is the bootloader (the default meta-mender feature set is GRUB/UEFI,
+# which this board does not have): turns on meta-mender's U-Boot integration
+# (its generic boot-code patches, the env_mender.h variables, and the
+# mender-uboot override u-boot_%.bbappend keys mender-boot.cfg on).
+MENDER_FEATURES_ENABLE:append = " mender-uboot"
+MENDER_FEATURES_DISABLE:append = " mender-grub mender-image-uefi"
+
+# U-Boot integration.  Mender's auto-configure would patch the U-Boot sources
+# to replace CONFIG_BOOTCOMMAND with its own generic one, which cannot boot
+# this board (dtb choice from the EEPROM manifest, microSD, the OpenCV/Codec
+# blobs).  The ALP U-Boot patch 0018 instead reads Mender's variables
+# (mender_boot_part / mender_boot_part_hex, upgrade_available, bootcount /
+# bootlimit, altbootcmd) from meta-mender's env_mender.h, which Mender's
+# generic boot-code patches still provide; u-boot_%.bbappend adds
+# mender-boot.cfg (CONFIG_ALP_E1M_MENDER) when mender-uboot is on.
+MENDER_UBOOT_AUTO_CONFIGURE ?= "0"

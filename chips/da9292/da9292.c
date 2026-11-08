@@ -389,11 +389,12 @@ alp_status_t da9292_set_enable(da9292_t *ctx, da9292_channel_t ch, bool enable)
 	if (s != ALP_OK) return s;
 
 	const uint8_t en = en_bit_for(ch);
-	if (enable == ((ctrl & en) != 0)) return ALP_OK; /* already there: no write */
 
 	/* An enable-only entry has no window: CH2 would come up at the OTP
 	 * 1.80 V.  The DA9292 is never enabled without a window. */
 	if (enable && l->max_mv == 0u) return ALP_ERR_NOSUPPORT;
+	/* Window check runs BEFORE the already-enabled early return (the ONE
+	 * enable-time window rule in pmic_rail_limit.h). */
 	if (enable) {
 		/* Both setpoints must be in-window: the VSELx PIN may select
 		 * either one regardless of the CHx_VSEL register bit. */
@@ -405,6 +406,7 @@ alp_status_t da9292_set_enable(da9292_t *ctx, da9292_channel_t ch, bool enable)
 		if (!in_window(l, vout_decode(lo, vstep)) || !in_window(l, vout_decode(hi, vstep)))
 			return ALP_ERR_OUT_OF_RANGE;
 	}
+	if (enable == ((ctrl & en) != 0)) return ALP_OK; /* already there: no write */
 	return reg_write(ctx, DA9292_REG_PMC_CTRL_01, (uint8_t)(ctrl ^ en));
 }
 

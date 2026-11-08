@@ -53,8 +53,8 @@
  *
  * @note The framing format is deliberately minimal in v0.6.  A
  *       richer schema (length-prefixed binary blocks or protobuf
- *       envelopes via nanopb) is an opt-in upgrade tracked for
- *       v0.7; it will reuse the same `<alp/rpc.h>` public API.  Both
+ *       envelopes via nanopb) is not implemented; it would reuse the
+ *       same `<alp/rpc.h>` public API.  Both
  *       ends of an `alp_rpc_channel_t` must agree on the framing
  *       format -- mixing framed and raw firmwares is a wire-protocol
  *       break.
@@ -89,22 +89,34 @@
  *     reports both @ref ALP_RPC_LINK_UP (chardev open) and
  *     @ref ALP_RPC_LINK_LOST (its rx thread's poll()/read() failing).
  *   - Zephyr/M-class backend (`src/backends/rpc/zephyr_drv.c`):
- *     reliably reports @ref ALP_RPC_LINK_UP (`ipc_service`'s `bound`
- *     callback), but the pinned Zephyr v4.4.1 `ipc_service` RPMsg
- *     static-vrings backend never invokes the `unbound`/`error`
- *     callbacks this code wires -- so @ref ALP_RPC_LINK_LOST is
- *     currently NOT observable on Zephyr; a far-core reset there
- *     stays silently reported as UP.  See that file's own `@par Link
- *     liveness` comment for the confirmation and what would flip it.
+ *     reports @ref ALP_RPC_LINK_UP from `ipc_service`'s `bound`
+ *     callback.  On the AEN M55 cores the pinned Zephyr v4.4.1
+ *     `ipc_service` RPMsg static-vrings backend never invokes the
+ *     `unbound`/`error` callbacks this code wires, so
+ *     @ref ALP_RPC_LINK_LOST is NOT observable there; a far-core reset
+ *     stays silently reported as UP.  On the RZ/V2N / V2M Cortex-M33
+ *     the SDK's own `ipc_service` backend
+ *     (`zephyr/drivers/ipc/ipc_alp_v2n_rpmsg.c`) does call `unbound`
+ *     when the Linux A55 resets the link (a re-attach), so there
+ *     @ref ALP_RPC_LINK_LOST is reported, and @ref ALP_RPC_LINK_UP
+ *     again once the A55 re-attaches and sends its first frame.  See
+ *     zephyr_drv.c's own `@par Link liveness` comment.
  *   - RZ/V2N's userspace-virtio backend
  *     (`src/backends/rpc/yocto_uio_drv.c`) -- the backend that wins on
  *     every V2N `silicon_ref` -- is not wired for link liveness at
  *     all yet, so V2N reports UP only, same as Zephyr today.
  *
  * A caller that needs @ref ALP_RPC_LINK_LOST reliably in THIS revision
- * has it only via a Linux/A-class peer running the plain chardev
- * backend -- not on Zephyr, and not on V2N's own A55 (which selects
- * the unwired UIO backend).
+ * has it via a Linux/A-class peer running the plain chardev backend,
+ * or on the V2N/V2M Cortex-M33 (A55-requested link reset) -- not on
+ * the AEN M55 cores, and not on V2N's own A55 (which selects the
+ * unwired UIO backend).
+ *
+ * @b Endpoint addressing on the V2N/V2M M33: `ipc_service` has no
+ * address field, so @ref alp_rpc_config_t `src_ept` / `dst_ept` are
+ * ignored there; the M33 serves channel N (in `alp_rpc_open()` order,
+ * first free slot) at rpmsg address 1024 + N, and the A55 must pass
+ * that as its `dst_ept`.
  *
  * @par ABI status: [ABI-STABLE]
  *      v0.6 framed RPC surface.  Adding optional fields to
@@ -162,6 +174,12 @@ typedef struct alp_rpc_channel alp_rpc_channel_t;
  * Every member except @c name is optional; uninitialised fields
  * adopt the defaults documented per-field.  Pass a designated-
  * initialiser literal directly to @ref alp_rpc_open for terse use.
+ *
+ * The RPMsg carve-out is non-cacheable by design and the SDK performs no
+ * cache flush or invalidate.  For board.yaml @c ipc: endpoints the
+ * generator emits @c CONFIG_DCACHE=n for every endpoint core; hand-written
+ * firmware must map the carve-out non-cacheable in the MPU.  There is no
+ * per-channel cache setting here.
  */
 typedef struct {
 	/** RPMsg endpoint name (matches @c ALP_IPC_<NAME>_NAME from the
@@ -185,12 +203,6 @@ typedef struct {
 	/** Mailbox channel index (@c ALP_IPC_<NAME>_MBOX_CH).  Defaults
      *  to @ref ALP_RPC_DEFAULT_MBOX_CH when 0. */
 	uint32_t mbox_ch;
-
-	/** Memory-caching policy for the carve-out.  @c false picks the
-     *  non-cacheable region (the v0.6 default).  Set to @c true on
-     *  AEN where M55 caches are enabled and the carve-out is in
-     *  cacheable MRAM. */
-	bool cacheable;
 } alp_rpc_config_t;
 
 /**
@@ -200,8 +212,7 @@ typedef struct {
  * ALREADY-documented per-field default: @c src_ept = 0 (the backend
  * derives it from @c name via FNV-1a hash), @c dst_ept = 0 (the
  * backend uses `src_ept + 1`), @c mbox_ch = @ref
- * ALP_RPC_DEFAULT_MBOX_CH, @c cacheable = false (the v0.6 default --
- * non-cacheable carve-out).
+ * ALP_RPC_DEFAULT_MBOX_CH.
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
@@ -209,11 +220,8 @@ typedef struct {
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_RPC_CONFIG_DEFAULT(id) \
-	((alp_rpc_config_t){ .name      = (id), \
-	                     .src_ept   = 0u, \
-	                     .dst_ept   = 0u, \
-	                     .mbox_ch   = ALP_RPC_DEFAULT_MBOX_CH, \
-	                     .cacheable = false })
+	((alp_rpc_config_t){ \
+	    .name = (id), .src_ept = 0u, .dst_ept = 0u, .mbox_ch = ALP_RPC_DEFAULT_MBOX_CH })
 
 /**
  * @brief Generic inbound-message callback.
@@ -318,10 +326,21 @@ typedef void (*alp_rpc_link_cb_t)(alp_rpc_link_state_t state, void *user);
  *                                       method-name too long
  *           - @ref ALP_ERR_NOMEM     — channel pool exhausted
  *           - @ref ALP_ERR_NOT_READY — RPMsg device or memory
- *                                       region not yet up
+ *                                       region not yet up, or (Linux
+ *                                       UIO) no CM33 beacon
+ *           - @ref ALP_ERR_BUSY      — Linux UIO: the CM33 is still
+ *                                       attached to an earlier session
+ *                                       and cannot reset, or another
+ *                                       process holds the link; also
+ *                                       the single-link busy of a
+ *                                       second concurrent open
+ *           - @ref ALP_ERR_TIMEOUT   — Linux UIO: the CM33 did not
+ *                                       acknowledge the attach reset
  *           - @ref ALP_ERR_NOSUPPORT — SDK built without
  *                                       CONFIG_ALP_SDK_RPC / no
- *                                       OpenAMP backend available
+ *                                       OpenAMP backend available, or
+ *                                       (Linux UIO) the CM33 image
+ *                                       serves no RPC
  */
 alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg);
 
@@ -417,6 +436,11 @@ alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t
 
 /**
  * @brief Remove a prior @ref alp_rpc_subscribe registration.
+ *
+ * Waits for an in-flight callback of that method to return (except when
+ * called from that callback itself), so the caller may free the
+ * callback's user pointer afterwards.  A callback must therefore not
+ * block on anything the unsubscribing thread holds.
  *
  * @param[in] ch      Channel handle.
  * @param[in] method  Method name previously passed to
@@ -538,7 +562,9 @@ alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, siz
  *                                    channel's link has already
  *                                    observed @ref ALP_RPC_LINK_LOST --
  *                                    see @ref alp_rpc_link_state and
- *                                    the note below
+ *                                    the note below, OR an earlier call
+ *                                    on this channel timed out (see the
+ *                                    note below)
  *          - @ref ALP_ERR_INVAL   @c method invalid, or
  *                                  @c resp != NULL with
  *                                  @c resp_len == NULL
@@ -550,7 +576,17 @@ alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, siz
  *                                    synchronous call on this OS yet
  *                                    (Linux side ships partial in
  *                                    v0.6 -- see src/yocto/rpc_yocto.c)
+ *          - @ref ALP_ERR_BUSY    (UIO/OpenAMP backend) called from a
+ *                                  subscribe callback, whose thread is
+ *                                  the one that delivers replies
  *
+ * @note Do not call this from a subscribe callback on the UIO/OpenAMP
+ *       backend: it returns @ref ALP_ERR_BUSY instead of blocking.
+ * @note Replies are matched by method name only (the frame has no
+ *       sequence id), so after a call times out (or its wait fails) the
+ *       channel refuses every later call with @ref ALP_ERR_NOT_READY
+ *       until it is closed and reopened -- otherwise that call's late
+ *       reply would be returned to the next call of the same method.
  * @note Concurrent calls on the same channel from multiple threads
  *       are serialised by the SDK; the second caller blocks until
  *       the first call returns or times out.

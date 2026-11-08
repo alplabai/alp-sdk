@@ -50,8 +50,9 @@ def test_scaffold_emits_json_envelope_for_the_examples_own_sku():
     # rewrite), so they differ even for the canonical example's own SKU.
     for rel in ("board.yaml", "prj.conf", "src/main.c"):
         assert by_path[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8"), rel
-    assert "--core m55_hp" in by_path["CMakeLists.txt"]
-    assert "ALP_SDK_ROOT is not set" in by_path["CMakeLists.txt"]
+    # The configure-time alp_project.py bridge is retired (#866): the
+    # scaffolded CMakeLists.txt carries no SDK-root plumbing at all.
+    assert "alp_project.py" not in by_path["CMakeLists.txt"]
 
 
 def test_iot_scaffold_emits_the_cc3501e_bridge_it_compiles():
@@ -83,7 +84,6 @@ def test_scaffold_substitutes_sku_and_preset_for_a_different_sku():
     # with rc=1, "unknown core id".
     assert "m33_sm:" in envelope["board.yaml"]
     assert "m55_hp" not in envelope["board.yaml"]
-    assert "--core m33_sm" in envelope["CMakeLists.txt"]
     # prj.conf / src/main.c carry no sku-specific content -- unmodified.
     for rel in ("prj.conf", "src/main.c"):
         assert envelope[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8")

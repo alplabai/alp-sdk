@@ -18,6 +18,10 @@
  *   - Reading bus voltage + current + power in one transaction via
  *     `ina236_read_all()` and converting the raw fixed-point fields
  *     to volts / milliamps / milliwatts.
+ *   - Treating an optional part as optional: the +5V input monitor
+ *     (an INA228, driven by `ina228_*`) answers only on carriers that
+ *     have the bus-pin rework, so "not present" is a normal result that
+ *     prints one line and leaves the rest of the table running.
  *
  * Scope
  * -----
@@ -30,22 +34,26 @@
  * (XEVK_I2C_BUS_SENSORS = ALP_E1M_X_I2C0, i.e. Linux /dev/i2c-0).
  *
  * Build (Yocto SDK):  see this example's README.md.
- * Run on target:      ./v2n-power-monitor   (Ctrl-C to stop)
+ * Run on target:      ./v2n-power-monitor [--ina228-range 163mv|40mv|auto]
+ *                     (Ctrl-C to stop; see the README for the INA228 scale)
  */
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "alp/peripheral.h"
+#include "alp/chips/ina228.h"
 #include "alp/chips/ina236.h"
 #include "alp/boards/alp_e1m_x_evk.h"        /* INA236 addresses + shunt calibration */
 #include "alp/boards/alp_e1m_x_evk_routes.h" /* XEVK_I2C_BUS_SENSORS                 */
+#include "range_policy.h"                    /* --ina228-range auto decision         */
 
 /*
- * The four INA236 rails.  Address + shunt + max-current come straight
+ * The three INA236 rails.  Address + shunt + max-current come straight
  * from the board header so the calibration constants live in one
  * place (the board definition), not scattered through app code.  The
  * +5V input monitor (U30) is an INA228, a different register map, so
@@ -59,14 +67,66 @@ static const struct rail_def {
 } k_rails[] = {
 	{ "3V3", XEVK_I2C_ADDR_INA236_3V3, XEVK_INA236_SHUNT_3V3_OHMS, XEVK_INA236_MAX_3V3_A },
 	{ "1V8", XEVK_I2C_ADDR_INA236_1V8, XEVK_INA236_SHUNT_1V8_OHMS, XEVK_INA236_MAX_1V8_A },
-	{ "VCAM2", XEVK_I2C_ADDR_INA236_VCAM2, XEVK_INA236_SHUNT_VCAM2_OHMS, XEVK_INA236_MAX_VCAM2_A },
 	{ "VCAM3", XEVK_I2C_ADDR_INA236_VCAM3, XEVK_INA236_SHUNT_VCAM3_OHMS, XEVK_INA236_MAX_VCAM3_A },
 };
 
 #define N_RAILS (sizeof(k_rails) / sizeof(k_rails[0]))
 
-int main(void)
+/*
+ * The +5V input monitor is an INA228 (20-bit registers, so a different
+ * driver).  The board header gives the shunt in ohms, a max current in amps
+ * and the default shunt scale (XEVK_INA228_ADCRANGE_5V: 0 = +/-163.84 mV,
+ * 1 = +/-40.96 mV); ina228_init() takes micro-ohms and micro-amps, so
+ * convert (+0.5f rounds the float product instead of truncating it).  The
+ * board's max current is the wide range's shunt full scale (163.84 mV /
+ * 100 mOhm = 1.6384 A), derived from the shunt, NOT a limit of the rail: the
+ * +5V input current with the NPU active is not known to stay under the
+ * narrow range's 0.4096 A, so the board default is the wide range.
+ */
+#define RAIL5V_SHUNT_UOHM ((uint32_t)(XEVK_INA228_SHUNT_5V_OHMS * 1000000.0f + 0.5f))
+#define RAIL5V_MAX_UA     ((uint32_t)(XEVK_INA228_MAX_5V_A * 1000000.0f + 0.5f))
+
+/* --ina228-range: which shunt scale to use for the +5V monitor. */
+enum range_mode { RANGE_MODE_163MV, RANGE_MODE_40MV, RANGE_MODE_AUTO };
+
+static bool parse_range_mode(const char *arg, enum range_mode *out)
 {
+	if (strcmp(arg, "163mv") == 0) {
+		*out = RANGE_MODE_163MV;
+	} else if (strcmp(arg, "40mv") == 0) {
+		*out = RANGE_MODE_40MV;
+	} else if (strcmp(arg, "auto") == 0) {
+		*out = RANGE_MODE_AUTO;
+	} else {
+		return false;
+	}
+	return true;
+}
+
+/* The reporting scale for a range: its full scale (clamped to what
+ * ina228_init() accepts), except the board's own max current on the board's
+ * default range. */
+static uint32_t range_max_ua(ina228_adcrange_t range)
+{
+	if ((int)range == XEVK_INA228_ADCRANGE_5V) return RAIL5V_MAX_UA;
+	uint64_t fs = ina228_full_scale_ua(RAIL5V_SHUNT_UOHM, range);
+	return (fs > INA228_MAX_CURRENT_LIMIT_UA) ? INA228_MAX_CURRENT_LIMIT_UA : (uint32_t)fs;
+}
+
+int main(int argc, char **argv)
+{
+	/* Default: the board's scale.  --ina228-range 163mv|40mv|auto overrides it. */
+	enum range_mode mode = (XEVK_INA228_ADCRANGE_5V == 1) ? RANGE_MODE_40MV : RANGE_MODE_163MV;
+	for (int i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "--ina228-range") == 0 && i + 1 < argc &&
+		    parse_range_mode(argv[i + 1], &mode)) {
+			i++;
+			continue;
+		}
+		fprintf(stderr, "usage: %s [--ina228-range 163mv|40mv|auto]\n", argv[0]);
+		return 2;
+	}
+
 	/*
 	 * One bus handle shared by all four monitors.  400 kHz
 	 * fast-mode is comfortable for the INA236 (it tolerates up to
@@ -104,6 +164,39 @@ int main(void)
 		}
 	}
 
+	/*
+	 * The INA228.  INA228_ERR_NOT_PRESENT means nothing acknowledged at its
+	 * address -- the normal result on a carrier without the bus-pin rework --
+	 * so say so once and carry on (the poll loop below still runs).  Any other
+	 * failure -- BUSY, TIMEOUT, ... -- is a real bus fault and is printed with
+	 * its actual status, never as "not present".
+	 */
+	/* auto starts on the wide range; 163mv / 40mv use that range for good. */
+	ina228_adcrange_t range5v =
+	    (mode == RANGE_MODE_40MV) ? INA228_ADCRANGE_40MV : INA228_ADCRANGE_163MV;
+	ina228_t     mon5v;
+	alp_status_t s5 = ina228_init(
+	    &mon5v, bus, XEVK_I2C_ADDR_INA228_5V, RAIL5V_SHUNT_UOHM, range_max_ua(range5v), range5v);
+	bool live5 = (s5 == ALP_OK);
+	/* Failure bookkeeping for a range switch that did not complete (see the loop):
+	 * broken5 = the monitor could not be brought back to a known state, err5 = the
+	 * status to show in its row until it is. */
+	ina228_adcrange_t cur_range5 = range5v;
+	bool              broken5    = false;
+	alp_status_t      err5       = ALP_OK;
+	if (s5 == INA228_ERR_NOT_PRESENT) {
+		fprintf(stderr,
+		        "INA228 5V    @0x%02x: not present (carrier without the bus-pin rework?); "
+		        "continuing without it\n",
+		        XEVK_I2C_ADDR_INA228_5V);
+	} else if (!live5) {
+		fprintf(stderr,
+		        "INA228 5V    @0x%02x: init failed: %s (%d)\n",
+		        XEVK_I2C_ADDR_INA228_5V,
+		        alp_status_name(s5),
+		        (int)s5);
+	}
+
 	/* Poll + print until interrupted. */
 	for (;;) {
 		printf("rail     bus_V     I_mA       P_mW\n");
@@ -118,6 +211,91 @@ int main(void)
 			       s.bus_mv / 1000.0,
 			       s.current_ua / 1000.0,
 			       s.power_uw / 1000.0);
+		}
+		int32_t      bus_uv = 0, cur_ua = 0, shunt_uv = 0;
+		uint64_t     pwr_uw  = 0;
+		bool         over    = false;
+		alp_status_t row_err = ALP_OK; /* != ALP_OK: show this status instead of values */
+		if (live5 && broken5) {
+			/* An earlier switch failed and the reset could not repair it: try to bring the
+			 * monitor back every cycle, on the range it was last known to be on. */
+			err5 = ina228_init(&mon5v,
+			                   bus,
+			                   XEVK_I2C_ADDR_INA228_5V,
+			                   RAIL5V_SHUNT_UOHM,
+			                   range_max_ua(cur_range5),
+			                   cur_range5);
+			if (err5 == ALP_OK) {
+				broken5 = false;
+				fprintf(stderr,
+				        "INA228 5V: recovered on the %s range\n",
+				        cur_range5 == INA228_ADCRANGE_40MV ? "40.96 mV" : "163.84 mV");
+			}
+		}
+		if (broken5) row_err = err5;
+		bool ok5 = live5 && !broken5 && ina228_read_shunt_uv(&mon5v, &shunt_uv) == ALP_OK &&
+		           ina228_check_over_range(&mon5v, &over) == ALP_OK;
+		if (ok5 && mode == RANGE_MODE_AUTO) {
+			/* Decide the range for the NEXT sample from this one; one line per switch. */
+			bool narrow = (mon5v.adcrange == INA228_ADCRANGE_40MV);
+			bool want   = range_policy_want_narrow(narrow, shunt_uv, over);
+			if (want != narrow) {
+				ina228_adcrange_t next = want ? INA228_ADCRANGE_40MV : INA228_ADCRANGE_163MV;
+				alp_status_t      ss   = ina228_set_shunt_range(&mon5v, next, range_max_ua(next));
+				if (ss == ALP_OK) {
+					cur_range5 = next;
+					printf("INA228 5V: switched to the %s range (shunt %d uV)\n",
+					       want ? "40.96 mV" : "163.84 mV",
+					       (int)shunt_uv);
+					/* A conversion taken at the old range may still be in the result
+					 * registers, so show no value for this one sample. */
+					ok5 = false;
+				} else {
+					/* The switch did not complete: the device may hold the new SHUNT_CAL or
+					 * range while the driver context still describes the old setup, so the
+					 * numbers could be off by 4x.  Show the error, not a value, for this
+					 * sample, then reset the part (which re-applies the context's, i.e. the
+					 * previous, range and calibration) and re-init if that fails too. */
+					ok5             = false;
+					row_err         = ss;
+					err5            = ss;
+					alp_status_t rs = ina228_reset(&mon5v);
+					if (rs != ALP_OK) {
+						rs = ina228_init(&mon5v,
+						                 bus,
+						                 XEVK_I2C_ADDR_INA228_5V,
+						                 RAIL5V_SHUNT_UOHM,
+						                 range_max_ua(cur_range5),
+						                 cur_range5);
+					}
+					broken5 = (rs != ALP_OK);
+					fprintf(stderr,
+					        "INA228 5V: range switch failed: %s (%d); %s\n",
+					        alp_status_name(ss),
+					        (int)ss,
+					        broken5 ? "recovery failed, will retry"
+					                : "reset onto the previous range");
+				}
+			}
+		}
+		if (row_err != ALP_OK) {
+			/* Not trustworthy: an error row, never a number. */
+			printf("  %-5s  error: %s\n", "5V", alp_status_name(row_err));
+		} else if (ok5 && over) {
+			/* Clipped: the numbers are not valid, so say so instead of printing them. */
+			printf("  %-5s  over-range (shunt voltage clipped on the %s range)\n",
+			       "5V",
+			       mon5v.adcrange == INA228_ADCRANGE_40MV ? "40.96 mV" : "163.84 mV");
+		} else if (!ok5 || ina228_read_bus_uv(&mon5v, &bus_uv) != ALP_OK ||
+		           ina228_read_current_ua(&mon5v, &cur_ua) != ALP_OK ||
+		           ina228_read_power_uw(&mon5v, &pwr_uw) != ALP_OK) {
+			printf("  %-5s    --        --         --\n", "5V");
+		} else {
+			printf("  %-5s %7.3f  %9.2f %10.1f\n",
+			       "5V",
+			       bus_uv / 1000000.0,
+			       cur_ua / 1000.0,
+			       (double)pwr_uw / 1000.0);
 		}
 		printf("\n");
 		sleep(1);

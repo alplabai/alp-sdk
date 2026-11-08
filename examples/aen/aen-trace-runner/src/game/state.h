@@ -14,6 +14,14 @@
  */
 #define TR_AIR_TICKS  14
 #define TR_DUCK_TICKS 12
+/*
+ * A jump asked while the runner is still airborne or ducking is not lost: it is
+ * held for this many steps and taken the first step the runner is free. A
+ * both-arms raise is an edge that cannot be repeated until both arms come
+ * down, so a player who raises a beat early (a duck or the last of a jump
+ * still running) would otherwise get nothing.
+ */
+#define TR_JUMP_BUFFER_TICKS 4
 /* Pixels per tick an entity travels down the track. P3c: 18 -> 11 (0.61x): at
  * the A32 build's 40 Hz tick the old 18 ran the board ~17x faster than the
  * runner's feet could plant; 11 with the faster, longer stride of the P3c run
@@ -154,6 +162,7 @@ typedef struct {
 	uint8_t     air_ticks;
 	bool        ducking;
 	uint8_t     duck_ticks;
+	uint8_t     jump_wait; /**< Steps a jump asked mid-air / mid-duck is still held for. */
 	uint32_t    score;
 	bool        alive;
 	bool        crashed;     /**< Died on an obstacle: the crash sequence below runs. */

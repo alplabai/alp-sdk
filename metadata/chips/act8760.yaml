@@ -166,3 +166,5 @@ physical:
   dimension_mm: "3.85 x 3.85"
   visibility:   public
   provenance:   web_provisional
+tracking:
+  blocker: "ADR 0017 tier decision pending"

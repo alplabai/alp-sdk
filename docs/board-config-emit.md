@@ -37,56 +37,39 @@ sizing workflows. The SDK's
 remain the reference implementations for parity, direct SDK maintenance, and
 west-centric artefact inspection.
 
-### Zephyr -- generated `alp.conf` appended to `prj.conf`
+### Zephyr -- generated `alp.conf` layered over `prj.conf`
 
-The canonical pattern is to run the loader at configure time and
-include the generated fragment from `prj.conf`:
+The loader runs **before** CMake configure, never inside it: an example's
+`CMakeLists.txt` carries no `alp_project.py` step (retired in #866 -- it put
+intermediate Python on every configure). Whoever starts the build hands the
+generated fragment to Zephyr's `EXTRA_CONF_FILE`, which merges it on top of
+`prj.conf` at Kconfig time. `prj.conf` itself stays empty -- everything flows
+from `board.yaml`.
+
+* **`tan build`** does this for you: the build plan's `configArtefacts`
+  materialise each core's `alp.conf` and the plan's `west build` command
+  passes it as `-DEXTRA_CONF_FILE` (or `-D<image>_EXTRA_CONF_FILE` on a
+  `--sysbuild` slice).
+* **twister / a bare `west build` of an SDK example** read the pre-generated
+  `<app dir>/generated/alp.conf`, which `scripts/gen_example_alp_conf.py`
+  writes (git-ignored); each example's `testcase.yaml` names it first in
+  `EXTRA_CONF_FILE`. Run the generator before twister.
+* **By hand**, one core at a time (`--core` is required on a multi-core
+  `board.yaml`; an unscoped emit sums every core's Kconfig):
 
 ```bash
 # At your app root, alongside board.yaml + prj.conf:
 python3 $ALP_SDK/scripts/alp_project.py \
     --input board.yaml \
-    --emit zephyr-conf \
-    --output build/generated/alp.conf
+    --emit zephyr-conf --core <core-id> \
+    --output generated/alp.conf
+
+west build -b <board> . -- -DEXTRA_CONF_FILE=$PWD/generated/alp.conf
 ```
 
-The application's `CMakeLists.txt` wires the loader as a
-configure-time step and layers the result over `prj.conf` with
-`EXTRA_CONF_FILE`.  `prj.conf` itself stays empty -- everything
-flows from `board.yaml`:
-
-```cmake
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-# Point ALP_SDK_ROOT at your alp-sdk checkout (env override, else a
-# tree-relative fallback -- mirrors the examples/*/CMakeLists.txt pattern).
-if(DEFINED ENV{ALP_SDK_ROOT})
-    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
-else()
-    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../.. ABSOLUTE)
-endif()
-
-set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
-            --input ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --emit zephyr-conf
-            --output ${_alp_generated}
-    RESULT_VARIABLE _alp_rv
-)
-if(NOT _alp_rv EQUAL 0)
-    message(FATAL_ERROR "alp_project.py failed (rv=${_alp_rv})")
-endif()
-list(APPEND EXTRA_CONF_FILE ${_alp_generated})
-
-find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-project(my_app LANGUAGES C)
-target_sources(app PRIVATE src/main.c)
-```
-
-Zephyr's `EXTRA_CONF_FILE` machinery merges the generated `alp.conf`
-on top of `prj.conf` at Kconfig time -- the app picks up every
-`CONFIG_*` line the loader emitted.
+Keep the fragment under `generated/` (or any non-build-root dir): Zephyr
+auto-merges every `*.conf` it finds beside `prj.conf` and in the build root,
+which would put it in the merge list twice and ahead of your overlays.
 
 The loader is a pure string templater: it never runs kconfiglib/west, so it
 can only reason about a symbol's dependency chain from its own metadata +
@@ -99,15 +82,44 @@ input to a Zephyr tree built from a different one. A clean cross-version skew
 error (rather than a Kconfig "assign to undefined symbol" abort) is #855's
 version-detection work, not this loader's.
 
+### Other rendered plan artefacts (reference only)
+
+A zephyr or baremetal slice's `configArtefacts` carries four rendered-text
+files after its primary config artefact, in this order: `alp.overlay`
+(`--emit dts-overlay --core <id>`), `cmake-args.txt` (`--emit cmake-args --core
+<id>` minus the marker line), `alp_hw_info_build.h` (`--emit hw-info-h --core
+<id>`) and `alp-west-libs.yml` (`--emit west-libraries --core <id>`). Each is
+byte-identical to the standalone render because both call one shared helper, so
+`tan` consumes the plan's bytes instead of re-rendering them. They are reference
+files: no build command, CMake file or Kconfig in this SDK reads them
+(`ALP_HW_BUILD_*` for the firmware still comes from the build itself).
+`alp.overlay` is absent, with a `dts-overlay-unavailable` warning, on a board
+with no header, and `alp_hw_info_build.h` is absent, with a `hw-info-unavailable`
+warning, for a SKU outside the production families; `cmake-args.txt` and
+`alp-west-libs.yml` are always present (a slice with no libraries gets a
+well-formed empty `alp-west-libs.yml`).
+
 ### Plain CMake (baremetal / yocto) -- generated `-D` args (reference / inspection)
+
+The SoC capability profile rides these args too: `-DALP_SOC=<ALP_SOC_...>`
+(the SoM silicon's Kconfig-style symbol, e.g. `ALP_SOC_RENESAS_RZV2N_N44`,
+from `metadata/registries/silicon-kconfig.json`) makes the top-level
+`CMakeLists.txt` define `CONFIG_<symbol>=1` on `alp_sdk_headers`, so
+`<alp/soc_caps.h>` resolves `ALP_SOC_REF_STR` and `ALP_HAS()` exactly as a
+Zephyr build with `CONFIG_ALP_SOC_*=y` does. The Yocto slice carries the same
+value as `ALP_SDK_SOC ?= "..."` in `--emit yocto-conf`; the `alp-sdk` recipe
+forwards it as `-DALP_SOC=`. Omitting it leaves the permissive "unknown SoC"
+profile (`ALP_SOC_REF_STR` is `"unknown"`).
 
 `--emit cmake-args` renders a slice's would-be `-D` arguments as text: an
 on-request surface for inspecting what a baremetal build needs, or for a
-build system that parses the lines itself. It is **not** a directly
+build system that parses the lines itself. The same text (minus the section
+marker below) is also carried in the build plan as each zephyr/baremetal
+slice's `cmake-args.txt` configArtefact, so `tan` does not re-render it. It is **not** a directly
 shell-pipeable recipe -- `cmake -B build $(... --emit cmake-args) .` fails
 CMake's own argument parser today, for two independent reasons: the CLI's
 leading `# --- core: <id> (<os>) ---` section marker
-(`scripts/alp_project.py:515` prepends it unconditionally for
+(`scripts/alp_project.py:528` prepends it unconditionally for
 `cmake-args`, unlike the `zephyr-conf` branch, which only adds it in the
 unscoped multi-core sum case), and the board-facade selector's bare
 `-DALP_BOARD_<SLUG>` (a compile-time `#if defined(...)` guard consumed by
@@ -189,8 +201,8 @@ manifest:
 ```
 
 Run `west update` and only the modules board.yaml actually
-references land in the workspace.  Closes the second v0.4 gap
-this doc previously flagged.
+references land in the workspace -- the `west.yml` auto-pinning
+gap is closed.
 
 ### Build-time identifier header (`--emit hw-info-h`)
 

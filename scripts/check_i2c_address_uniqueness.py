@@ -74,14 +74,22 @@ Run locally:
   * ``examples/**/board.yaml``'s ``hw_info.eeprom.{bus,addr_7bit}`` is a
     further address-declaring shape, outside the ``metadata/`` tree this
     gate walks.
-  * **Cross-file joins are not performed.** A carrier's flat ``i2c_devices:``
-    and a mounted SoM preset's ``e1m_i2c*`` bus can be the SAME physical bus
-    (``XEVK_I2C_BUS_SENSORS`` is ``ALP_E1M_X_I2C0`` --
-    ``include/alp/boards/alp_e1m_x_evk_routes.h``), but the two live in
-    different files and the gate compares within a file only. It therefore
-    cannot see a collision that only exists once a particular SoM is mounted
-    on a particular carrier. Widening it to that would need a declared
-    SoM<->carrier bus mapping that does not exist in the tree today.
+  * A carrier's ``audio.codecs[]`` entries are not joined against a SoM
+    (only the flat ``i2c_devices:`` block is; see below).
+
+**SoM <-> carrier join (#2990).**  A carrier's flat ``i2c_devices:`` and a
+mounted SoM preset's ``e1m_i2c*`` bus are the SAME physical bus
+(``XEVK_I2C_BUS_SENSORS`` is ``ALP_E1M_X_I2C0`` --
+``include/alp/boards/alp_e1m_x_evk_routes.h``; ``aen/on-module-links.yaml``
+says the same for ``e1m_i2c0``), so a carrier part strapped onto the module
+EEPROM's ``0x50`` / ``0x58`` is a real collision even though the two live in
+different files.  The join is declared, not guessed: a board's
+``hosts_som_families:`` selects the SoM presets whose ``family:`` matches,
+and its ``i2c_devices_bus:`` (``E1M_I2C0`` / ``E1M_X_I2C0``) maps to the SoM
+bus key ``e1m_i2c0`` by lower-casing and dropping the ``_X``.  A carrier row
+whose ``part`` is the same chip at the same address as a SoM device on that
+bus is the carrier MIRRORING the module part (the X-EVK
+``XEVK_I2C_ADDR_EEPROM`` row), not a second device, and is not a collision.
 """
 
 from __future__ import annotations
@@ -96,21 +104,7 @@ import yaml
 # (repo-relative file, bus id, "0xNN" 7-bit address) -> why this collision is
 # real hardware ambiguity, not a bug in the gate. Each entry must name the
 # tracking issue -- see the module docstring.
-ALLOWLIST: dict[tuple[str, str, str], tuple[tuple[str, ...], str]] = {
-    (
-        "metadata/boards/e1m-x-evk.yaml",
-        "E1M_X_I2C0",
-        "0x48",
-    ): ((
-        "chip=tas2563 broadcast",
-        "part=ina236 macro=XEVK_I2C_ADDR_INA236_VCAM2",
-    ), (
-        "#2343: U32 (INA236B, VCAM2) is strapped to the TAS2563 global-call "
-        "address on the E1M-X EVK V2. The maintainer's call is to remove U32 "
-        "on the current build batch and re-strap it to 0x4A/0x4B on the next "
-        "carrier revision; the metadata keeps it at its V2 strap until then."
-    )),
-}
+ALLOWLIST: dict[tuple[str, str, str], tuple[tuple[str, ...], str]] = {}
 
 # Synthetic bus id for metadata/boards/*.yaml's top-level i2c_devices: block
 # -- see the module docstring's "What it scans" section on why this list has
@@ -356,6 +350,62 @@ def find_problems(root: Path) -> list[str]:
     return problems
 
 
+def _som_bus_key(carrier_bus: str) -> str:
+    """Carrier ``E1M_I2C0`` / ``E1M_X_I2C0`` -> SoM preset bus key
+    ``e1m_i2c0``."""
+    return carrier_bus.lower().replace("_x_", "_")
+
+
+def find_carrier_som_problems(root: Path) -> list[str]:
+    """One message per carrier ``i2c_devices`` row whose address is also
+    claimed by a fitted SoM device on the same physical bus, for every SoM
+    family the carrier hosts."""
+    problems: list[str] = []
+    modules_dir = root / "metadata" / "e1m_modules"
+    boards_dir = root / "metadata" / "boards"
+    if not (modules_dir.is_dir() and boards_dir.is_dir()):
+        return problems
+    modules = [(p, _load_yaml(p)) for p in sorted(modules_dir.glob("*.yaml"))]
+    for bpath in sorted(boards_dir.glob("*.yaml")):
+        board = _load_yaml(bpath)
+        carrier_bus = board.get("i2c_devices_bus")
+        hosts = board.get("hosts_som_families") or []
+        if not carrier_bus or not hosts:
+            continue
+        som_bus = _som_bus_key(str(carrier_bus))
+        brel = bpath.relative_to(root).as_posix()
+        for mpath, mod in modules:
+            if mod.get("family") not in hosts:
+                continue
+            buses = ((mod.get("on_module") or {}).get("i2c_devices")) or {}
+            devices = ((buses.get(som_bus) or {}).get("devices")) or []
+            som_by_addr: dict[int, list[dict[str, Any]]] = {}
+            for dev in devices:
+                addr = _addr_int(dev.get("address_7bit"))
+                if addr is not None and dev.get("assembled") is not False:
+                    som_by_addr.setdefault(addr, []).append(dev)
+            for cdev in board.get("i2c_devices") or []:
+                if cdev.get("assembled") is False:
+                    continue
+                addr = _addr_int(cdev.get("address"))
+                if addr is None:
+                    continue
+                for sdev in som_by_addr.get(addr, []):
+                    if sdev.get("chip") == cdev.get("part"):
+                        continue  # carrier row mirrors the module part
+                    problems.append(
+                        f"{brel}: bus '{carrier_bus}' address "
+                        f"{_addr_label(addr)} (part={cdev.get('part', '?')} "
+                        f"macro={cdev.get('macro', '?')}) is also claimed on "
+                        f"the same physical bus by SoM {mpath.stem} "
+                        f"'{som_bus}' (chip={sdev.get('chip', '?')} "
+                        f"role={sdev.get('role', '?')}) -- two devices "
+                        f"answering the same 7-bit address on the same bus "
+                        f"are electrically indistinguishable (issue #1675)."
+                    )
+    return problems
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Check I2C 7-bit address uniqueness per declared bus."
@@ -363,6 +413,7 @@ def main() -> int:
     ap.add_argument("--root", default=".", help="repository root to scan")
     args = ap.parse_args()
     problems = find_problems(Path(args.root))
+    problems.extend(find_carrier_som_problems(Path(args.root)))
     for p in problems:
         print(p, file=sys.stderr)
     if problems:

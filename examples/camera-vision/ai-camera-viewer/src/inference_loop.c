@@ -7,8 +7,8 @@
  *   1. Open the camera at startup; on failure tolerate it and
  *      run with a synthetic frame so the UI still renders.
  *   2. Open the inference backend (ALP_INFERENCE_BACKEND_AUTO --
- *      let the dispatcher pick the on-chip NPU on AEN / V2N /
- *      NX9101, or fall back to CPU on native_sim).
+ *      let the dispatcher pick the on-chip NPU on AEN / V2N,
+ *      or fall back to CPU on native_sim).
  *   3. Per loop iteration:
  *        - alp_camera_capture(...) returns a frame.
  *        - alp_inference_invoke(...) runs the model.
@@ -76,7 +76,7 @@ void inference_loop_run(viewer_state_t *state)
 
 	/* Inference setup.  AUTO routes to the best backend available to
      * this Zephyr slice (ETHOS_U85 on AEN401 / AEN601 / AEN801,
-     * U65 on NX9101, TFLM CPU on V2N M33 and native_sim).  V2N's
+     * TFLM CPU on V2N M33 and native_sim).  V2N's
      * DRP-AI3 engine is available only to its A55/Yocto slice. */
 	alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
 	    .backend     = ALP_INFERENCE_BACKEND_AUTO,

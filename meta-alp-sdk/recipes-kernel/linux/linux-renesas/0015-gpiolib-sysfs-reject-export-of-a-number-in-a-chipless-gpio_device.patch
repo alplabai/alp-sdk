@@ -1,0 +1,53 @@
+From: Alp Lab AB <contact@alplab.ai>
+Subject: [PATCH] gpiolib: sysfs: reject export of a number in a chipless
+ gpio_device
+
+A gpio_device outlives its gpio_chip while consumers still hold
+descriptors: gpiochip_remove() sets gdev->chip to NULL and leaves the
+device on gpio_devices with its base/ngpio range intact.  gpio_to_desc()
+still resolves a legacy global number inside that range, so
+export_store() loads gc = desc->gdev->chip == NULL and passes it to
+gpiochip_line_is_valid(), which reads gc->valid_mask and oopses:
+
+  Unable to handle kernel NULL pointer dereference at 0x1e0
+  pc : gpiochip_line_is_valid+0x0/0x30
+  lr : export_store+0x78/0x1b0
+
+Reproduced on 6.1.141-cip43 by unbinding and rebinding gpio-gd32-bridge
+(its base moved 394 -> 372, Wi-Fi/BT consumers kept the old device
+alive) and writing a number from the old range to /sys/class/gpio/export.
+
+Return -ENODEV when the chip is gone.  The other gdev->chip dereferences
+reachable from sysfs are already safe or unreachable with a stale number:
+
+ - unexport_store() only reaches gpiod_free(); gpiod_free_commit() tests
+   gc before using it and gpiod_unexport() does not touch the chip.
+ - gpiod_export() (called later by export_store) already returns -ENODEV
+   for a NULL chip.
+ - The per-line attributes (direction/value/edge/...) and the lock_as_irq
+   calls in gpio_sysfs_request_irq()/free_irq() only exist for an exported
+   line; gpiochip_sysfs_unregister() frees every FLAG_SYSFS descriptor
+   before gdev->chip is cleared, and gpiod_export() refuses a chipless
+   device, so no such attribute can be reached with a stale number.
+
+This is a minimal local guard, not a backport.  The check-then-use window
+between this test and gpiochip_line_is_valid() is not closed here.
+
+Upstream-Status: Inappropriate [local guard; upstream reworked gdev->chip under SRCU]
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+diff --git a/drivers/gpio/gpiolib-sysfs.c b/drivers/gpio/gpiolib-sysfs.c
+index a646486..0c75cc2 100644
+--- a/drivers/gpio/gpiolib-sysfs.c
++++ b/drivers/gpio/gpiolib-sysfs.c
+@@ -447,6 +447,9 @@ static ssize_t export_store(struct class *class,
+ 		return -EINVAL;
+ 	}
+ 	gc = desc->gdev->chip;
++	/* the chip was removed but a consumer keeps its gpio_device alive */
++	if (!gc)
++		return -ENODEV;
+ 	offset = gpio_chip_hwgpio(desc);
+ 	if (!gpiochip_line_is_valid(gc, offset)) {
+ 		pr_warn("%s: GPIO %ld masked\n", __func__, gpio);

@@ -39,7 +39,7 @@ def test_is_tbd_rejects_substring_and_non_placeholder_values():
 
 # ---------------------------------------------------------------------
 # Call-site regressions -- a hand-typed lowercase "tbd" is schema-valid
-# (som-preset-v1 $defs.chip_ref accepts it as a chip-id slug), so a site
+# (som-preset-v2 $defs.chip_ref accepts it as a chip-id slug), so a site
 # that reverts to `== "TBD"` doesn't just miss a style nit: it emits
 # CONFIG_ALP_SDK_CHIP_TBD / a bogus wireless provider for a chip that
 # doesn't exist.

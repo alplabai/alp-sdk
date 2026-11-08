@@ -79,6 +79,29 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _component_problems(bundle_dir: Path, doc: dict) -> list[str]:
+    """Every component file lies inside the bundle dir and matches the
+    declared size_bytes and sha256 (the same checks the V2N flow's
+    gates.artefacts makes)."""
+    problems: list[str] = []
+    root = bundle_dir.resolve()
+    for c in doc.get("components", []):
+        role, rel = c.get("role"), c.get("file", "")
+        path = (bundle_dir / rel).resolve()
+        if not path.is_relative_to(root):
+            problems.append(f"{role}: {rel} escapes the bundle directory")
+        elif not path.is_file():
+            problems.append(f"{role}: {rel} missing")
+        else:
+            size = path.stat().st_size
+            if size != c.get("size_bytes"):
+                problems.append(f"{role}: size {size} != bundle.json {c.get('size_bytes')}")
+            digest = _sha256(path)
+            if digest != c.get("sha256"):
+                problems.append(f"{role}: sha256 {digest} != bundle.json {c.get('sha256')}")
+    return problems
+
+
 def _validate_bundle(cfg: Cfg):
     bj = cfg.bundle_dir / "bundle.json"
     if not bj.is_file():
@@ -91,6 +114,13 @@ def _validate_bundle(cfg: Cfg):
         return None, Step("validate", False,
                           f"bundle failed schema validation:\n{proc.stdout.strip()}")
     doc = json.loads(bj.read_text(encoding="utf-8"))
+    # check_som_bundle.py validates the schema only; it never hashes the
+    # component files. Verify each one before anything is flashed, so a
+    # truncated, swapped or ../-escaping image cannot reach a flash backend.
+    problems = _component_problems(cfg.bundle_dir, doc)
+    if problems:
+        return None, Step("validate", False,
+                          "bundle components failed verification:\n" + "\n".join(problems))
     return doc, Step("validate", True,
                      f"bundle {doc['release_version']} ({doc['status']}) valid")
 
@@ -200,19 +230,25 @@ def _power_on_test(cfg: Cfg) -> tuple[bool, Step]:
 
 
 def _record(cfg: Cfg, bundle: dict, manifest: Path, test_ran: bool, test_ok: bool) -> Step:
-    """Three-valued, one value per outcome (#1305):
+    """Record the unit in the ledger. This flow emits only `fail` and
+    `pending-hw` (#1305); `som_ledger.py` accepts three values:
 
-      * `pass`        -- --execute, a test was configured, it ran, it passed.
+      * `pass`        -- never from this flow (the EEPROM write is HW-gated).
       * `fail`        -- --execute, a test was configured, it ran, it FAILED.
-      * `pending-hw`  -- everything else: dry-run, no test configured, or a
-                         test skipped under --execute.
+      * `pending-hw`  -- everything else: dry-run, no test configured, a
+                         test skipped under --execute, or a test that
+                         passed (the EEPROM write is HW-gated).
 
     `test_ran` must mean the power-on test was actually configured and
     invoked -- a skipped test is not a passed test (#1276) -- so `test_ok`
-    only earns a `pass` when `test_ran` is also True.
+    is only consulted for `fail` when `test_ran` is also True.
 
-    `cfg.execute` gates BOTH `pass` and `fail`, and that is load-bearing, not
-    symmetry for its own sake: `_power_on_test` returns `test_ran=True` in a
+    This flow never programs the EEPROM (`_eeprom` only builds and plans the
+    manifest), so a unit it provisions is never verified end to end: even a
+    passing power-on test records `pending-hw`, not `pass`. Only `fail` is
+    recorded as such -- a failed test is bad regardless of the EEPROM.
+
+    `cfg.execute` gates `fail`, and that is load-bearing: `_power_on_test` returns `test_ran=True` in a
     dry run too, because it still invokes the runner with `--validate` to
     check the spec. A spec that fails validation on a workstation with no
     board attached is not a unit that failed its power-on test, and must not
@@ -227,8 +263,8 @@ def _record(cfg: Cfg, bundle: dict, manifest: Path, test_ran: bool, test_ok: boo
     met."""
     if not (cfg.ledger_root and cfg.som_ledger):
         return Step("record", True, "no --ledger-root/--som-ledger; ledger record skipped")
-    if cfg.execute and test_ran:
-        result = "pass" if test_ok else "fail"
+    if cfg.execute and test_ran and not test_ok:
+        result = "fail"
     else:
         result = "pending-hw"
     cmd = [sys.executable, str(cfg.som_ledger), "--ledger-root", str(cfg.ledger_root),
@@ -292,6 +328,8 @@ def provision(cfg: Cfg) -> int:
     bootloader_only = bundle["status"].startswith("bootloader-only")
     image_skipped = False
     for comp in sorted(bundle["components"], key=lambda c: _FLASH_ORDER.get(c["role"], 9)):
+        if comp["role"] == "system_image_bmap":       # companion of system_image, never flashed itself
+            continue
         if comp["role"] == "system_image" and bootloader_only:
             steps.append(Step("flash:system_image", True, "skipped (bundle is bootloader-only)"))
             image_skipped = True
@@ -392,19 +430,35 @@ def _v2n_parser() -> argparse.ArgumentParser:
     work.add_argument("--tier-markers", type=Path, help="PRIVATE DDR tier markers JSON")
     work.add_argument("--pmic-expect", type=Path,
                       help="PRIVATE expected PMIC registers (YAML or JSON)")
+    work.add_argument("--functest-expect", type=Path,
+                      help="PRIVATE expected values of functional_test (YAML), merged over "
+                           "scripts/provision/functest-expect-v2n.yaml")
     work.add_argument("--flash-writer", type=Path, help="Flash Writer .mot (overrides bench.yaml)")
     work.add_argument("--gd32-fw", type=Path,
                       help="dir with bootloader.bin, ota-meta.bin, slot-a.bin")
-    work.add_argument("--enable-dxm1-flash", action="store_true",
-                      help="BENCH-PENDING: program the DX-M1 NPU's SPI-NAND over the UART "
-                           "recovery path (v2n-m1 only); needs bench.yaml dxm1.* -- has never "
-                           "run on silicon and cannot succeed on the first V2M bench unit yet "
-                           "-- default skip until bench-verified")
+    work.add_argument("--no-payload-store", action="store_true",
+                      help="do not cache payloads in /var/lib/alp-payload on the provisioning SD's "
+                           "root filesystem; push everything over SSH / the console")
+    work.add_argument("--hw-rev", metavar="rN",
+                      help="this unit's hardware revision key (e.g. r2) when it differs from "
+                           "the bundle/preset default; a batch can mix revisions")
     work.add_argument("--mfg-date", type=date.fromisoformat,
                       help="default: Monday of the serial's ISO week (a different date is "
                            "recorded as an override)")
     work.add_argument("--allow-tier-mismatch", metavar="REASON")
+    work.add_argument("--sd-removed-by-operator", action="store_true",
+                      help="sd_out_emmc_boot: the GD32 cannot hold the SD out (released v0.3.0 answers "
+                           "BOOT_CONFIG NOSUPPORT); the operator removed the microSD and the unit already "
+                           "booted from the eMMC. Verified (no SD enumerated) and recorded as "
+                           "sd_out_method=operator-removed. Without it the tool prompts interactively.")
+    work.add_argument("--accept-cid-change", metavar="REASON",
+                      help="the unit's eMMC was legitimately replaced: adopt the CID now behind the "
+                           "address as this serial's identity (recorded as an override; blocks shipping)")
     work.add_argument("--reprovision-from", type=Path, metavar="MANIFEST")
+    work.add_argument("--replace-identity", action="store_true",
+                      help="replace an already-committed identity (needs --reprovision-from): the old "
+                           "manifest and secure-page blobs are archived as <serial>.manifest.<old-hwrev>-<date>.bin "
+                           "/ <serial>.secure-page.<old-hwrev>-<date>.bin and the new ones are promoted")
     work.add_argument("--cold-cycles", type=_positive_int, default=3)
     work.add_argument("--transfer", choices=("sd", "xmodem"), default="sd")
     work.add_argument("--carrier", default="")
@@ -416,6 +470,9 @@ def _v2n_parser() -> argparse.ArgumentParser:
     work.add_argument("--only", help="STEP[,STEP] (preflight always runs)")
     work.add_argument("--from", dest="start", metavar="STEP")
     work.add_argument("--skip", help="STEP[,STEP]")
+    work.add_argument("--linux-host", metavar="HOST",
+                      help="sets the target host for this run (overrides bench.yaml linux.host; an EEPROM MAC "
+                           "change still forces rediscovery)")
     work.add_argument("--force-step", help="STEP[,STEP]: run even if its probe is satisfied")
     sub.add_parser("plan", parents=[common, work], help="dry run; read-only probes with --bench")
     r = sub.add_parser("run", parents=[common, work], help="dry run unless --execute")
@@ -443,6 +500,9 @@ def _bundle_from_build_dir(d: Path) -> dict:
             raise ValueError(f"--build-dir: want exactly one {pat}, found {[h.name for h in hits]}")
         comps.append({"role": role, "file": hits[0].name, "sha256": _sha256(hits[0]),
                       "size_bytes": hits[0].stat().st_size, "flash_target": target})
+    if len(bm := sorted(d.glob("*.wic.bmap"))) == 1:
+        comps.append({"role": "system_image_bmap", "file": bm[0].name, "sha256": _sha256(bm[0]),
+                      "size_bytes": bm[0].stat().st_size, "flash_target": "emmc"})
     return {"status": "complete", "release_version": f"build-dir:{d.name}", "components": comps}
 
 
@@ -493,7 +553,10 @@ def _status(a) -> int:
     for o in state.get("overrides", []):
         print(f"  override {o['gate']}: {o['reason']} ({o['at']})")
     cat = ledger_out.load_catalogue(a.catalogue or a.ledger_root / "schema" / "v2n.keys.yaml")
-    blockers = ledger_out.ship_check(ledger_out.read_unit_yaml(d / f"{a.serial}.unit.yaml"), cat)
+    import yaml
+    preset = yaml.safe_load((REPO / "metadata" / "e1m_modules" / f"{a.sku}.yaml").read_text(encoding="utf-8"))
+    blockers = ledger_out.ship_check(ledger_out.read_unit_yaml(d / f"{a.serial}.unit.yaml"), cat,
+                                     steps.expected_family(preset))
     failed = [n for n, v in state.get("steps", {}).items() if v.get("status") == "failed"]
     print("ship check: " + ("SHIPPABLE" if not blockers and not failed else "blocked"))
     for b in blockers:
@@ -507,10 +570,24 @@ def _status(a) -> int:
     return 0
 
 
+def _check_hw_rev(family: str, key: str) -> None:
+    """--hw-rev must be a `production` key of the family's hw-revisions.yaml (exact case)."""
+    import yaml
+    path = REPO / "metadata" / "e1m_modules" / family / "hw-revisions.yaml"
+    if not path.is_file():
+        raise ValueError(f"no {path.relative_to(REPO).as_posix()} to validate --hw-rev against")
+    revs = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("hw_revisions") or {}
+    status = (revs.get(key) or {}).get("status")
+    if status != "production":
+        ok = ", ".join(k for k, v in revs.items() if (v or {}).get("status") == "production")
+        raise ValueError(f"--hw-rev {key!r} is {'not a known key' if key not in revs else 'status ' + repr(status)} "
+                         f"for family {family}; production keys: {ok}")
+
+
 def v2n_main(argv: list[str]) -> int:
     import yaml
     from provision import bench as bench_mod
-    from provision import gates, steps
+    from provision import functest, gates, steps
 
     try:
         a = _v2n_parser().parse_args(argv)
@@ -535,11 +612,19 @@ def v2n_main(argv: list[str]) -> int:
             bundle.update(sku=a.sku, family=steps.expected_family(preset),
                           hw_rev=preset.get("default_hw_rev", "r1"))
             bundle_sha = hashlib.sha256(json.dumps(bundle, sort_keys=True).encode()).hexdigest()
+        if a.hw_rev:
+            _check_hw_rev(steps.expected_family(preset), a.hw_rev)
+            bundle = {**bundle, "hw_rev": a.hw_rev}
         markers = json.loads(a.tier_markers.read_text(encoding="utf-8")) if a.tier_markers else None
         regs = yaml.safe_load(a.pmic_expect.read_text(encoding="utf-8")) if a.pmic_expect else None
+        expect = functest.load_expect(a.functest_expect)
         if a.cmd == "run" and not a.bench:
             raise ValueError("run needs --bench")
+        if a.replace_identity and a.reprovision_from is None:
+            raise ValueError("--replace-identity needs --reprovision-from the manifest the EEPROM holds")
         bench = bench_mod.load_bench(a.bench) if a.bench else None
+        if bench is not None and a.linux_host:
+            bench.linux_host = a.linux_host
         names = (_csv(a.only) or []) + (_csv(a.skip) or []) + (_csv(a.force_step) or [])
         for n in names + ([a.start] if a.start else []):
             if n not in steps.STEP_NAMES:
@@ -547,6 +632,15 @@ def v2n_main(argv: list[str]) -> int:
     except (ValueError, OSError, json.JSONDecodeError, yaml.YAMLError) as e:
         print(f"provision_som: {e}", file=sys.stderr)
         return 2
+
+    hil = a.hil_spec
+    if hil is None and a.carrier:
+        hil = REPO / "tests" / "hil" / f"{a.sku.lower().removeprefix('e1m-')}-{a.carrier}"
+    if hil is not None:
+        hil = hil if hil.is_absolute() else REPO / hil
+        if not hil.is_dir():
+            print(f"provision_som: HiL spec dir is not a directory: {hil}", file=sys.stderr)
+            return 2
 
     serial = a.serial
     if not serial:
@@ -573,16 +667,17 @@ def v2n_main(argv: list[str]) -> int:
         print(f"provision_som: {e}", file=sys.stderr)
         return 2
 
-    hil = a.hil_spec
-    if hil is None and a.carrier:
-        hil = REPO / "tests" / "hil" / f"{a.sku.lower().removeprefix('e1m-')}-{a.carrier}"
     ctx = steps.Ctx(sku=a.sku, serial=serial, bundle_dir=bundle_dir, bundle=bundle, preset=preset,
                     ledger_root=a.ledger_root, execute=execute, lock=getattr(a, "lock", False),
-                    bench=bench, tier_markers=markers, expected_registers=regs,
-                    allow_tier_mismatch=a.allow_tier_mismatch, reprovision_from=a.reprovision_from,
+                    bench=bench, tier_markers=markers, expected_registers=regs, functest_expect=expect,
+                    allow_tier_mismatch=a.allow_tier_mismatch,
+                    accept_cid_change=a.accept_cid_change,
+                    sd_removed_by_operator=a.sd_removed_by_operator, reprovision_from=a.reprovision_from,
+                    replace_identity=a.replace_identity,
                     cold_cycles=a.cold_cycles, hil_spec=hil, flash_writer=a.flash_writer,
-                    gd32_fw=a.gd32_fw, dxm1_flash=a.enable_dxm1_flash,
+                    gd32_fw=a.gd32_fw,
                     transfer=a.transfer, station=a.station, by=a.by,
+                    payload_store_on=not a.no_payload_store,
                     ledger_xlsx=a.ledger_xlsx,
                     mfg_date_override=a.mfg_date if a.mfg_date and a.mfg_date != derived else None)
     ctx.state = steps.load_state(ctx.state_path)
@@ -607,7 +702,15 @@ def v2n_main(argv: list[str]) -> int:
     return 1 if any(r.status == "failed" for r in results) else 0
 
 
+def _robust_output() -> None:
+    """Serial text can carry U+FFFD; a cp1252 Windows console must not crash printing it."""
+    for stream in (sys.stdout, sys.stderr):
+        if reconf := getattr(stream, "reconfigure", None):
+            reconf(errors="replace")
+
+
 def _dispatch() -> int:
+    _robust_output()
     if len(sys.argv) > 1 and sys.argv[1] in V2N_SUBCOMMANDS:
         return v2n_main(sys.argv[1:])
     return main()

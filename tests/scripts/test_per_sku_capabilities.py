@@ -3,7 +3,7 @@
 
 Covers the three layers of the restriction mechanism:
 
-  1. Schema — som-preset-v1 accepts a well-formed restriction block on a
+  1. Schema — som-preset-v2 accepts a well-formed restriction block on a
      real preset and rejects malformed shapes (empty list, wrong types,
      unknown sibling keys, duplicate entries, bad name pattern).
   2. Semantic validation — scripts/validate_metadata.py's cross-check:
@@ -33,7 +33,7 @@ import yaml
 from .conftest import clang_format_text
 
 REPO = Path(__file__).resolve().parents[2]
-SOM_SCHEMA_PATH = REPO / "metadata" / "schemas" / "som-preset-v1.schema.json"
+SOM_SCHEMA_PATH = REPO / "metadata" / "schemas" / "som-preset-v2.schema.json"
 REAL_PRESET = REPO / "metadata" / "e1m_modules" / "E1M-AEN801.yaml"
 GEN_SCRIPT = REPO / "scripts" / "gen_soc_caps.py"
 VALIDATE_SCRIPT = REPO / "scripts" / "validate_metadata.py"

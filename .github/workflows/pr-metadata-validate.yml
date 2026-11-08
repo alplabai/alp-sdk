@@ -6,208 +6,209 @@
 # Catches schema drift the moment someone edits an SoC file —
 # missing required fields, typo'd refs, invalid `ref` patterns,
 # undeclared additionalProperties, etc.
-
 name: pr-metadata-validate
 
+# Required-context shape (alp-sdk#2972): `metadata-validate · all` (the
+# `summary` job below) is the ONE context meant to be required on `dev`.
+# Every trap cross-platform-zephyr.yml's header documents applies, so the
+# same shape is used:
+#
+#   - No `paths:` on pull_request/push. A paths-filtered trigger leaves a
+#     required context permanently "Expected" on a PR that touches no
+#     watched path, and GitHub blocks that PR forever (#1474/#1528). The
+#     path list moved into the `detect` job's filter instead, so the
+#     summary reports on EVERY PR and a no-op PR passes it.
+#   - `merge_group:` is present, or a queued PR would wait on a context
+#     this workflow can never raise on a queue ref (#1415).
+#   - The summary name is static (no matrix interpolation) so a skipped
+#     run still reports under the name branch protection matches.
+#
+# On `merge_group` `validate` runs UNCONDITIONALLY (the path filter applies to
+# pull_request/push only), minus the two pytest steps. Reason: the queue ref is the PR rebased
+# onto the PRs ahead of it, and these gates are cross-file parity checks
+# (metadata <-> headers <-> docs <-> examples) whose answer can change under
+# a neighbour's merge -- that is the one thing a queue run can catch that
+# the PR run could not. The check_*.py/validate_*.py steps are seconds each;
+# the ~4,400-test pytest sweep (up to 20 min) is not, and re-running it
+# would take runner slots from the REQUIRED twister-shard/distro-install
+# jobs (queue-ejection class, #1952/#1887). Pytest already graded the PR
+# head on pull_request, and the unit tests exercise the scripts, not the
+# merged tree, so a queue re-run adds little.
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'metadata/**'
-      - 'examples/**/board.yaml'
-      - 'examples/**/README.md'
-      - 'examples/**/testcase.yaml'
-      - 'include/alp/boards/**'
-      - 'include/alp/chips/**'
-      - 'zephyr/boards/alp/**'
-      - 'zephyr/kconfigs/**'
-      - 'scripts/alp_project_emit/**'
-      - 'scripts/check_chip_subsystems_parity.py'
-      - 'chips/**'
-      - 'scripts/check_delay_us_literal.py'
-      - '.github/workflows/pr-metadata-validate.yml'
-      - 'scripts/validate_metadata.py'
-      - 'scripts/validate_board_yaml.py'
-      - 'scripts/check_board_target_tree_parity.py'
-      - 'scripts/check_yocto_machine_tree_parity.py'
-      - 'scripts/check_atoc_reservation.py'
-      # check 4 reads aen_atoc.SLOT0_WINDOWS, so an aen_atoc-only PR must fire it too (#1981)
-      - 'scripts/aen_atoc.py'
-      - 'scripts/check_example_board_overlay_parity.py'
-      - 'scripts/check_example_board_overlay_content_parity.py'
-      # The #2101 platform_allow-parity half reads examples/**/boards/*
-      # content directly, not just testcase.yaml/board.yaml -- a PR that
-      # only adds/renames/deletes a boards/ overlay must fire this job too
-      # (the #1585 defect class this file's other comments already name).
-      - 'examples/**/boards/**'
-      - 'scripts/check_example_sdk_root.py'
-      - 'scripts/check_som_topology_parity.py'
-      - 'scripts/check_helper_firmware_path.py'
-      - 'scripts/check_core_cmakelists_mapping.py'
-      - 'examples/**/CMakeLists.txt'
-      - 'scripts/alp_project_loader.py'
-      - 'scripts/alp_project.py'
-      - 'scripts/alp_orchestrate/**'
-      - 'scripts/check_emit_snapshots.py'
-      - 'scripts/check_stub_symbol_matrix.py'
-      - 'src/common/stub_backend.c'
-      - 'src/common/stub/**'
-      # This job hosts three gates that sweep src/ wholesale --
-      # check_slot_claim_atomic.py (every handle pool),
-      # check_stub_issues.py (src/backends/**/*_stub.c) and
-      # check_sw_fallback_tags.py (src/backends/**/sw_fallback.c) -- so the
-      # trigger has to cover src/ or a PR that adds the exact defect they
-      # exist to catch never runs them (issue #1630).
-      - 'src/**'
-      - 'scripts/check_slot_claim_atomic.py'
-      - 'scripts/lint_doc_yaml_fragments.py'
-      - 'scripts/check_som_bundle.py'
-      - 'scripts/check_chip_header_status.py'
-      - 'scripts/check_i2c_address_uniqueness.py'
-      - 'scripts/check_e1m_pinout.py'
-      - 'scripts/check_amp_pad_claims.py'
-      - 'scripts/sync_e1m_spec.py'
-      - 'metadata/templates/som-release-bundle.example.json'
-      - 'tests/scripts/**'
-      - 'tests/fixtures/emit-snapshots/**'
-      - 'tests/fixtures/stub-symbol-matrix/**'
-      - 'README.md'
-      - 'docs/**/*.md'
-      - 'examples/**/*.md'
-      - 'examples/**/*.c'
-      - 'examples/**/*.h'
-      - 'scripts/check_cc3501e_bridge_copies.py'
-      - 'west.yml'
-      - 'metadata/libraries/**'
-      - 'meta-alp-sdk/**'
-      - 'scripts/check_library_pin_parity.py'
-      - 'scripts/requirements.txt'
-      - 'scripts/alp_cli/__init__.py'
-      - 'scripts/alp_lock/**'
-      - 'scripts/west_commands/alp_lock.py'
-      - 'changelog.d/**'
-      - 'scripts/assemble_changelog.py'
-      - 'scripts/check_changelog_fragments.py'
-      - 'scripts/check_changelog_citations.py'
-      - 'scripts/check_changelog_fragment_issue.py'
-      - 'scripts/check_silicon_claim_provenance.py'
-      # check_no_committed_doxygen_output.py (#1573) reads OUTPUT_DIRECTORY out
-      # of the Doxyfile and sweeps what is tracked under it, so both are its
-      # inputs -- a gate absent from its own trigger is the #1585 defect class.
-      - 'docs/doxygen/Doxyfile'
-      - 'doxygen-out/**'
-      - 'scripts/check_no_committed_doxygen_output.py'
-      - 'scripts/check_doxyfile_single_source.py'
-      # check_issue_citations.py (#1950) reads driver-status prose out of
-      # metadata/**/*.yaml and include/alp/chips/*.h against its committed
-      # snapshot, metadata/issue-state-snapshot.json. All three inputs are
-      # already covered by the metadata/** and include/alp/chips/**
-      # triggers above -- only the script itself is genuinely new coverage;
-      # the snapshot's own explicit entry below is redundant but kept, same
-      # as this file's style elsewhere.
-      - 'scripts/check_issue_citations.py'
-      - 'metadata/issue-state-snapshot.json'
   push:
     branches: [main, dev]
-    paths:
-      - 'metadata/**'
-      - 'examples/**/board.yaml'
-      - 'examples/**/README.md'
-      - 'examples/**/testcase.yaml'
-      - 'include/alp/boards/**'
-      - 'include/alp/chips/**'
-      - 'zephyr/boards/alp/**'
-      - 'zephyr/kconfigs/**'
-      - 'scripts/alp_project_emit/**'
-      - 'scripts/check_chip_subsystems_parity.py'
-      - 'chips/**'
-      - 'scripts/check_delay_us_literal.py'
-      - 'scripts/validate_board_yaml.py'
-      - 'scripts/check_board_target_tree_parity.py'
-      - 'scripts/check_yocto_machine_tree_parity.py'
-      - 'scripts/check_atoc_reservation.py'
-      # check 4 reads aen_atoc.SLOT0_WINDOWS, so an aen_atoc-only PR must fire it too (#1981)
-      - 'scripts/aen_atoc.py'
-      - 'scripts/check_example_board_overlay_parity.py'
-      - 'scripts/check_example_board_overlay_content_parity.py'
-      # The #2101 platform_allow-parity half reads examples/**/boards/*
-      # content directly, not just testcase.yaml/board.yaml -- a PR that
-      # only adds/renames/deletes a boards/ overlay must fire this job too
-      # (the #1585 defect class this file's other comments already name).
-      - 'examples/**/boards/**'
-      - 'scripts/check_example_sdk_root.py'
-      - 'scripts/check_som_topology_parity.py'
-      - 'scripts/check_helper_firmware_path.py'
-      - 'scripts/check_core_cmakelists_mapping.py'
-      - 'examples/**/CMakeLists.txt'
-      - 'scripts/alp_project_loader.py'
-      - 'scripts/alp_project.py'
-      - 'scripts/check_stub_symbol_matrix.py'
-      - 'src/common/stub_backend.c'
-      - 'src/common/stub/**'
-      # This job hosts three gates that sweep src/ wholesale --
-      # check_slot_claim_atomic.py (every handle pool),
-      # check_stub_issues.py (src/backends/**/*_stub.c) and
-      # check_sw_fallback_tags.py (src/backends/**/sw_fallback.c) -- so the
-      # trigger has to cover src/ or a PR that adds the exact defect they
-      # exist to catch never runs them (issue #1630).
-      - 'src/**'
-      - 'scripts/check_slot_claim_atomic.py'
-      - 'scripts/lint_doc_yaml_fragments.py'
-      - 'scripts/check_som_bundle.py'
-      - 'scripts/check_chip_header_status.py'
-      - 'scripts/check_i2c_address_uniqueness.py'
-      - 'scripts/check_e1m_pinout.py'
-      - 'scripts/check_amp_pad_claims.py'
-      - 'scripts/sync_e1m_spec.py'
-      - 'metadata/templates/som-release-bundle.example.json'
-      - 'tests/scripts/**'
-      - 'tests/fixtures/stub-symbol-matrix/**'
-      - 'README.md'
-      - 'docs/**/*.md'
-      - 'examples/**/*.md'
-      - 'examples/**/*.c'
-      - 'examples/**/*.h'
-      - 'scripts/check_cc3501e_bridge_copies.py'
-      - 'west.yml'
-      - 'metadata/libraries/**'
-      - 'meta-alp-sdk/**'
-      - 'scripts/check_library_pin_parity.py'
-      - 'scripts/requirements.txt'
-      - 'scripts/alp_cli/__init__.py'
-      - 'scripts/alp_lock/**'
-      - 'scripts/west_commands/alp_lock.py'
-      - 'changelog.d/**'
-      - 'scripts/assemble_changelog.py'
-      - 'scripts/check_changelog_fragments.py'
-      - 'scripts/check_changelog_citations.py'
-      - 'scripts/check_changelog_fragment_issue.py'
-      - 'scripts/check_silicon_claim_provenance.py'
-      # check_no_committed_doxygen_output.py (#1573) reads OUTPUT_DIRECTORY out
-      # of the Doxyfile and sweeps what is tracked under it, so both are its
-      # inputs -- a gate absent from its own trigger is the #1585 defect class.
-      - 'docs/doxygen/Doxyfile'
-      - 'doxygen-out/**'
-      - 'scripts/check_no_committed_doxygen_output.py'
-      - 'scripts/check_doxyfile_single_source.py'
-      # check_issue_citations.py (#1950) reads driver-status prose out of
-      # metadata/**/*.yaml and include/alp/chips/*.h against its committed
-      # snapshot, metadata/issue-state-snapshot.json. All three inputs are
-      # already covered by the metadata/** and include/alp/chips/**
-      # triggers above -- only the script itself is genuinely new coverage;
-      # the snapshot's own explicit entry below is redundant but kept, same
-      # as this file's style elsewhere.
-      - 'scripts/check_issue_citations.py'
-      - 'metadata/issue-state-snapshot.json'
+  merge_group:
   workflow_dispatch:
+
+# pull-requests: read is what dorny/paths-filter needs to list a PR's files.
+permissions:
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Cheap path detector (same shape as cross-platform-zephyr.yml `detect`).
+  # Not a required context. Runs on merge_group too (git diff against the
+  # queue's base_sha), so a docs-only queue entry skips the heavy jobs.
+  detect:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      # push / merge_group: dorny diffs with git, so it needs a checkout WITH
+      # history (a bare runner has no repo: `fatal: not a git repository`, exit
+      # 128, which reddened the summary on every push). pull_request uses the API.
+      - name: Checkout (history for the git diff)
+        if: github.event_name != 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Detect metadata-validate-relevant changes
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
+        timeout-minutes: 2
+        with:
+          # merge_group: the queue's base commit. push: the pre-push SHA, so the
+          # diff is before..after (empty base would diff the default branch
+          # against main and false-pass every post-merge push; an all-zero
+          # `before` on a new branch falls back to the default merge-base).
+          # pull_request: empty, dorny uses the API.
+          base: ${{ github.event.merge_group.base_sha || (github.event_name == 'push' && github.event.before) || '' }}
+          filters: |
+            relevant:
+            - 'metadata/**'
+            - 'examples/**/board.yaml'
+            - 'examples/**/README.md'
+            - 'examples/**/testcase.yaml'
+            - 'include/alp/boards/**'
+            - 'include/alp/chips/**'
+            # This job hosts check_vendor_ext_tags.py (include/alp/ext/**) and
+            # check_public_header_purity.py (root include/alp/*.h), so a
+            # header-only PR must fire it.
+            - 'include/alp/ext/**'
+            - 'include/alp/*.h'
+            - 'scripts/check_vendor_ext_tags.py'
+            - 'scripts/check_public_header_purity.py'
+            - 'zephyr/boards/alp/**'
+            - 'zephyr/kconfigs/**'
+            - 'scripts/alp_project_emit/**'
+            - 'scripts/check_chip_subsystems_parity.py'
+            - 'chips/**'
+            - 'scripts/check_delay_us_literal.py'
+            - '.github/workflows/pr-metadata-validate.yml'
+            - 'scripts/validate_metadata.py'
+            - 'scripts/validate_board_yaml.py'
+            - 'scripts/check_board_target_tree_parity.py'
+            - 'scripts/check_yocto_machine_tree_parity.py'
+            - 'scripts/check_camera_parity.py'
+            - 'scripts/gen_camera_dt.py'
+            - 'scripts/check_atoc_reservation.py'
+            # check 4 reads aen_atoc.SLOT0_WINDOWS, so an aen_atoc-only PR must fire it too (#1981)
+            - 'scripts/aen_atoc.py'
+            - 'scripts/check_example_board_overlay_parity.py'
+            - 'scripts/check_example_board_overlay_content_parity.py'
+            # The #2101 platform_allow-parity half reads examples/**/boards/*
+            # content directly, not just testcase.yaml/board.yaml -- a PR that
+            # only adds/renames/deletes a boards/ overlay must fire this job too
+            # (the #1585 defect class this file's other comments already name).
+            - 'examples/**/boards/**'
+            - 'scripts/check_example_sdk_root.py'
+            - 'scripts/check_som_topology_parity.py'
+            - 'scripts/check_helper_firmware_path.py'
+            - 'scripts/check_core_cmakelists_mapping.py'
+            - 'examples/**/CMakeLists.txt'
+            - 'scripts/alp_project_loader.py'
+            - 'scripts/alp_project.py'
+            - 'scripts/alp_orchestrate/**'
+            - 'scripts/check_emit_snapshots.py'
+            - 'scripts/check_stub_symbol_matrix.py'
+            - 'src/common/stub_backend.c'
+            - 'src/common/stub/**'
+            # This job hosts three gates that sweep src/ wholesale --
+            # check_slot_claim_atomic.py (every handle pool),
+            # check_stub_issues.py (src/backends/**/*_stub.c) and
+            # check_sw_fallback_tags.py (src/backends/**/sw_fallback.c) -- so the
+            # trigger has to cover src/ or a PR that adds the exact defect they
+            # exist to catch never runs them (issue #1630).
+            - 'src/**'
+            - 'scripts/check_slot_claim_atomic.py'
+            - 'scripts/lint_doc_yaml_fragments.py'
+            - 'scripts/check_som_bundle.py'
+            - 'scripts/check_chip_header_status.py'
+            - 'scripts/check_i2c_address_uniqueness.py'
+            - 'scripts/check_e1m_pinout.py'
+            - 'scripts/check_amp_pad_claims.py'
+            - 'scripts/check_example_readme.py'
+            - 'scripts/check_amp_window.py'
+            - 'scripts/gen_amp_window.py'
+            - 'src/backends/rpc/alp_amp_window.h'
+            - 'include/alp/protocol/amp_beacon.h'
+            - 'firmware/**'
+            - 'tests/yocto/**'
+            - 'tests/hil/**'
+            - 'src/backends/rpc/**'
+            - 'examples/multicore/**'
+            - 'scripts/check_pad_voltage.py'
+            - 'scripts/sync_e1m_spec.py'
+            - 'metadata/templates/som-release-bundle.example.json'
+            - 'tests/scripts/**'
+            - 'tests/fixtures/emit-snapshots/**'
+            - 'tests/fixtures/stub-symbol-matrix/**'
+            - 'README.md'
+            - 'docs/**/*.md'
+            - 'examples/**/*.md'
+            - 'examples/**/*.c'
+            - 'examples/**/*.h'
+            - 'scripts/check_cc3501e_bridge_copies.py'
+            - 'west.yml'
+            - 'metadata/libraries/**'
+            - 'meta-alp-sdk/**'
+            - 'scripts/check_library_pin_parity.py'
+            - 'scripts/requirements.txt'
+            - 'scripts/alp_cli/__init__.py'
+            - 'scripts/alp_lock/**'
+            - 'scripts/west_commands/alp_lock.py'
+            - 'changelog.d/**'
+            - 'scripts/assemble_changelog.py'
+            - 'scripts/check_changelog_fragments.py'
+            - 'scripts/check_changelog_citations.py'
+            - 'scripts/check_changelog_fragment_issue.py'
+            - 'scripts/check_silicon_claim_provenance.py'
+            # check_no_committed_doxygen_output.py (#1573) reads OUTPUT_DIRECTORY out
+            # of the Doxyfile and sweeps what is tracked under it, so both are its
+            # inputs -- a gate absent from its own trigger is the #1585 defect class.
+            - 'docs/doxygen/Doxyfile'
+            - 'doxygen-out/**'
+            - 'scripts/check_no_committed_doxygen_output.py'
+            - 'scripts/check_doxyfile_single_source.py'
+            # check_issue_citations.py (#1950) reads driver-status prose out of
+            # metadata/**/*.yaml and include/alp/chips/*.h against its committed
+            # snapshot, metadata/issue-state-snapshot.json. All three inputs are
+            # already covered by the metadata/** and include/alp/chips/**
+            # triggers above -- only the script itself is genuinely new coverage;
+            # the snapshot's own explicit entry below is redundant but kept, same
+            # as this file's style elsewhere.
+            - 'scripts/check_issue_citations.py'
+            - 'metadata/issue-state-snapshot.json'
+
   validate:
     name: validate · soc-spec-v1
+    needs: detect
+    # Fail CLOSED (same shape as cross-platform-zephyr.yml python-smoke):
+    # skip ONLY when `detect` ran, succeeded and found no watched path
+    # changed. merge_group, workflow_dispatch and any `detect` non-success
+    # run the real job.
+    if: always() && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     runs-on: ubuntu-latest
     # The ceiling must exceed the job's LONGEST step cap, not the sum of
     # every cap (test_job_ceiling_exceeds_its_longest_step_timeout in
@@ -231,7 +232,7 @@ jobs:
         timeout-minutes: 5
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         timeout-minutes: 5
         with:
           python-version-file: .python-version
@@ -266,8 +267,22 @@ jobs:
       # field (#1157), and neither side could see the other -- which is
       # how the usb20 OVC gpio-hog silently clobbered the CM33's live
       # SCK7 mux on P9.6 (errata E3) until a bench session found it.
+      # Also runs the full pass (resolved board.yaml `ownership:` + the
+      # generated Linux fragment) for every V2N-family examples/**/board.yaml
+      # (#2660).
       - name: Check no Linux DT pad claim lands on a CM33-owned pad
         run: python3 scripts/check_amp_pad_claims.py
+
+      # The CM33 OpenAMP window is declared once (SoC `openamp_carveout`);
+      # the generated board .dts, the Linux reserved-memory/UIO nodes and the
+      # RPC backend header must agree (every sub-region), and the beacon magic
+      # and address must be defined only in include/alp/protocol/amp_beacon.h.
+      - name: Check the OpenAMP window agrees across metadata, DT and backend
+        run: python3 scripts/check_amp_window.py
+      # RZ/V2N P90-P92, P2x and PBx are not 3.3 V tolerant (SoC
+      # pad_tolerance); a board that routes 3.3 V there needs a level shifter.
+      - name: Check non-3.3 V-tolerant pads carry a level declaration
+        run: python3 scripts/check_pad_voltage.py
 
       # Cross-checks every non-TBD E1M pad/function claimed by a SoM
       # pin-mux table against the vendored e1m-spec standard snapshot
@@ -391,24 +406,10 @@ jobs:
           python3 scripts/validate_board_yaml.py \
               --input metadata/templates/board.yaml.example
 
-      # examples/multicore/rpmsg-imx93/board.yaml is EXCLUDED from both
-      # sweeps below (#1025): E1M-NX9101's only hw_rev (imx93 r1) is
-      # `status: tbd`, refused outright by the hw_rev-buildable gate
-      # (exit 5) -- not a validation defect, the gate correctly refusing
-      # an unbuildable SoM. The example's source + README stay (see the
-      # README's own #1025 note); only the requirement that it VALIDATE
-      # cleanly is lifted. The exclusion pattern lives in one place,
-      # scripts/board-yaml-sweep-exclude.sh (also sourced by
-      # scripts/test-all.sh -- alp-sdk#1109 was these two copies drifting
-      # apart), so both steps below source it rather than hardcoding it.
-      # Remove BOARD_YAML_SWEEP_EXCLUDE_PATTERN there once
-      # metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
-      # buildable status.
       - name: Validate every examples/*/board.yaml
         run: |
           set -e
-          . scripts/board-yaml-sweep-exclude.sh
-          for f in $(find examples -name board.yaml | grep -v "${BOARD_YAML_SWEEP_EXCLUDE_PATTERN}"); do
+          for f in $(find examples -name board.yaml); do
               echo "--- $f ---"
               python3 scripts/validate_board_yaml.py --input "$f"
           done
@@ -417,16 +418,14 @@ jobs:
       # examples/ + tests/ and runs scripts/validate_board_yaml.py
       # against metadata/schemas/board.schema.json.  Hard gate: any
       # board.yaml that doesn't validate fails the PR here (not at
-      # twister / bitbake time).  rpmsg-imx93 excluded -- see the
-      # #1025 comment above the previous step.
+      # twister / bitbake time).
       - name: schema sweep across examples/ + tests/
         run: |
           set -euo pipefail
-          . scripts/board-yaml-sweep-exclude.sh
           while IFS= read -r f; do
               echo "--- v2-check: $f ---"
               python3 scripts/validate_board_yaml.py --input "$f"
-          done < <(find examples tests -name board.yaml 2>/dev/null | grep -v "${BOARD_YAML_SWEEP_EXCLUDE_PATTERN}")
+          done < <(find examples tests -name board.yaml 2>/dev/null)
 
       # End-to-end: every E1M board route resolves to a function the SoM
       # capability table actually backs (or is a documented open pad).
@@ -514,6 +513,8 @@ jobs:
 
       - name: Gate — root public headers stay chip-neutral
         run: python3 scripts/check_public_header_purity.py
+      - name: Gate — public headers compile as C++17
+        run: python3 scripts/check_public_header_purity.py --cxx --require-cxx
       - name: Gate — no hard-coded home-directory paths in build/exec files
         run: python3 scripts/check_local_paths.py
 
@@ -583,6 +584,9 @@ jobs:
       - name: "Gate — SoM preset machine: targets resolve to a real conf or a declared gap (#1982)"
         run: python3 scripts/check_yocto_machine_tree_parity.py
 
+      - name: "Gate — V2N/V2M Linux camera DT + kernel config match the camera metadata (#2633)"
+        run: python3 scripts/check_camera_parity.py
+
       - name: "Gate — AEN ATOC reservation, aperture tiling/class, and slot0 address (#1289, #1365)"
         run: python3 scripts/check_atoc_reservation.py
 
@@ -601,10 +605,16 @@ jobs:
       - name: Gate — quality-task registry matches scripts/check_*.py on disk
         run: python3 scripts/check_quality_registry.py
 
+      - name: Gate — example READMEs show `tan build` and match board.yaml (#2885)
+        run: python3 scripts/check_example_readme.py
+
       - name: "Gate — changelog.d/ fragments are well-formed (#1395)"
         run: python3 scripts/check_changelog_fragments.py
 
       - name: "Gate — changelog.d/ path:line citations still resolve (#1416)"
+        # merge_group: merge-queue-changelog-citations.yml grades the queue
+        # ref against the event's real base_sha; this step has no base there.
+        if: github.event_name != 'merge_group'
         # HEAD is the merge commit, so this already grades the tree that will
         # land. On a PR into dev, DIFF_BASE=HEAD^1 turns on the new-citation
         # rule: a citation on a line this PR adds must be anchored
@@ -676,6 +686,8 @@ jobs:
       # default resolution (regression-lock for commit e3a4c6b) it started
       # as. Run in parallel over every runner core with pytest-xdist.
       - name: Pytest -- linter + schema regression + topology defaults
+        # Not on merge_group: see the header comment (#2972).
+        if: github.event_name != 'merge_group'
         # #2328: serially this step had reached 19-20 min of this 20 min
         # cap on dev (the #1477 figure, 812s/13.5min, was long stale) and
         # timed out unrelated PRs. `-n auto` spreads it over the runner's
@@ -692,7 +704,7 @@ jobs:
       - name: Pytest -- repo-writing tests (serial)
         # Still run when the parallel sweep failed, so one CI round reports
         # both sets.
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'merge_group' }}
         timeout-minutes: 10
         run: |
           python3 -m pytest tests/scripts/ -m repo_writes -v --tb=short
@@ -743,9 +755,60 @@ jobs:
 
       # Public-API test-coverage audit -- per the VERSIONS.md
       # "Quality bar" entry, every public function should have at
-      # least one ztest mention.  Runs informational today (no
-      # --fail-on-gaps) so backfilling can happen incrementally; the
-      # gate flips on for the v1.0 release branch.
-      - name: Public-API test-coverage audit (informational)
+      # least one ztest mention.  --fail-on-gaps is a ratchet, not an
+      # all-or-nothing bar: the portable core must stay at 0 gaps and the
+      # chip-helper backlog may only shrink (budget in the script), so
+      # backfilling stays incremental while a new untested public function
+      # fails the job.
+      - name: Public-API test-coverage audit
         run: |
-          python3 scripts/check_test_coverage.py
+          python3 scripts/check_test_coverage.py --fail-on-gaps
+
+  # ---------------------------------------------------------------
+  # THE context to require on `dev` (#2972). Static name, always runs.
+  # Verdict mirrors cross-platform-zephyr.yml's `python-smoke · all`:
+  # `skipped` is a pass ONLY when detect genuinely ran and found nothing.
+  # ---------------------------------------------------------------
+  summary:
+    name: metadata-validate · all
+    needs: [detect, validate]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Compute verdict from validate's + detect's results
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DETECT_RESULT: ${{ needs.detect.result }}
+          DETECT_RELEVANT: ${{ needs.detect.outputs.relevant }}
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+        run: |
+          set -euo pipefail
+          echo "event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.relevant=${DETECT_RELEVANT} validate.result=${VALIDATE_RESULT}"
+
+          case "${DETECT_RESULT}" in
+            failure|cancelled)
+              echo "::error::detect concluded '${DETECT_RESULT}'"
+              exit 1
+              ;;
+          esac
+
+          case "${VALIDATE_RESULT}" in
+            success)
+              echo "PASS: validate ran and succeeded"
+              exit 0
+              ;;
+            skipped)
+              if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ] || [ "${EVENT_NAME}" = "merge_group" ]; } \
+                 && [ "${DETECT_RESULT}" = "success" ] && [ "${DETECT_RELEVANT}" != "true" ]; then
+                echo "PASS: validate legitimately skipped -- detect ran, succeeded, and found no watched path changed"
+                exit 0
+              fi
+              echo "::error::validate reported 'skipped' but event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.relevant=${DETECT_RELEVANT} does not match the one legitimate-skip condition -- treating this as a broken gate, not a pass"
+              exit 1
+              ;;
+            *)
+              echo "::error::validate concluded '${VALIDATE_RESULT}'"
+              exit 1
+              ;;
+          esac

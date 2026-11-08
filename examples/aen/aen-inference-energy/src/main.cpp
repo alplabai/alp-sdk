@@ -212,49 +212,32 @@ static constexpr float SCAN_SHUNT_LSB_UV = 2.5f;
 /* ------------------------------------------------------------------------- *
  * Cycle counter.
  *
- * The DWT cycle counter is the finest clock on this core: it ticks once per CPU
- * cycle (160 MHz here => 6.25 ns).  It is optional in the architecture, so
- * DWT_CTRL.NOCYCCNT is checked and Zephyr's k_cycle_get_32() is used instead
- * when the hardware does not implement it -- silently timestamping every sample
- * with a frozen zero would turn every duration into nonsense.
+ * Zephyr's k_cycle_get_32() is the time base for every timestamp, poll slot and
+ * window span.  It is the SysTick-backed kernel counter: it ticks once per CPU
+ * cycle (160 MHz here => 6.25 ns) and keeps running whatever a debugger does.
  *
- * Both sources are read as a raw uint32 that WRAPS (every ~26.8 s at 160 MHz).
- * Every consumer takes unsigned differences, which stay correct across a single
- * wrap, and the host is handed the raw counts plus a millisecond cross-check per
+ * It is deliberately NOT the DWT CYCCNT.  A J-Link session close (the end of a
+ * `tan flash --ram` / ram-run) clears DEMCR.TRCENA on this core about 10 ms
+ * after `go`, which freezes CYCCNT for good.  A frozen stamp here would stall
+ * the polling gate (`now >= next_poll` never true again) and turn every window
+ * into a timed-out one with zero samples.  Bench, 2026-10-07: DEMCR read
+ * 0x00100000 at the stall (TRCENA clear), DAUTHSTATUS 0x00ff00ff (no auth
+ * gating); re-arming TRCENA revived the counter.  The same defect broke
+ * aen-inference-latency (#2761).  This app needs no per-inference cycle detail,
+ * so it does not touch the DWT at all.
+ *
+ * The count is a raw uint32 that WRAPS (every ~26.8 s at 160 MHz).  Every
+ * consumer takes unsigned differences, which stay correct across a single wrap,
+ * and the host is handed the raw counts plus a millisecond cross-check per
  * window so it can verify the cycles-per-second figure rather than trust it.
  * ------------------------------------------------------------------------- */
 
-static bool g_dwt_in_use;
-
-static void cycles_init(void)
-{
-	/* TRCENA gates the whole trace/debug block, DWT included. */
-	DCB->DEMCR |= DCB_DEMCR_TRCENA_Msk;
-	__DSB();
-	if (DWT->CTRL & DWT_CTRL_NOCYCCNT_Msk) {
-		g_dwt_in_use = false; /* not implemented -- fall back */
-		return;
-	}
-	DWT->CYCCNT = 0U;
-	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
-	__DSB();
-	/* Prove it actually advances before trusting it: a counter that reads
-	 * back frozen despite CYCCNTENA (a locked or gated debug block) must fall
-	 * back too, not be believed. */
-	uint32_t a = DWT->CYCCNT;
-	__NOP();
-	__NOP();
-	__NOP();
-	g_dwt_in_use = (DWT->CYCCNT != a);
-}
-
 static inline uint32_t cycles_now(void)
 {
-	return g_dwt_in_use ? DWT->CYCCNT : k_cycle_get_32();
+	return k_cycle_get_32();
 }
 
-/* Cycles per second for whichever source is live.  Both count CPU cycles on
- * this core, so both scale by the kernel's configured cycle rate. */
+/* Cycles per second of the kernel cycle counter: the CPU clock on this core. */
 static inline uint32_t cycles_per_s(void)
 {
 	return sys_clock_hw_cycles_per_sec();
@@ -595,11 +578,8 @@ int main(void)
 	printk("\n=== aen-inference-energy ===\n");
 	printk("model      : %s (%u bytes)\n", NETWORK_MODEL_NAME, (unsigned)NETWORK_MODEL_LEN);
 
-	cycles_init();
 	const uint32_t cps = cycles_per_s();
-	printk("clock      : %u Hz, timestamp source %s\n",
-	       (unsigned)cps,
-	       g_dwt_in_use ? "DWT CYCCNT" : "k_cycle_get_32 (DWT NOCYCCNT)");
+	printk("clock      : %u Hz, timestamp source k_cycle_get_32\n", (unsigned)cps);
 
 	const struct device *npu       = DEVICE_DT_GET(NPU_NODE);
 	bool                 npu_ready = device_is_ready(npu);
@@ -923,7 +903,7 @@ int main(void)
 	       (unsigned)WINDOW_PAIRS,
 	       npu_ready ? "true" : "false",
 	       criterion,
-	       g_dwt_in_use ? "dwt-cyccnt" : "k-cycle-get-32");
+	       "k-cycle-get-32");
 
 	/* --- The measurement ------------------------------------------------- */
 	float    per_window_mj[WINDOW_PAIRS] = { 0.0f };

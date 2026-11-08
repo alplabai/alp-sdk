@@ -24,7 +24,7 @@
 # vendors/<lib>/ checked-in copy), this checkout has **no** west.yml
 # entry and **no** vendors/nlohmann_json/ directory for the Zephyr side,
 # and the only real usages in-tree (examples/multicore/{rpmsg-aen,
-# rpmsg-v2n,rpmsg-imx93,heterogeneous-offload}/board.yaml) select it on
+# rpmsg-v2n,heterogeneous-offload}/board.yaml) select it on
 # the `a32_cluster` (Yocto) core, not a Zephyr core -- and no meta-alp-sdk
 # OE recipe exists either.  `version: "3.11.3"` below is the latest
 # upstream release as a documented best-effort placeholder (matches the

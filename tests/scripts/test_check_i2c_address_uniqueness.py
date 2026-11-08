@@ -16,10 +16,15 @@ import sys
 import textwrap
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
-from check_i2c_address_uniqueness import find_problems  # noqa: E402
+from check_i2c_address_uniqueness import (  # noqa: E402
+    find_carrier_som_problems,
+    find_problems,
+)
 
 
 def _seed(root: Path, relpath: str, body: str) -> None:
@@ -182,11 +187,12 @@ def test_board_audio_codecs_collision_is_reported(tmp_path: Path) -> None:
     assert "U27" in problems[0] and "U99" in problems[0]
 
 
-def test_allowlisted_collision_is_not_reported(tmp_path: Path) -> None:
-    """The #2343 E1M-X EVK U32-vs-TAS2563-broadcast collision on the real
-    tree must be silent -- proven against a scaffolded copy (board preset +
-    the TAS2563 chip manifest) so this test does not depend on the rest of
-    the real metadata staying exactly as it is today."""
+def test_evk_board_preset_is_clean_and_has_no_device_claiming_0x48(tmp_path: Path) -> None:
+    """The E1M-X EVK board preset (the TAS2563 pair's shared 0x48 plus every
+    fitted device) must be silent against a scaffolded copy (board preset +
+    the TAS2563 chip manifest), and no I2C device entry may claim 0x48 -- the
+    camera-rail monitor that was strapped there is not fitted. The test does
+    not depend on the rest of the real metadata staying exactly as it is."""
     import shutil
 
     for rel in ("metadata/boards/e1m-x-evk.yaml",
@@ -195,6 +201,8 @@ def test_allowlisted_collision_is_not_reported(tmp_path: Path) -> None:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO / rel, dst)
     assert find_problems(tmp_path) == []
+    board = yaml.safe_load((REPO / "metadata/boards/e1m-x-evk.yaml").read_text(encoding="utf-8"))
+    assert [d["macro"] for d in board["i2c_devices"] if int(str(d["address"]), 0) == 0x48] == []
 
 
 def test_real_tree_is_clean() -> None:
@@ -409,3 +417,54 @@ def test_unassembled_codec_contributes_no_broadcast(tmp_path: Path) -> None:
         """,
     )
     assert find_problems(tmp_path) == []
+
+
+_SOM_WITH_EEPROM = """\
+    family: fake-family
+    on_module:
+      i2c_devices:
+        e1m_i2c0:
+          devices:
+            - { chip: eeprom_24c128, role: eeprom, address_7bit: "0x50" }
+    """
+
+
+def _carrier(bus: str, part: str, extra: str = "", family: str = "fake-family") -> str:
+    return (
+        f"hosts_som_families: [{family}]\n"
+        f"i2c_devices_bus: {bus}\n"
+        "i2c_devices:\n"
+        f'  - {{ macro: FAKE_I2C_ADDR_X, part: {part}, address: "0x50"{extra} }}\n'
+    )
+
+
+def test_carrier_part_on_som_eeprom_address_fails(tmp_path: Path) -> None:
+    """A carrier part strapped onto the module EEPROM's 0x50 on the same
+    physical bus is a collision no single-file check can see (#2990)."""
+    _seed(tmp_path, "metadata/e1m_modules/E1M-FAKE.yaml", _SOM_WITH_EEPROM)
+    _seed(tmp_path, "metadata/boards/fake-evk.yaml", _carrier("E1M_I2C0", "ina236"))
+    assert find_problems(tmp_path) == []
+    problems = find_carrier_som_problems(tmp_path)
+    assert len(problems) == 1
+    assert "0x50" in problems[0] and "E1M-FAKE" in problems[0]
+
+
+def test_carrier_x_bus_maps_to_som_e1m_bus(tmp_path: Path) -> None:
+    _seed(tmp_path, "metadata/e1m_modules/E1M-FAKE.yaml", _SOM_WITH_EEPROM)
+    _seed(tmp_path, "metadata/boards/fake-x-evk.yaml", _carrier("E1M_X_I2C0", "ina236"))
+    assert len(find_carrier_som_problems(tmp_path)) == 1
+
+
+def test_carrier_mirror_of_som_part_is_not_a_collision(tmp_path: Path) -> None:
+    _seed(tmp_path, "metadata/e1m_modules/E1M-FAKE.yaml", _SOM_WITH_EEPROM)
+    _seed(tmp_path, "metadata/boards/fake-evk.yaml", _carrier("E1M_I2C0", "eeprom_24c128"))
+    assert find_carrier_som_problems(tmp_path) == []
+
+
+def test_carrier_other_family_or_unassembled_not_joined(tmp_path: Path) -> None:
+    _seed(tmp_path, "metadata/e1m_modules/E1M-FAKE.yaml", _SOM_WITH_EEPROM)
+    _seed(tmp_path, "metadata/boards/other-evk.yaml",
+          _carrier("E1M_I2C0", "ina236", family="some-other-family"))
+    _seed(tmp_path, "metadata/boards/dnp-evk.yaml",
+          _carrier("E1M_I2C0", "ina236", extra=", assembled: false"))
+    assert find_carrier_som_problems(tmp_path) == []

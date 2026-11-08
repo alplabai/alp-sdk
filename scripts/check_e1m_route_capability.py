@@ -60,7 +60,6 @@ KNOWN_UNBACKED: dict[tuple[str, str], dict[str, str]] = {
         "E1M_X_GPIO_IO4": "X-EVK I2S path-mux enable; carrier-side control, not a V2N-backed E1M-X GPIO.",
         "E1M_X_GPIO_IO5": "X-EVK I2S path-mux select; carrier-side control, not a V2N-backed E1M-X GPIO.",
         "E1M_X_GPIO_IO6": "M.2 E-key UART wake sideband; carrier/M.2 control, not a V2N-backed E1M-X GPIO.",
-        "E1M_X_GPIO_IO15": "LCD1 power enable is carrier-pulled on V2N X-EVK; no firmware-controlled V2N E1M-X GPIO route.",
         "E1M_X_GPIO_IO24": "USB path-mux select; IO24 is not a GD32 pad (DX-M1-driven on V2M, undriven on V2N), so no V2N/V2M route backs it (#2453).",
         "E1M_X_GPIO_IO17": "Display-2 touch interrupt is wired for future dual-DSI SoMs; V2N/V2M do not expose this sideband.",
         "E1M_X_GPIO_IO18": "Camera-0 power enable is a carrier sideband not exposed as a current V2N E1M-X GPIO route.",
@@ -100,10 +99,10 @@ def _v2n_function_aliases(silicon_peripheral: str) -> list[str]:
         return [f"UART{m.group(1)}_TX"]
 
     canfd_to_e1m = {
-        "CANFD2_CRX2": "CAN0_RX",
-        "CANFD2_CTX2": "CAN0_TX",
-        "CANFD3_CRX3": "CAN1_RX",
-        "CANFD3_CTX3": "CAN1_TX",
+        "CANFD2_CRX2": "CAN1_RX",
+        "CANFD2_CTX2": "CAN1_TX",
+        "CANFD3_CRX3": "CAN0_RX",
+        "CANFD3_CTX3": "CAN0_TX",
     }
     if silicon_peripheral in canfd_to_e1m:
         return [canfd_to_e1m[silicon_peripheral]]

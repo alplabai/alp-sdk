@@ -24,6 +24,10 @@ any miss a CI failure instead of a silent drift.  Verified copies:
      checked, never its prose content -- VERSIONS.md's per-version summary is
      free-form and reviewed by hand, same as every other row already in the
      table.
+  5. meta-alp-sdk/ -- Yocto DISTRO_VERSION must be DERIVED (an inline
+     `${@...}` reading include/alp/version.h), never a hardcoded literal.  The
+     literal "0.7.0" sat unbumped in conf/distro/alp.conf across many releases
+     and stamped the wrong version into /etc/os-release and the login banner.
 
 The README / docs current-state prose is de-versioned: its status lines were
 rewritten to carry no version label ("Partially silicon-verified", "Current
@@ -45,6 +49,9 @@ import argparse
 import pathlib
 import re
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from bump_version import parse_version  # noqa: E402  one SemVer parser (#2850)
 
 
 _VERSION_LINE_RE = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)(?:-([\w.]+))?\s*$", re.MULTILINE)
@@ -167,6 +174,65 @@ def check_versions_md(repo: pathlib.Path, want_str: str) -> list[str]:
     return []
 
 
+_DISTRO_VERSION_ASSIGN_RE = re.compile(
+    r'^\s*DISTRO_VERSION(?::\w+)?\s*(?:\?\??|:|\+|\.)?=\s*(.*)$', re.MULTILINE)
+
+
+def check_yocto_distro_version(repo: pathlib.Path) -> list[str]:
+    """No meta-alp-sdk conf may assign DISTRO_VERSION a literal; it must use
+    an inline `${@...}` (or reference another variable)."""
+    layer = repo / "meta-alp-sdk"
+    if not layer.is_dir():
+        return []
+    drifts: list[str] = []
+    for f in sorted(layer.rglob("*")):
+        if f.suffix not in (".conf", ".inc", ".bb", ".bbappend", ".bbclass") or not f.is_file():
+            continue
+        text = f.read_text(encoding="utf-8", errors="replace")
+        for m in _DISTRO_VERSION_ASSIGN_RE.finditer(text):
+            if re.fullmatch(r"[\"']\s*\d[^$]*[\"']\s*(?:#.*)?", m.group(1).strip()):
+                drifts.append(f"  HARDCODED {f.relative_to(repo).as_posix()}: DISTRO_VERSION = "
+                              f"{m.group(1).strip()} -- derive it from include/alp/version.h "
+                              f"(see conf/distro/alp.conf)")
+    return drifts
+
+
+def expected_recipe_pv(pre_version: str) -> str:
+    major, minor, patch, pre = parse_version(pre_version)
+    return f"{major}.{minor}.{patch}" + (f"~{pre}" if pre else "")
+
+
+def check_yocto_recipe_pv(repo: pathlib.Path, full: str) -> list[str]:
+    """The shared recipe PV include must track the release (#2827); bump_version.py writes it."""
+    rel = "meta-alp-sdk/recipes-core/alp-sdk/alp-sdk-version.inc"
+    f = repo / rel
+    if not f.is_file():
+        return []
+    m = re.search(r'^PV\s*=\s*"([^"]*)"', f.read_text(encoding="utf-8"), re.MULTILINE)
+    want = expected_recipe_pv(full)
+    if m is None or m.group(1) != want:
+        return [f"  DRIFT    {rel}: PV = {m.group(1) if m else '<missing>'!r}, "
+                f"want {want!r} (scripts/bump_version.py rewrites it)"]
+    return []
+
+
+def check_sibling_recipes_use_shared_pv(repo: pathlib.Path) -> list[str]:
+    """Recipes built from this repo take PV from the shared include (#2850)."""
+    layer = repo / "meta-alp-sdk"
+    drifts: list[str] = []
+    for f in sorted(layer.rglob("*.bb")) if layer.is_dir() else []:
+        text = f.read_text(encoding="utf-8", errors="replace")
+        if "alplabai/alp-sdk.git" not in text:
+            continue
+        rel = f.relative_to(repo).as_posix()
+        if not re.search(r"^require\s+\S*alp-sdk-version\.inc", text, re.MULTILINE):
+            drifts.append(f"  DRIFT    {rel}: builds from this repo "
+                          f"but does not `require recipes-core/alp-sdk/alp-sdk-version.inc`")
+        if re.search(r"^PV(\s*[?:+.]?=|:)", text, re.MULTILINE):
+            drifts.append(f"  DRIFT    {rel}: sets its own PV; it must come from alp-sdk-version.inc")
+    return drifts
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1] if __doc__ else "")
     ap.add_argument("--root", default=None,
@@ -184,6 +250,9 @@ def main() -> int:
         + check_pyproject(repo, want_str)
         + check_banner_c(repo, want_str)
         + check_versions_md(repo, want_str)
+        + check_yocto_distro_version(repo)
+        + check_yocto_recipe_pv(repo, want_full)
+        + check_sibling_recipes_use_shared_pv(repo)
     )
 
     if drifts:

@@ -9,8 +9,8 @@ extras).
 ## What the SDK is
 
 alp-sdk is a unification layer for **E1M** and **E1M-X** system-on-modules — a
-heterogeneous mix of MCU and MPU silicon from **Alif (Ensemble)**, **Renesas
-(RZ/V2N)**, and **NXP (i.MX 93)**. It rides *on top of* each vendor SDK rather
+heterogeneous mix of MCU and MPU silicon from **Alif (Ensemble)** and **Renesas
+(RZ/V2N)**. It rides *on top of* each vendor SDK rather
 than replacing it. Cortex-M cores run **Zephyr**; Cortex-A cores run **Yocto
 Linux** — the runtime follows the core class, it is not a user choice. Apps
 write against one portable C API and stay source-compatible across every SoM in

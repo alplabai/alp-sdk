@@ -10,6 +10,7 @@ level contract.  Structural split only, no behaviour change;
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from alp_project_loader import METADATA_ROOT, _sku_family
@@ -33,9 +34,8 @@ from alp_project_loader import METADATA_ROOT, _sku_family
 #                                      ALP_HW_BUILD_SOM_SKU,
 #                                      ALP_HW_BUILD_SOM_HW_REV);
 #
-# The CMakeLists.txt example pattern (mirroring the zephyr-conf
-# emission) writes the header to `${CMAKE_BINARY_DIR}/generated/`
-# and adds that path to the include search.
+# A CMakeLists.txt consuming it writes the header to
+# `${CMAKE_BINARY_DIR}/generated/` and adds that path to the include search.
 
 
 def _pick_primary_core_os(cores: dict[str, str]) -> tuple[str, str]:
@@ -73,6 +73,7 @@ def _emit_hw_info_h(
     *,
     v2_cores: dict[str, str] | None = None,
     v2_selected_core: str | None = None,
+    metadata_root: Path | None = None,
 ) -> str:
     """Emit <alp_hw_info_build.h> -- build-time identifier companion to
     <alp/hw_info.h>.
@@ -107,7 +108,7 @@ def _emit_hw_info_h(
     # module-level import here closes a cycle.
     from alp_orchestrate.sdk_compat import board_designator, load_family_table
     som_hw_rev = board_designator(
-        load_family_table(METADATA_ROOT, family), som_hw_rev)
+        load_family_table(metadata_root or METADATA_ROOT, family), som_hw_rev)
 
     board_block = project.get("board") or {}
     board_name = board_block.get("name") or ""

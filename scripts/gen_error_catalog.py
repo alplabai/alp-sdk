@@ -12,8 +12,8 @@ truth for error/diagnostic codes:
     diagnostics       docs/diagnostics/ALP-B*.md, whose heading + body carry
                        the human-readable narrative (cause / fix).
 
-The catalog is what `alp explain <code>` reads, so a firmware engineer (or
-their agent) can type `alp explain ALP_ERR_NO_BACKEND` (or `alp explain
+The catalog is what `tan explain <code>` reads, so a firmware engineer (or
+their agent) can type `tan explain ALP_ERR_NO_BACKEND` (or `tan explain
 ALP-B003`) and get the cause/fix/doc-link instead of grepping headers.
 
 NO TEXT IS INVENTED here: every field is lifted verbatim from the enum

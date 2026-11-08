@@ -299,8 +299,8 @@ static void pmu_clock_test(volatile results_t *r)
 	r->pmu_cntvct_ticks = (uint32_t)(v1 - v0); /* actual measured window, target 10,000,000 */
 }
 
-/* Task 4 / addendum F: {L1CFB, SRCTRL, POS_STAT} from alp-sdk-lcd's
- * display_cdc200.h (CDC_L1_CFB_ADDR=0x134, CDC_SRCTRL=0x24, CDC_POS_STAT=
+/* Task 4 / addendum F: {L1CFB, SRCTRL, POS_STAT} from
+ * zephyr/drivers/display/display_cdc200.h (CDC_L1_CFB_ADDR=0x134, CDC_SRCTRL=0x24, CDC_POS_STAT=
  * 0x44, all off CDC base 0x49031000), read twice ~1 ms apart so decode.py
  * can show whether POS_STAT (current scan position) is actually moving.
  * probe_read32() makes each SYNCHRONOUS fault non-fatal, but that's not

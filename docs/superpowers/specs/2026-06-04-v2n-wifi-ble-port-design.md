@@ -1,12 +1,6 @@
 # V2N/V2M Wi-Fi + BLE port — Murata LBEE5HY2FY-922 (design)
 
-> **Active.** Design spec dated 2026-06-04; still current design intent,
-> not settled history. Tracked by #479 (V2N/V2M Murata CYW55513
-> Wi-Fi/BLE Yocto stack is missing). Only the side-channel GPIO driver
-> (`include/alp/chips/murata_lbee5hy2fy.h`, `[UNTESTED]`) exists today --
-> the SDIO/brcmfmac Wi-Fi stack, BT UART/BlueZ stack and Yocto DT/kernel
-> wiring below have not been built. Cross-check the tree, but this is
-> the grounded design and should not be discarded.
+> **Status (2026-10-08): Landed** — the Yocto stack (SDIO/Wi-Fi, BT UART, DT/kernel wiring) shipped in PR #2302 (closes #479). Silicon validation is partial (`metadata/chips/murata_lbee5hy2fy.yaml` records `hil_silicon: partial`): a 2026-09-26 bench run on E1M-V2M103 showed Wi-Fi scan, WPA2-SAE association, DHCP, TCP throughput and hci0 UP+RUNNING. Only RF range and antenna performance remain open.
 
 Date: 2026-06-04
 Status: approved (Approach A)

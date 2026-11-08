@@ -9,6 +9,7 @@
 
 #include <zephyr/ztest.h>
 
+#include "alp/chips/gd32g553.h" /* GD32G553_PAD_ID_* */
 #include "alp/peripheral.h"
 
 ZTEST(alp_peripheral, test_gpio_output_write_read_roundtrip)
@@ -72,5 +73,22 @@ ZTEST(alp_peripheral, test_gpio_pool_exhaustion_returns_null)
 
 	for (size_t i = 0; i < opened; i++) {
 		alp_gpio_close(pins[i]);
+	}
+}
+
+/* The reserved GD32 pad ids name the GD32 SWD / reset / ATTN pads (P71 is the
+ * bridge ATTN input; P74 is the shared open-drain NRST net).  Only the V2N
+ * supervisor and the SWD driver may open them, through an internal opener: the
+ * portable alp_gpio_open() -- and so application code and the console -- must
+ * refuse every one, whatever the board publishes. */
+ZTEST(alp_peripheral, test_gpio_open_refuses_the_reserved_gd32_pad_ids)
+{
+	static const uint32_t ids[] = {
+		GD32G553_PAD_ID_SWDIO, GD32G553_PAD_ID_SWCLK, GD32G553_PAD_ID_NRST, GD32G553_PAD_ID_ATTN
+	};
+	for (size_t i = 0; i < ARRAY_SIZE(ids); i++) {
+		alp_gpio_t *g = alp_gpio_open(ids[i]);
+		zassert_is_null(g, "reserved id 0x%08x opened through the portable API", ids[i]);
+		zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 	}
 }

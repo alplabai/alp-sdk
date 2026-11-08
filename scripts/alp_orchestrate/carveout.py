@@ -60,19 +60,35 @@ def _align_down(value: int, alignment: int) -> int:
     return value - (value % alignment)
 
 
-def _resolve_default_mailbox_channel(
+def _resolve_mailbox_channel(
     mailbox: dict[str, Any],
     entry_name: str,
-) -> int:
-    """Pick the mailbox channel reserved for a given IPC name.
+    claimed: set[int],
+) -> tuple[Optional[int], Optional[str]]:
+    """Pick the mailbox channel for an IPC entry, or explain why none.
 
-    Returns the channel `id` from mailbox.channels[] whose
-    `reserved_for:` matches the entry name; falls back to channel 0
-    when nothing matches (loader-rule check happens at emit time)."""
-    for ch in mailbox.get("channels") or []:
+    1. A channel whose `reserved_for:` equals the entry name wins.
+    2. Otherwise the lowest-id still-unclaimed `reserved_for: app`
+       channel is handed out (each channel carries one carve-out).
+    3. Otherwise no channel: the caller blocks the entry.  Channel 0 is
+       `alp_default_rpmsg`'s and is never handed to an unrelated entry.
+    """
+    channels = list(mailbox.get("channels") or [])
+    for ch in channels:
         if ch.get("reserved_for") == entry_name:
-            return int(ch["id"])
-    return 0
+            return int(ch["id"]), None
+    free = sorted(int(ch["id"]) for ch in channels
+                  if ch.get("reserved_for") == "app"
+                  and int(ch["id"]) not in claimed)
+    if free:
+        return free[0], None
+    named = sorted({str(ch.get("reserved_for")) for ch in channels})
+    return None, (
+        f"ipc entry '{entry_name}' has no mailbox channel: none is "
+        f"`reserved_for: {entry_name}` and no unclaimed `reserved_for: "
+        f"app` channel is left (reservations: {', '.join(named) or 'none'}). "
+        f"Rename the entry to a reserved name or add a channel to the "
+        f"SoM preset's mailbox.channels.")
 
 
 def _region_ipc_eligibility(
@@ -85,7 +101,7 @@ def _region_ipc_eligibility(
     Called only once `aperture` has already resolved non-`None` -- the
     caller (`_candidate_regions` below) special-cases `aperture is None`
     itself, honouring the legacy `carveout:` flag verbatim so this whole
-    function is a no-op on every non-Alif SoM (V2N/V2M/NX9101).
+    function is a no-op on every non-Alif SoM (V2N/V2M).
 
     Eligible iff the region's derived class (`aperture.classify_region`)
     is not `flash`, AND -- for a region the SoM preset authored itself --
@@ -116,7 +132,7 @@ def _region_ipc_eligibility(
 
     AGREE contract (#1365 split B review, BLOCKER): `carveout:` is a
     LEGACY OVERRIDE that must AGREE with a resolvable derived class
-    (`metadata/schemas/som-preset-v1.schema.json`'s `carveout` field,
+    (`metadata/schemas/som-preset-v2.schema.json`'s `carveout` field,
     `docs/board-config-features.md`'s #1365-split-B paragraph). It is
     NOT a second vote that can silently win against `flash`/`ram`, nor
     against the `write_authority`-derived answer on an `unclassified`
@@ -248,7 +264,7 @@ def _blocked_carve_out(entry: IpcEntry, reason: str) -> ResolvedCarveOut:
     mailbox controller) or the board.yaml entry can't be satisfied
     (no region, collision, etc.).  The manifest records the entry as
     `status: blocked` + `reason: ...` so reviewers see the gap; the
-    actual slice-build step is what trips on it.
+    build plan reports it as a `blocked-ipc-carveout` warning.
     """
     return ResolvedCarveOut(
         name=entry.name,
@@ -273,8 +289,7 @@ def resolve_carve_outs(
        default; explicit `cacheable: true` flips the preference).
     3. Emit a `status: blocked` entry when the matching region has a
        TBD base / size (the SoM isn't HW-mapped yet); the manifest
-       records the block reason and the actual slice-build step is
-       what fails.
+       records the block reason and the build plan warns.
     4. Allocate top-down within the region, page-aligned (4 KiB), and
        only inside the sub-extent every endpoint can actually address
        (`access_windows:`, #553).  An explicit `ipc[].address:` is
@@ -316,6 +331,8 @@ def resolve_carve_outs(
     aperture = resolve_aperture(
         project.som_preset, project.effective_metadata_root())
     is_preset_authored = bool(project.som_preset.get("memory_map"))
+    silicon = str(project.som_preset.get("silicon") or "")
+    alif_silicon = silicon if silicon.startswith("alif:") else ""
 
     # Phase 3 strict mailbox checks (spec §6.4).  Surfaces preset
     # bugs before the user spends time on a build that would silently
@@ -334,7 +351,7 @@ def resolve_carve_outs(
                 f"metadata.  Fill `mailbox.controller:` in "
                 f"metadata/e1m_modules/{project.sku}.yaml with the "
                 f"vendor mailbox node name (e.g. `renesas_mhu`, "
-                f"`nxp_mu`, `alif_mhuv2`) or remove the rpmsg "
+                f"`alif_mhuv2`) or remove the rpmsg "
                 f"entries from board.yaml.")
         else:
             reserved_tags = {
@@ -460,6 +477,22 @@ def resolve_carve_outs(
         prefers_cacheable = (bool(entry.cacheable)
                              if entry.cacheable is not None else False)
         endpoint_set = set(entry.endpoints)
+
+        # An Alif SoM must resolve an MRAM aperture: without one the
+        # legacy `carveout: false` filter below would treat `mram_main`
+        # (no `carveout` key, spans the SE-owned ATOC band) as a valid
+        # IPC target.  Refuse rather than fall back (ADR-0034 clause 4,
+        # never guess).
+        if aperture is None and alif_silicon:
+            return [], (
+                f"ipc entry '{entry.name}': SoM {project.sku} names Alif "
+                f"silicon {alif_silicon!r} but its on-die MRAM aperture "
+                f"could not be resolved (SoC JSON unreadable, "
+                f"`silicon_variant` matches no variants[].order_code, or "
+                f"`soc_flash_base` / `mram_mb` missing), so no region can "
+                f"be proven clear of the SE-owned ATOC band.  Fix the "
+                f"SoM preset's `silicon` / `silicon_variant` or the "
+                f"metadata/socs entry.")
 
         # Filter candidates: accessibility covers every endpoint, and the
         # region is eligible for IPC carve-out allocation.
@@ -683,6 +716,11 @@ def resolve_carve_outs(
             placement[index] = _place_auto(entry)
 
     resolved: list[ResolvedCarveOut] = []
+    # Channels reserved by exact entry name are claimed up front so an
+    # earlier-sorted unnamed entry can never take one of them.
+    claimed_channels: set[int] = {
+        int(ch["id"]) for ch in (mailbox.get("channels") or [])
+        if ch.get("reserved_for") in {e.name for e in sorted_entries}}
     seen_low_bytes: dict[int, str] = {}
 
     for index, entry in enumerate(sorted_entries):
@@ -712,7 +750,12 @@ def resolve_carve_outs(
         src_ept = 0x400 | low
         dst_ept = src_ept + 1
 
-        mbox = _resolve_default_mailbox_channel(mailbox, entry.name)
+        mbox, mbox_reason = _resolve_mailbox_channel(
+            mailbox, entry.name, claimed_channels)
+        if mbox is None:
+            resolved.append(_blocked_carve_out(entry, mbox_reason or ""))
+            continue
+        claimed_channels.add(mbox)
 
         resolved.append(ResolvedCarveOut(
             name=entry.name,

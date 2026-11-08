@@ -35,6 +35,7 @@ from . import sdk_compat
 from .models import (BoardProject, IpcEntry, OrchestratorError,
                      SdkRevisionNotBuildable, SdkRevisionUnknown,
                      SdkRevisionUnsupported, Slice, StorageEntry)
+from .ownership import load_ownership_doc, resolve_ownership
 from .partition import _is_ospi_key_unassembled, _known_flash_devices
 from .paths import BOARD_SCHEMA, METADATA_ROOT, REPO
 from .topology import _default_os_from_core_type
@@ -848,7 +849,7 @@ def _validate_topology_cores(
     # `som.sku:` swap where `cores.<key>` doesn't match this SoM preset's
     # `topology:`.  Example: customer has `cores.m55_hp:` and swaps
     # som.sku from E1M-AEN801 (topology: m55_hp + m55_he + a32_cluster)
-    # to E1M-NX9101 (topology: m33 + a55_cluster).  Pre-fix the slice-
+    # to E1M-V2N101 (topology: m33_sm + a55_cluster).  Pre-fix the slice-
     # build loop iterated topology keys, NOT project_cores keys, so
     # `cores.m55_hp:` was silently dropped and the customer got an
     # empty slice with no diagnostic.
@@ -1175,11 +1176,11 @@ def _validate_cross_fields(
         att_root = psa.get("attestation_root")
         if att_root == "optiga_trust_m":
             if _is_i2c_chip_unassembled(som_preset, "optiga_trust_m"):
-                # #2316, same class as #2311's OSPI guard: E1M-AEN801/803
-                # carry `capabilities.optiga_trust_m: true` and name the
-                # part under `on_module:`, but the part itself is DNP
-                # (`assembled: false` on its i2c_devices entry).  The
-                # population fact wins -- an attestation root on a part
+                # #2316, same class as #2311's OSPI guard: every E1M-AEN
+                # SKU names the part under `on_module:` with
+                # `assembled: false` (IC1 is DNP on the shared AEN PCB,
+                # #2958), and capabilities.optiga_trust_m now follows
+                # population (#2990).  The population fact wins -- an attestation root on a part
                 # this SKU does not carry would build and then fail on
                 # silicon.
                 where = f"SoM {sku}" if sku else "this SoM"
@@ -1299,7 +1300,8 @@ def _normalize_libraries(project: dict[str, Any],
 
 
 def load_board_yaml(path: Path, *,
-                    metadata_root: Path = METADATA_ROOT) -> BoardProject:
+                    metadata_root: Path = METADATA_ROOT,
+                    sku: Optional[str] = None) -> BoardProject:
     """Load + validate a board.yaml.
 
     Raises OrchestratorError on any schema / preset / topology error.
@@ -1314,6 +1316,14 @@ def load_board_yaml(path: Path, *,
     unchanged.
     """
     project = _load_and_validate_yaml(path, metadata_root)
+    if sku:
+        # Per-target SKU (#2597): the SoM facts follow the board being
+        # built, not the single static `som.sku` an example declares.  Safe
+        # after schema validation: the override only changes the SKU string,
+        # and every SKU-derived value (_resolve_board's preset + SoC variant
+        # lookup, hw_rev checks, topology, storage) is computed below from
+        # it.  Callers pass a SKU taken from metadata/e1m_modules/.
+        project["som"]["sku"] = sku
 
     # Fold the unified top-level `libraries:` list into the per-core /
     # project-wide channels the downstream resolution expects, so topology +
@@ -1356,6 +1366,14 @@ def load_board_yaml(path: Path, *,
     security_block = _validate_cross_fields(
         project, som_preset, sku, storage_entries, metadata_root)
 
+    ownership = resolve_ownership(
+        load_ownership_doc(metadata_root, _sku_family_dir(sku)),
+        project.get("ownership"),
+        declared_core_types=(
+            {str(c.get("type") or "") for c in (soc_spec.get("cores") or [])
+             if c.get("id") in project["cores"]}
+            if project.get("cores") else None))
+
     out = BoardProject(
         sku=sku,
         hw_rev=hw_rev or som_preset.get("default_hw_rev"),
@@ -1374,13 +1392,25 @@ def load_board_yaml(path: Path, *,
         ota=dict(project.get("ota") or {}),
         storage=storage_entries,
         security=security_block,
+        ownership=ownership,
         raw=project,
         metadata_root=metadata_root,
+        source_dir=Path(path).resolve().parent,
     )
 
     # Cross-field consistency pass (v0.6 P2.3).  Runs last so it can
     # inspect the fully-assembled project + every per-core
     # extra_libraries: entry the schema couldn't validate cleanly.
     _validate_consistency(out)
+
+    # `diagnostics.link: itcm` (tan-cli#1350) is implemented by tan's planner
+    # only (ADR-0026).  This planner would otherwise accept the schema-valid
+    # knob and silently emit an MRAM-linked image: refuse instead.
+    if str(out.diagnostics.get("link") or "auto").strip().lower() != "auto":
+        raise OrchestratorError(
+            "diagnostics.link: itcm is implemented by `tan build` only "
+            "(ADR-0026: tan owns the planner); alp_orchestrate would emit an "
+            "MRAM-linked image and silently ignore it.  Build with `tan build`, "
+            "or remove `diagnostics.link`.")
 
     return out

@@ -24,7 +24,8 @@ module-isolated power.
    headroom, else stays on +/-81.92 mV.
 3. Runs M pairs of equal-length (active, idle) windows, sampling on the INA236
    conversion-ready flag so each conversion is consumed exactly once, and
-   timestamping with the M55 DWT cycle counter.
+   timestamping with the kernel cycle counter (`k_cycle_get_32()`; the DWT is not
+   used, a J-Link close clears TRCENA and freezes it).
 4. Prints every raw sample so the host re-integrates independently, plus its own
    on-target integral as a cross-check, plus a `RESULT PASS/FAIL` line.
 
@@ -60,6 +61,8 @@ real-model build is MRAM-resident (Flow D). The tiny-model ITCM build (Flow C)
 remains useful as a fast, non-destructive check that the pipeline is intact.
 
 ## Build + run — real model, Flow D (the measuring configuration)
+
+This app has no `board.yaml`, so there is no `tan build` path yet; it builds through the SDK-internal bench wrapper `scripts/bench/aen/build.sh`, from an alp-sdk checkout.
 
 ```sh
 export PATH="$ZEPHYR_SDK_INSTALL_DIR/gnu/arm-zephyr-eabi/bin:$PATH"

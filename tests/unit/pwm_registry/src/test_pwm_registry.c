@@ -215,3 +215,70 @@ ZTEST(alp_pwm_registry, test_alp_pwm_set_period_public_dispatch)
 
 	ops->close(&h.state);
 }
+
+/* ---------- (g2) set_period resets duty to 0 % on every backend ---------- */
+
+static uint32_t g_fake_duty = 900000u;
+
+static alp_status_t _fake_set_duty(alp_pwm_backend_state_t *st, uint32_t pulse_ns)
+{
+	ARG_UNUSED(st);
+	g_fake_duty = pulse_ns;
+	return ALP_OK;
+}
+
+static alp_status_t _fake_set_period(alp_pwm_backend_state_t *st, uint32_t period_ns)
+{
+	ARG_UNUSED(st);
+	/* Like the GD32 bridge: reject a duty that exceeds the new period. */
+	return (g_fake_duty > period_ns) ? ALP_ERR_OUT_OF_RANGE : ALP_OK;
+}
+
+ZTEST(alp_pwm_registry, test_alp_pwm_set_period_resets_duty_to_zero)
+{
+	static const alp_pwm_ops_t fake_ops = {
+		.set_duty   = _fake_set_duty,
+		.set_period = _fake_set_period,
+	};
+	struct alp_pwm h;
+	memset(&h, 0, sizeof(h));
+	h.state.ops = &fake_ops;
+	h.period_ns = 1000000u;
+	h.in_use    = true;
+	h.lifecycle = ALP_HANDLE_LC_OPEN;
+	g_fake_duty = 900000u;
+
+	/* Shrinking below the old duty must succeed because duty drops first. */
+	zassert_equal(alp_pwm_set_period(&h, 500000u), ALP_OK);
+	zassert_equal(g_fake_duty, 0u);
+	zassert_equal(h.period_ns, 500000u);
+}
+
+/* ---------- (h) alp_pwm_configure -- undefined break bits (#1648) ---------- */
+
+ZTEST(alp_pwm_registry, test_configure_rejects_undefined_break_bits)
+{
+	/* The dispatcher refuses a break_cfg bit outside ALP_PWM_BREAK_* with
+	 * INVAL before the backend's own NOSUPPORT.  Driven through the real
+	 * public entry point on a sw_fallback handle (wired by hand, as in (g))
+	 * so the assertion always executes -- the DT-alias zephyr_drv open
+	 * returns NULL on native_sim. */
+	const alp_pwm_ops_t *ops = _find_sw_fallback_ops();
+	zassert_not_null(ops);
+
+	struct alp_pwm h;
+	memset(&h, 0, sizeof(h));
+	alp_capabilities_t caps = { 0 };
+	alp_pwm_config_t   cfg  = { .channel_id = 0u, .period_ns = 1000000u };
+	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
+	h.state.ops = ops;
+	h.in_use    = true;
+	h.lifecycle = ALP_HANDLE_LC_OPEN;
+
+	zassert_equal(alp_pwm_configure(&h, ALP_PWM_ALIGN_EDGE, 0u, 0x80u), ALP_ERR_INVAL);
+	/* A defined value passes the check and reaches the sw backend. */
+	zassert_equal(alp_pwm_configure(&h, ALP_PWM_ALIGN_EDGE, 0u, ALP_PWM_BREAK_NONE),
+	              ALP_ERR_NOSUPPORT);
+
+	ops->close(&h.state);
+}

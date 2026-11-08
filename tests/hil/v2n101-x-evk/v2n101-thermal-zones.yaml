@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2N101 SoC thermal: at least one thermal_zone reports, and every
+# zone reads inside 10..105 degC (an idle board on a bench; catches a dead
+# sensor reading 0/-274 or a runaway).  Read-only sysfs.
+
+schema_version: 1
+name: v2n101-thermal-zones
+description: |
+  thermal_zone temps present and within 10..105 degC.
+
+flash_method: ssh-run
+ssh_command: |-
+  ok=0
+  for z in /sys/class/thermal/thermal_zone*; do
+    t=$(cat $z/temp 2>/dev/null) || continue
+    echo "HIL_THERMAL ${z##*/} $t"
+    if [ "$t" -ge 10000 ] && [ "$t" -le 105000 ]; then ok=1; else ok=bad; break; fi
+  done
+  [ "$ok" = 1 ] && echo HIL_THERMAL_OK
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_THERMAL_OK"

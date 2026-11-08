@@ -16,6 +16,7 @@
 #define TR_HUD_HUD_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "../game/hiscore.h"
@@ -46,6 +47,16 @@
                          * duplicated up here too. */
 #define TR_PERF_COLS 40
 
+/* ---------------------------------------------------------------- power
+ * The +5V net's power graph (the HUD's T_PWR tile, "+5V net (SoM+LCD)", a line graph): the last TR_PWR_N
+ * samples of platform/rail5v_power.c, oldest first, ~10 Hz so about 10 s, in mW. A sample the
+ * poll could not take (the HP holds I2C2, a read missed, the rail below 4.5 V) is TR_PWR_GAP and
+ * draws as a hole, never as a zero. pwr_seq counts every sample pushed: the repaint key. */
+#define TR_PWR_N           96
+#define TR_PWR_GAP         (-1)
+#define TR_PWR_MIN_SPAN_MW 100 /* the graph's full scale is never less ... */
+#define TR_PWR_STEP_MW     50  /* ... and its ends sit on multiples of this */
+
 typedef struct {
 	uint8_t  mode;   /* TR_HUD_* */
 	uint8_t  banner; /* TR_BANNER_* (tr_mbox.h), TR_HUD_BANNER only */
@@ -58,15 +69,32 @@ typedef struct {
 	uint32_t popup_seq;
 	uint8_t  zone;     /* the world zone (src/game/zone.h) ... */
 	uint32_t zone_seq; /* ... and its entry count: a change shows its name */
+	uint8_t  vol_pct;  /* the game sound's volume, percent (0 = mute) ... */
+	uint32_t
+	    vol_seq; /* ... and its change count: a change shows "VOLUME n%" for TR_HUD_VOL_FRAMES */
+	uint8_t  vol_kind; /* TR_HUD_KNOB_*: what the encoder is set to, so what the popup names */
 	uint32_t score, metres, best;
 	char     perf[TR_PERF_LINES][TR_PERF_COLS]; /* NUL-terminated, "" = blank line */
+	int16_t  pwr[TR_PWR_N];                     /* the power graph, oldest first (see TR_PWR_N) */
+	uint32_t pwr_seq;                           /* samples pushed so far: the tile's repaint key */
 	/* Booth (tr_hud_view_booth()): */
 	uint8_t popup_hs;  /* the popup is the new-high-score celebration (score.h), not a pickup's */
 	tr_hiscore_t  hs;  /* the table: a page of the attract card */
 	tr_initials_t ini; /* TR_HUD_INITIALS: the entry as it stands */
 } tr_hud_view_t;
 
-#define TR_HUD_TILES 7
+/* The window's readouts: *now the newest sample (-1: it is a gap), *avg the mean and *peak the
+ * largest of the real ones (-1 with none); returns how many are real. */
+int tr_hud_pwr_stats(const int16_t pwr[TR_PWR_N], int32_t *now, int32_t *avg, int32_t *peak);
+
+/* The graph's vertical scale, mW: *lo at the bottom, *span from it to the top. Tight on the data -- the
+ * rail sits at ~4.85 W and swings ~50 mW, which a scale from 0 hides: span = the data's range x 1.25,
+ * at least TR_PWR_MIN_SPAN_MW, rounded UP to TR_PWR_STEP_MW, centred on the data, *lo a multiple of
+ * TR_PWR_STEP_MW (never below 0) and raised span so the peak is always inside. No data: 0 and the
+ * minimum span. */
+void tr_hud_pwr_scale(const int16_t pwr[TR_PWR_N], int32_t *lo, int32_t *span);
+
+#define TR_HUD_TILES 9
 
 typedef struct {
 	uint32_t key[TR_HUD_TILES]; /* what each tile last showed */
@@ -75,9 +103,15 @@ typedef struct {
 	uint32_t popup_start;       /* 40 Hz frame (below) the current popup started */
 	uint32_t zone_seq;          /* last zone_seq seen */
 	uint32_t zone_start;        /* 40 Hz frame the zone name popup started */
+	uint32_t vol_seq;           /* last vol_seq seen */
+	uint32_t vol_start;         /* 40 Hz frame the volume popup started */
 	bool     drawn;             /* false: every tile repaints on the next update */
 	uint32_t budget; /* px repainted per update at most (0: no cap); see tr_hud_update() */
 	int      next;   /* the tile a capped update stopped at */
+	/* Clockwise degrees the buffer is turned (render/panel_rot.h): 0 the 720 x 352
+	 * portrait HUD, 90 / 270 the 352 x 720 layer of a panel mounted turned
+	 * (hud_l2.c sets it at open). tr_hud_paint_all() always paints rotation 0. */
+	int rot;
 } tr_hud_t;
 
 /* Blink and popup run on a 40 Hz frame clock (tr_hz_to40() of the update
@@ -85,6 +119,8 @@ typedef struct {
 #define TR_HUD_POPUP_FRAMES 32u /* 0.8 s */
 #define TR_HUD_ZONE_FRAMES \
 	110u /* 2.75 s: a zone's name on entry (P15), in the row under the play field's centre */
+#define TR_HUD_VOL_FRAMES \
+	60u /* 1.5 s: "VOLUME n%" over the bottom row (every screen) when the volume changes */
 #define TR_HUD_BLINK_FRAMES 40u /* invitation period, 1 s, on for the first 28 */
 #define TR_HUD_PAGE_FRAMES \
 	240u /* 6 s: the attract card turns between the logo and the high scores */
@@ -115,6 +151,34 @@ void tr_hud_view_booth(tr_hud_view_t *v, const tr_hiscore_t *hs, const tr_initia
  * of the invitation. After tr_hud_view_set(). */
 void tr_hud_view_zone(tr_hud_view_t *v, uint8_t zone, uint32_t seq);
 
+#ifdef TR_PARTNER_LOGO_HEADER
+/* The optional co-brand header (CMake -DTR_PARTNER_LOGO=<header>, tools/genlogo.py): the attract
+ * header card holds the ALP LAB mark, a divider and the partner's logo. Where each sits, in HUD
+ * pixels (rotation 0). Only declared when the logo is built in. */
+typedef struct {
+	int card_x, card_y, card_w, card_h;
+	int alp_x, alp_y, alp_w, alp_h;
+	int div_x, div_y, div_h; /* the divider is 1 px wide */
+	int logo_x, logo_y, logo_w, logo_h;
+} tr_hud_partner_layout_t;
+
+void tr_hud_partner_layout(tr_hud_partner_layout_t *l);
+#endif
+
+/* view <- the game sound's volume (percent) and its change count (tr_vol_t.seq): the bottom row
+ * shows "VOLUME n%" (or "MUTE" at 0) for TR_HUD_VOL_FRAMES whenever seq changes, over whatever the
+ * screen has there. A seq that never moves shows nothing. */
+void tr_hud_view_vol(tr_hud_view_t *v, uint8_t pct, uint32_t seq);
+
+/* The popup's subject: TR_HUD_KNOB_VOLUME ("VOLUME n%" / "MUTE") or TR_HUD_KNOB_BRIGHTNESS
+ * ("BRIGHTNESS n%"); then `pct` of tr_hud_view_vol() is that quantity. Default (0): volume. */
+#define TR_HUD_KNOB_VOLUME     0u
+#define TR_HUD_KNOB_BRIGHTNESS 1u
+void tr_hud_view_vol_kind(tr_hud_view_t *v, uint8_t kind);
+
+/* The popup's text (the longest, "BRIGHTNESS 80%", is 14 chars + NUL). */
+void tr_hud_vol_text(char *b, size_t n, uint8_t kind, uint8_t pct);
+
 void tr_hud_init(tr_hud_t *h);
 
 /* One presented frame: repaint the tiles that changed into fb (TR_HUD_W x
@@ -126,13 +190,14 @@ void tr_hud_init(tr_hud_t *h);
 uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32_t *dirty);
 
 /* The whole HUD painted from scratch for `v` at hud frame `frame`, the
- * popups started at popup_start / zone_start (the reference tr_hud_update()
- * must match). */
+ * popups started at popup_start / zone_start / vol_start (the reference
+ * tr_hud_update() must match). */
 void tr_hud_paint_all(uint16_t            *fb,
                       const tr_hud_view_t *v,
                       uint32_t             frame,
                       uint32_t             popup_start,
-                      uint32_t             zone_start);
+                      uint32_t             zone_start,
+                      uint32_t             vol_start);
 
 /* The character's name as the HUD shows it (out of range: Probe's). */
 const char *tr_hud_char_name(uint8_t character);
@@ -164,7 +229,8 @@ typedef struct {
 	uint32_t hp_magic;    /* sound ring identity word (tr_aring.h TR_ARING_MAGIC) */
 	uint32_t hp_state;    /* sound ring hp_state */
 	int32_t
-	    rail5v_mw; /* platform/rail5v_power.h tr_rail5v_avg_mw: carrier +5V net (SoM+LCD+regs), EMA mW */
+	    rail5v_mw; /* platform/rail5v_power.h tr_rail5v_avg_mw: carrier +5V net (SoM+LCD+regs), EMA mW;
+	       * -1 = stale (the HP holds I2C2 for its amp bring-up): the HUD prints "--" */
 	/* fix round 5: hp_vision's OWN beacon (src/ipc/tr_hp_dbg.h), read
 	 * alongside the sound ring's -- only one of the two is ever meaningful
 	 * on a given HP_APP (see tr_hp_dbg_magic's use in tr_perf_sample()).
@@ -218,7 +284,7 @@ typedef struct {
 	uint32_t    base, size;
 } tr_mem_region_t;
 
-#define TR_MEM_REGIONS    21
+#define TR_MEM_REGIONS    23
 #define TR_MEM_SRAM_BASE  0x02000000u
 #define TR_MEM_SRAM_TOTAL 0x00800000u /* SRAM0 4 MiB + SRAM1 4 MiB, contiguous */
 

@@ -36,7 +36,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 SNAP_DIR = REPO / "tests" / "fixtures" / "emit-snapshots"
 sys.path.insert(0, str(REPO / "scripts"))
-from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
 # The orchestrator is now a package; invoke it as a module.  scripts/ goes on
 # PYTHONPATH so the package + its `alp_project` sibling import both resolve
 # (replaces the old file-path call to scripts/alp_orchestrate.py).
@@ -78,13 +77,6 @@ CASES = [
     ("rpmsg-aen.build-plan",        ORCH, "examples/multicore/rpmsg-aen/board.yaml",            "build-plan"),
     ("rpmsg-v2n.system-manifest",   ORCH, "examples/multicore/rpmsg-v2n/board.yaml",            "system-manifest"),
     ("rpmsg-v2n.build-plan",        ORCH, "examples/multicore/rpmsg-v2n/board.yaml",            "build-plan"),
-    # rpmsg-imx93 excluded (#1025): E1M-NX9101's only hw_rev (imx93 r1) is
-    # `status: tbd` -- refused outright by the hw_rev-buildable gate, so
-    # `--emit` can no longer run against it at all.  Re-add the two cases
-    # above (system-manifest, build-plan) plus `--update` once
-    # metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a buildable
-    # status.  `main()` re-asserts that reason still holds every run
-    # (RATCHET -- see assert_exclusion_still_not_buildable).
     ("hetero-offload.system-manifest", ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "system-manifest"),
     ("hetero-offload.build-plan",      ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "build-plan"),
     # `raw_shmem` ipc[] coverage (kconfig.py's `_emit_cross_core_shmem_cache`,
@@ -112,6 +104,9 @@ CASES = [
     # staying in the build-plan's rendered alp.conf for THIS declaration
     # form specifically.
     ("coap-client-get.build-plan",  ORCH, "examples/connectivity/coap-client-get/board.yaml",   "build-plan"),
+    # `cameras:` -> -DSHIELD (Zephyr) / cmake-args.txt; pins the resolver
+    # output in the plan's command and its rendered cmake-args artefact.
+    ("camera-firstlight.build-plan", ORCH, "tests/fixtures/cameras-select/board.yaml",   "build-plan"),
 ]
 for _bid, _board in _PROJ_BOARDS:
     for _mode in _PROJ_MODES:
@@ -285,12 +280,6 @@ def main() -> int:
                     help="rewrite the golden snapshots instead of checking")
     args = ap.parse_args()
     SNAP_DIR.mkdir(parents=True, exist_ok=True)
-
-    exclusion_stale = assert_exclusion_still_not_buildable(
-        REPO / "metadata", "imx93", "r1", gate="check_emit_snapshots.py")
-    if exclusion_stale:
-        print(f"FAIL {exclusion_stale}", file=sys.stderr)
-        return 1
 
     stale: list[str] = []
     for case in CASES:

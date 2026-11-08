@@ -2,14 +2,14 @@
 
 # Tutorial 12: Mender OTA on Yocto
 
-**Target audience:** developers who already have a V2N or
-i.MX 93 Yocto image working on the bench and want to add
+**Target audience:** developers who already have a V2N
+Yocto image working on the bench and want to add
 in-field firmware updates.
 
 **Prerequisites:**
 
 - Tutorial [01](01-first-build.md) completed.
-- A V2N / V2N-M1 / i.MX 93 module running a `meta-alp-sdk` Yocto
+- A V2N / V2N-M1 module running a `meta-alp-sdk` Yocto
   image.
 - A reachable Mender server.  For development: stand up
   Mender's open-source server locally (15 minutes; instructions

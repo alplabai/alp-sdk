@@ -12,6 +12,10 @@ Deciders: alpCaner
 > reference/parity producer. This changes the repository boundary, not this
 > ADR's single-`board.yaml`, per-core-slice, or peer-OS decisions.
 
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The `E1M-NX9101` bullet in Context and the `iMX93` mentions in Decision/Consequences are history; the heterogeneous families are V2N/V2M (A55 + M33) and AEN501..AEN803 (A32 + M55). The `multicore_rpmsg-imx93` slice and the `rpmsg-imx93` example are deleted.
+
 ## Context
 
 The SDK presents Zephyr and Yocto as mutually exclusive build targets

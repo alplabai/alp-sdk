@@ -1,5 +1,7 @@
 # Multi-core scaffolding for dual-Zephyr-core SoMs — design
 
+> **Status (2026-10-08): Landed** — multi-core aware scaffold emit, template `cores` map and the first dual-Zephyr-core example shipped in #1287; #1275 is closed.
+
 Date: 2026-08-06
 Issue: [#1275](https://github.com/alplabai/alp-sdk/issues/1275) item 1
 Status: design approved; implementation not started

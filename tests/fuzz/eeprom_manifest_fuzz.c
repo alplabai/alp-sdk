@@ -2,89 +2,71 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * libFuzzer harness for the 24C128 EEPROM manifest decoder consumed
- * by `<alp/hw_info.h>`'s `alp_hw_info_read`.
+ * libFuzzer harness for the EEPROM manifest classifier,
+ * `alp_hw_info_classify_manifest()` and its CRC-32 in
+ * `src/zephyr/hw_info_zephyr.c`: what `alp_hw_info_read()` runs on the 128
+ * bytes it reads off the SoM's 24C128.
  *
- * The manifest is a fixed-layout 128-byte struct (see
- * `alp_hw_info_eeprom_t` in hw_info.h) with magic + schema_version +
- * strings + CRC32.  Production-test writes it via
- * `scripts/program_eeprom.py`; the SDK reads it at boot.
+ * The harness links the real file; nothing is stubbed.  Input layout:
  *
- * What this harness catches:
- *   - Magic / schema-version validation that overruns the input
- *     when the buffer is smaller than 128 bytes.
- *   - String fields lacking NUL termination -- the decoder must
- *     treat the field as a fixed-length blob, not a C string.
- *   - CRC32 verification on a corrupted manifest must reject; the
- *     fuzzer drives random byte sequences and the decoder must
- *     never accept anything that isn't the magic + valid CRC.
- *   - mfg_month / mfg_day field range validation (1..12, 1..31).
+ *   byte[0]    bit 0 = stamp the ALPH magic, bit 1 = stamp the schema version,
+ *              bit 2 = stamp a valid CRC32 (via the production
+ *              alp_hw_info_crc32), so the deeper checks stay reachable
+ *   byte[1..]  the manifest, zero-padded / truncated to sizeof(alp_hw_info_eeprom_t)
+ *
+ * Checked on every input: a non-OK verdict leaves the output untouched, and
+ * an OK one carries NUL-terminated SoM strings and a manifest that really has
+ * the magic, schema version and CRC the classifier claims to have verified.
  *
  * Build:
  *   cmake -B build-fuzz -DALP_BUILD_FUZZ=ON -DALP_OS=baremetal \
  *         -DCMAKE_C_COMPILER=clang
  *   cmake --build build-fuzz --target alp_fuzz_eeprom_manifest
- *
- * Run:
- *   ./build-fuzz/tests/fuzz/alp_fuzz_eeprom_manifest -max_total_time=30 \
- *         tests/fuzz/corpus/eeprom_manifest
  */
 
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include "alp/hw_info.h"
-
-/* CRC-32 (ISO-3309) -- same algorithm `scripts/program_eeprom.py` +
- * `zlib.crc32` use.  Inlined so the harness has no external dependency. */
-static uint32_t crc32_iso3309(const uint8_t *buf, size_t len)
-{
-	uint32_t crc = 0xFFFFFFFFu;
-	for (size_t i = 0; i < len; ++i) {
-		crc ^= buf[i];
-		for (unsigned b = 0; b < 8; ++b) {
-			const uint32_t mask = -(int32_t)(crc & 1u);
-			crc                 = (crc >> 1) ^ (0xEDB88320u & mask);
-		}
-	}
-	return crc ^ 0xFFFFFFFFu;
-}
-
-/* Standalone decoder that mirrors what alp_hw_info_read would do
- * after reading the 128 bytes from the EEPROM.  Returns 0 on a
- * structurally valid manifest, non-zero otherwise.  Caller's job is
- * to NOT trust strings, dates, or any field on a non-zero return. */
-static int decode_manifest(const uint8_t *buf, size_t len)
-{
-	if (len < sizeof(alp_hw_info_eeprom_t)) return -1;
-	/* memcpy, not a cast -- libFuzzer's `data` buffer carries no alignment
-	 * guarantee for alp_hw_info_eeprom_t (alignment 4, for its uint32_t
-	 * magic/schema_version/crc32 and uint16_t mfg_year). A cast-and-deref
-	 * here is the exact misaligned-access bug already fixed on the Secure
-	 * Data Page path (see alp_secure_page_mirror_classify()'s doc comment in
-	 * include/alp/hw_info.h) -- and defeats this harness's own purpose: an
-	 * x86 host tolerates the unaligned read silently, so the bug this
-	 * fuzzer exists to catch on the real ARM target would never trip here. */
-	alp_hw_info_eeprom_t m;
-	memcpy(&m, buf, sizeof(m));
-	if (m.magic != ALP_HW_INFO_MAGIC) return -2;
-	if (m.schema_version != ALP_HW_INFO_SCHEMA_VERSION) return -3;
-	/* CRC covers everything except the trailing crc32 field itself. */
-	const size_t crc_len = sizeof(m) - sizeof(uint32_t);
-	if (crc32_iso3309(buf, crc_len) != m.crc32) return -4;
-	/* Date sanity: production-test fills these.  A bad manifest with
-     * a valid CRC32 (someone reflashed a malformed image) must still
-     * be rejected. */
-	if (m.mfg_month < 1u || m.mfg_month > 12u) return -5;
-	if (m.mfg_day < 1u || m.mfg_day > 31u) return -6;
-	return 0;
-}
+#include "hw_info_manifest.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-	/* Run the decoder; throw away the return value.  The fuzzer
-     * watches for ASan / UBSan trips inside decode_manifest. */
-	(void)decode_manifest(data, size);
+	if (size < 1u) return 0;
+
+	/* A struct, not a cast of `data`: libFuzzer gives no alignment guarantee. */
+	alp_hw_info_eeprom_t m;
+	memset(&m, 0, sizeof(m));
+	const size_t n = (size - 1u) < sizeof(m) ? (size - 1u) : sizeof(m);
+	memcpy(&m, data + 1, n);
+
+	if ((data[0] & 1u) != 0u) m.magic = ALP_HW_INFO_MAGIC;
+	if ((data[0] & 2u) != 0u) m.schema_version = ALP_HW_INFO_SCHEMA_VERSION;
+	if ((data[0] & 4u) != 0u) {
+		m.crc32 = alp_hw_info_crc32((const uint8_t *)&m, sizeof(m) - sizeof(m.crc32));
+	}
+
+	alp_hw_info_t out;
+	memset(&out, 0xA5, sizeof(out));
+	alp_hw_info_t before = out;
+
+	const alp_status_t s = alp_hw_info_classify_manifest(&m, &out);
+
+	if (s != ALP_OK) {
+		if (memcmp(&out, &before, sizeof(out)) != 0) __builtin_trap();
+		return 0;
+	}
+	if (m.magic != ALP_HW_INFO_MAGIC || m.schema_version != ALP_HW_INFO_SCHEMA_VERSION) {
+		__builtin_trap();
+	}
+	if (m.crc32 != alp_hw_info_crc32((const uint8_t *)&m, sizeof(m) - sizeof(m.crc32))) {
+		__builtin_trap();
+	}
+	if (memchr(out.som_family, '\0', sizeof(out.som_family)) == NULL ||
+	    memchr(out.som_sku, '\0', sizeof(out.som_sku)) == NULL ||
+	    memchr(out.som_hw_rev, '\0', sizeof(out.som_hw_rev)) == NULL ||
+	    memchr(out.som_serial, '\0', sizeof(out.som_serial)) == NULL) {
+		__builtin_trap();
+	}
 	return 0;
 }

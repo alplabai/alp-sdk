@@ -60,9 +60,19 @@ MACHINE=e1m-v2n101-a55 bitbake alp-image-edge
 #  V2N-M1: e1m-v2m101-a55 / e1m-v2m102-a55 / e1m-v2m103-a55)
 ```
 
+Each `e1m-*` machine conf defaults `ALP_SDK_SOC ?= "ALP_SOC_..."` (V2N and
+V2N-M1: `ALP_SOC_RENESAS_RZV2N_N44`), so the plain-`bitbake` flow above still
+builds libalp_sdk with the right SoC capability profile
+(`ALP_SOC_REF_STR`, `ALP_HAS()`, the UIO/MHU rpc backend). A build plan's
+generated `local.conf` sets the same variable with `?=` and wins.
+
 Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
 - `alp-image-edge-*.wic[.gz]` — full SD/eMMC image (bootloader excluded;
   it's already on xSPI).
+- `alp-image-edge-*.wic.bmap` — block map of the wic (`wic.bmap` in
+  `IMAGE_FSTYPES`); ship it as the bundle's `system_image_bmap` so the
+  provisioning tool writes only the used blocks
+  (see [provisioning-v2n.md](provisioning-v2n.md)).
 - `Image` + `renesas/e1m-v2n101-x-evk.dtb` — kernel + the **carrier
   dtb** (composed from the SoC + SoM + E1M-X-EVK carrier dtsi and selected
   via the machine's `KERNEL_DEVICETREE`, so this is the e1m-x carrier dtb
@@ -84,7 +94,7 @@ differ only in posture:
 
 Build the production image against the **`alp` distro** so the rootfs
 carries an Alp identity (`/etc/os-release`, `/etc/issue`, the login
-banner say `Alp SDK 6.30`) instead of the upstream
+banner say `Alp SDK <version>`, read from `include/alp/version.h`) instead of the upstream
 `Poky (Yocto Project Reference Distro)` reference-distro banner:
 
 ```bash
@@ -114,11 +124,20 @@ not the distro.
 > to `"6.1%"` (linux-renesas 6.1.141-cip43) for BSP v6.30.  Leaving it at
 > the template default causes a recipe mismatch and build failure.
 
+> **Core ownership (kernel `do_configure`):** the linux-renesas bbappend needs
+> to know which cores own the assignable peripherals. For a project build it
+> renders the Linux fragment from the system-manifest
+> (`ALP_SYSTEM_MANIFEST_PATH`, default `../alp-sdk/build/system-manifest.yaml`,
+> written by `tan build`). With no manifest (a generic SoM image) the build
+> warns and keeps the committed SoM-default fragment, which still carries the
+> `renesas,cm33-owned-clocks` hold for the CM33's RSCI7 clocks.
+
 > **Machine fragments:** `alp-image-edge` picks up per-machine `.cfg`
-> fragments from `meta-alp-sdk/recipes-kernel/linux/`.  For V2N with the
-> display feature enabled, the active fragment list is `display.cfg`.
-> (There is no audio fragment: the carrier TAS2563 codec has no DT node
-> yet, so nothing would bind — see the audio TODO in `e1m-x-evk.dtsi`.)
+> fragments from `meta-alp-sdk/recipes-kernel/linux/`.  Merged
+> unconditionally: `uio.cfg`, `rv3028-rtc.cfg`, `wifi-bt.cfg`,
+> `trim-unused-storage-net-fs.cfg`, `no-kernel-audit.cfg`, and the generated `camera-sensors.cfg`. Per carrier:
+> `display.cfg` and `tas2563-audio.cfg` (with kernel patches `0009` and
+> `0014`). Opt-in camera DT: `ALP_CAMERA_CAM0` (see `v2n-camera-csi.md`).
 > To build a minimal image without
 > Weston/display, remove the `alp-lvgl-dashboard`, `weston`, and
 > `weston-init` packages from `IMAGE_INSTALL` in your `local.conf` and
@@ -134,18 +153,21 @@ MACHINE's `KERNEL_DEVICETREE` reuses its x101 sibling's dtb by design --
 see the memory-tier rationale in `e1m-v2n103-a55.conf` /
 `e1m-v2m103-a55.conf`) (issue #1175, closed as
 #1252). The vendor env's hardcoded `boot/r9a09g056n44-dev.dtb` is a
-filename **no Alp image builds**, on the eMMC branch as well as the SD
-one, which is why the reload exists. If the dtb is missing from
+filename **no Alp machine builds as a dtb**, on the eMMC branch as well as the
+SD one, which is why the reload exists (the image links that name to the board
+dtb so the vendor load succeeds harmlessly, #2637). If the dtb is missing from
 `/boot`, the bootloader prints an error and **stops** — it does not
 fall through and boot whatever devicetree is left in RAM.
 
 The boot medium is auto-detected **per boot**: if an SD card is
-present, root = `/dev/mmcblk1p2` (the carrier microSD, `&sdhi1` — see
+present and holds `boot/Image` on partition 2, root = `/dev/mmcblk1p2` (the carrier microSD, `&sdhi1` — see
 `e1m-x-evk.dtsi`), otherwise eMMC `/dev/mmcblk0p2`
 (`ALP_BOOT_DEVICE ?= "emmc"` names the provisioning default, not a
 build split). **Bench-confirmed 2026-09-29 on E1M-V2M103
-2026W38-0001:** U-Boot prefers a present microSD unconditionally --
-this selection is independent of the DSW1 boot-mode switch. DSW1
+2026W38-0001:** U-Boot takes the SD branch only when `mmc dev 1`
+succeeds AND `boot/Image` exists on partition 2, otherwise it boots the
+eMMC (a data card in the slot boots the eMMC); this selection is
+independent of the DSW1 boot-mode switch. DSW1
 (BOOT 2 = xSPI) only selects where **BL2/FIP** load from at boot ROM
 time; it does not choose the Linux root device. Removing the microSD
 falls through to eMMC (`root=/dev/mmcblk0p2`, HS200) with no DSW1
@@ -229,37 +251,117 @@ To raise the cap to 1.8 GHz, flip one line in the SoM dtsi
 V2N-family SKUs. Validate your own silicon + thermals before enabling it
 fleet-wide.
 
-## Kernel FIT signing (opt-in scaffolding)
+## Verified kernel boot: signed FIT (opt-in)
+
+> **BENCH-UNVERIFIED.** The U-Boot and the signed kernel FIT build, and the
+> FIT, `bootcmd` and control-dtb key were inspected, but a unit has never
+> booted this way. The failure mode is a **reset loop** (no U-Boot shell, a
+> failed boot resets) that only an external eMMC / FIP reflash recovers: try
+> it on a unit you can reflash from outside.
 
 By default U-Boot loads a **raw** `Image` + dtb from `/boot` and boots them
-with no integrity check. An opt-in builds the kernel instead as a **signed
-`fitImage`** — kernel + dtb in one FIT with an **RSA-2048 / SHA-256**
-signature over the configuration (so the kernel and its dtb are bound
-together). Enable it in `conf/local.conf`:
+with no integrity check. The opt-in builds the kernel as a **signed
+`fitImage`** (kernel + dtb in one FIT, **RSA-2048 / SHA-256** over the
+configuration so the two are bound together) and builds U-Boot to boot and
+verify it. Enable it in `conf/local.conf`:
 
 ```bash
 ALP_FIT_SIGNED = "1"
 require conf/include/alp-fit-signing.inc
 ```
 
-When off (the default) the build is unchanged. When on, the kernel deploys
-`fitImage` signed with a **generated dev key** under `build/alp-fit-keys/`
-(gitignored build dir; dev-only — never ship it).
+When off (the default) the build is unchanged. When on:
 
-> **This is build-side scaffolding only — it is not yet enforced.** Making
-> U-Boot *verify* the FIT before boot (`CONFIG_FIT_SIGNATURE` + the
-> production public key in the FIP's U-Boot dtb + `bootcmd` → `bootm`) means
-> rebuilding and reflashing the bootloader, and choosing the production key
-> custody — a separate, brick-class step tracked in `alp-sdk-internal`. The
-> dev-key fitImage here lets you exercise the signed-image build path now.
->
-> **Caveat — not bootable as-is.** With the flag on the kernel deploys
-> **only** the signed `fitImage` (the raw `Image` is no longer produced), and
-> the current (phase-1) bootloader still `ext4load`s `/boot/Image` + `booti`s
-> it — it does **not** `bootm` a FIT. So the flag validates the signed-*build*
-> path, not a bootable board, and the §4 "Fast dev iteration" copy-`Image`
-> recipe does not apply while it is on. Booting the FIT comes with the
-> phase-2 U-Boot work.
+- the kernel deploys `/boot/fitImage` signed with a **generated dev key**
+  under `build/alp-fit-keys/` (gitignored build dir; never ship it);
+- U-Boot (patch `0018`, `fit-signed.cfg`) loads `/boot/fitImage` from the
+  eMMC and runs `bootm` on the configuration node of the board dtb. The
+  public key is embedded in the control dtb of the U-Boot in the FIP as a
+  `required = "conf"` key, so a FIT that is unsigned or fails verification
+  is not booted, and U-Boot halts at start-up if that key is missing;
+- there is no fallback: no `/boot/Image`, no microSD, no
+  `booti`/`bootz`/`go`/`bootelf`/EFI/network/serial-download/`source`
+  commands, no legacy image format, and no way to interrupt autoboot
+  (`CONFIG_BOOTDELAY=-2`). A boot that fails ends in `reset`;
+- the OpenCV accelerator and codec firmware blobs (`OpenCV_Bin.bin`,
+  `Codec_Bin.bin`) are **not** preloaded, because they would be loaded
+  without a signature check.
+
+The **bootloader (FIP) must be rebuilt and reflashed together with the
+image**: a FIP from a default build still `booti`s `/boot/Image` and finds
+none. With no U-Boot shell, an image that does not verify boot-loops; reflash
+the eMMC from outside the unit.
+
+> **Not a complete secure-boot chain.** The key is a dev key (anyone who can
+> build can sign), TF-A does not verify the FIP, and there is no
+> anti-rollback: an older, validly signed FIT still boots. TF-A trusted boot,
+> the production key custody and anti-rollback are separate, owner-decided
+> steps tracked in `alp-sdk-internal`. The §4 "Fast dev iteration" copy-`Image`
+> recipe does not apply while the flag is on.
+
+## Dev-kit package feed (opkg)
+
+Dev boards can take `alp-sdk` and `alp-sdk-dev` without a
+reflash, from a **signed opkg feed** published per image release line and per
+machine. **Dev kits only: this is not a field-update channel.** Field devices
+stay on image-based A/B OTA (Mender).
+
+**Adding the feed.** An `alp-image-edge` image built with
+`require conf/distro/include/alp-devkit-feed.inc` (in `local.conf`) already has
+it (`alp-image-prod` never does: it fails the build if the fragment is set): opkg with GPG and HTTPS support, `/etc/opkg/alp-devkit-feed.conf`
+(`option check_signature 1`) and the Alp feed public key
+(`keys/alp_devkit_feed_signing.pub.asc`, fingerprint
+`2B7807E20B75B471BF88FD7AC9AB032782D3143B`) in the opkg keyring. The fragment also switches the build to the ipk
+packager (`PACKAGE_CLASSES = "package_ipk"`; the poky default is rpm), so a
+dev-kit image is a different build from a stock one. Then, on the board:
+
+```sh
+opkg update && opkg upgrade alp-sdk
+```
+
+`opkg update` fails if the index signature does not verify; there is no
+unsigned fallback.
+
+**Where it lives.** The feed of release line `0.17` for machine
+`e1m-v2n101-a55` is the GitHub Release tagged `feed-v0.17-e1m-v2n101-a55`
+(`feed-v<major.minor>-<MACHINE>`). opkg needs `<base>/Packages.gz` and every
+`<base>/<ipk>` by name under one base URL, and a release's assets are a flat
+namespace, so the feed is **one release per line and machine** whose assets are
+a single merged `Packages`, `Packages.gz`, `Packages.sig` and the ipks
+(the allowlisted packages of `all` + the machine arch); the base URL is
+`https://github.com/alplabai/alp-sdk/releases/download/<tag>`. The release is
+refreshed in place, so the URL stays stable. Each release also carries
+`<tag>.tar.gz`, the same files for hosts that cannot use the URL
+as a base: unpack it and use `src/gz alp-devkit file:///path/to/feed` in a
+`/etc/opkg/*.conf`.
+
+**ABI.** Keep the image and the feed on the same line. While the SDK is 0.x the
+minor is part of the soname (`libalp_sdk.so.0.17`), so an upgrade cannot load an
+incompatible library into an app linked against the old one: moving to the next
+line means a new image, not `opkg upgrade`. The feed publishes only an
+allowlist of our packages (`alp-sdk`, `alp-sdk-dev`,
+`alp-devkit-feed-config`) from the `all` and machine-arch dirs; it carries no
+tune-arch (`cortexa55`/`aarch64`) packages and no poky/BSP packages. It can
+therefore only **upgrade packages already in the image** whose dependencies are
+already installed: a package that adds a new dependency, or `alp-sdk-dev` when the
+image lacks its tune-arch RDEPENDS, cannot be resolved from it. The example
+packages are not published: they are tune-arch until their recipes become
+MACHINE_ARCH (#2850 item 2). The packager fails when an allowlisted package is
+missing from the index, a stanza has no `SHA256sum:`, an ipk name falls outside
+`[A-Za-z0-9._-]`, or there are more assets than a GitHub release allows (1000).
+
+**Building and signing (release builder only).** Signing uses Yocto's
+`sign_package_feed` (`PACKAGE_FEED_SIGN`, `PACKAGE_FEED_GPG_NAME`,
+`PACKAGE_FEED_GPG_PASSPHRASE_FILE`, `PACKAGE_FEED_GPG_SIGNATURE_TYPE`), enabled
+by `require conf/distro/include/alp-devkit-feed-sign.inc` plus
+`GPG_PATH = "<gnupg home holding the key>"`. It is opt-in so a customer build is
+never forced to sign. The private key lives only in `alp-sdk-internal/signing/`
+and in the internal runner's secret store; signing never runs in public
+Actions. After `bitbake alp-image-edge package-index`,
+`scripts/package_devkit_feed.sh --ipk-dir tmp/deploy/ipk --machine <MACHINE> --tag <tag> --out <dir>`
+merges the arches into the flat feed, signs it, verifies the signature against the
+committed public key and writes the tarball (`--out` must be empty or new); the
+internal `devkit-feed` workflow uploads the result to the release.
 
 ## Notes
 

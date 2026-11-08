@@ -1,7 +1,7 @@
 # aen-qenc-readout
 
-Measure a **quadrature encoder** on the E1M-AEN801 (M55-HE) through TWO
-independent paths, neither bench-verified yet:
+Measure a **quadrature encoder** on the E1M-AEN801 / E1M-AEN803 (M55-HE) through TWO
+independent paths; path 1 is measured, path 2 is unrun:
 
 1. **Hardware**: the Ensemble **E8 UTIMER** QEC0 channel, through the
    vendored `alif,utimer-qdec` sensor driver, using the standard Zephyr
@@ -41,6 +41,9 @@ binds the `alif,utimer-qdec` child of an `alif,utimer` parent.
 A **software** decoder, added this round, reaches the same `P3_0`/`P3_1`
 pads through the SoC's GPIO controller instead -- see "Software decoder"
 below.
+
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout.
+Path 1 was measured on an E1M-AEN803 (2026W36-0002); use `alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` for it.
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-qenc-readout
@@ -210,7 +213,7 @@ in order:
    decoder's own register state is the correct resting state for a
    trigger-counting channel (`UTIMER_CNTR_CTRL` `0x00000021`), and
    `UTIMER_CNTR` itself read `0x00000000` at every point checked, including
-   under motion — see `changelog.d/2037.md` for the full register dump. This
+   under motion — see the `CHANGELOG.md` entries tagged (#2037) for the full register dump. This
    run could not tell a live decode from an unwired shaft.
 2. **`RESULT FAIL`, same pre-fix build, raw pad sampling added: pads
    toggled, angle never did.** GPIO3 `EXT_PORTA` (`0x49003050`, bits 0/1)

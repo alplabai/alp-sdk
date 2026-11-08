@@ -146,7 +146,7 @@ def test_abi_current_snapshot_matches_the_real_repos_declared_version():
     proving the function is wired to the actual single-source file,
     not a copy."""
     m = re.search(
-        r"^version:\s*(\d+)\.(\d+)\.(\d+)\s*$",
+        r"^version:\s*(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?\s*$",
         SDK_VERSION_YAML.read_text(encoding="utf-8"),
         re.MULTILINE,
     )

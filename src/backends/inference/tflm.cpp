@@ -3,20 +3,19 @@
  *
  * Portable TFLM-backed inference backend.  Registered at
  * priority 50 against silicon_ref="*" so it wins everywhere
- * unless a vendor-specific NPU backend (ethos_u_aen on AEN,
- * ethos_u_n93 on i.MX 93) registers at priority 100 on the
- * matching silicon.
+ * unless a vendor-specific NPU backend (ethos_u_aen on AEN)
+ * registers at priority 100 on the matching silicon.
  *
  * Why C++?  TFLM exposes tflite::MicroInterpreter +
  * tflite::MicroMutableOpResolver only via its C++ surface; the
  * C wrapper in TFL is for the full runtime, not the micro
  * variant.  The .cpp file keeps the binding simple and lets
- * the AEN / N93 Ethos-U backends layer on top by reusing
+ * the AEN Ethos-U backend layers on top by reusing
  * AddEthosU() against the same op resolver.
  *
  * Variant logging
  *   The build-time CPU-kernel + Ethos-U variant pair (NEON /
- *   Helium / scalar-ref and U55 / U65 / U85 / none) get logged
+ *   Helium / scalar-ref and U55 / U85 / none) get logged
  *   once on first open() so a HIL operator running on a multi-
  *   variant SoM (E4 / E6 / E8 ship U55 pair + U85) can confirm
  *   which kernel set the build linked against.
@@ -36,6 +35,18 @@
 #include <cstring>
 #include <cstdint>
 #include <new>
+
+/* The TFLM headers go BEFORE any Zephyr header, and that order is
+ * load-bearing on native_sim.  They pull in libstdc++'s <memory>, which
+ * reaches the host's <pthread.h>; Zephyr's toolchain header defines
+ * `__unused` as an attribute macro, and glibc 2.43 names a member of
+ * struct __pthread_mutex_s exactly that (`short __unused;`, x86
+ * bits/struct_mutex.h).  With Zephyr first the member expands to a bare
+ * attribute and the TU dies with "declaration does not declare anything".
+ * Host headers first means glibc is parsed before the macro exists. */
+#include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
+#include "tensorflow/lite/schema/schema_generated.h"
 
 #include <zephyr/logging/log.h>
 
@@ -59,16 +70,11 @@ extern "C" {
  * alp_inference_tflm_ops + the variant helpers.  Including it here is
  * load-bearing: without the prior extern "C" declaration the `const`
  * vtable definition below gets C++ INTERNAL linkage and every
- * ethos_u_aen / ethos_u_n93 build fails to link with undefined
+ * ethos_u_aen build fails to link with undefined
  * references to alp_inference_tflm_ops. */
 #include "tflm_shared.h"
 
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
-#include "tensorflow/lite/schema/schema_generated.h"
-
-#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) || \
-    defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
+#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN)
 /* The Register_ETHOSU() registration header lives at kernels/ethosu.h in the
  * pinned (Zephyr v4.4) tflite-micro fork -- NOT kernels/ethos_u/ethosu.h.  The
  * fork keeps the kernel implementation in kernels/ethos_u/ethosu.cc but the
@@ -86,8 +92,6 @@ namespace
 
 #if defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85)
 constexpr const char *kEthosUVariantName = "ethos-u85";
-#elif defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65)
-constexpr const char *kEthosUVariantName = "ethos-u65";
 #elif defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55)
 constexpr const char *kEthosUVariantName = "ethos-u55";
 #else
@@ -126,7 +130,8 @@ constexpr size_t kDefaultArenaBytes = 128 * 1024;
 alignas(16) uint8_t g_default_arena[kDefaultArenaBytes];
 bool g_default_arena_in_use = false;
 
-/* Map a TFL data type onto the alp_inference dtype enum. */
+/* Map a TFL data type onto the alp_inference dtype enum.  Only types
+ * tfl_dtype_known() accepts reach here (tflm_open() refuses the rest). */
 alp_inference_dtype_t tfl_dtype_to_alp(TfLiteType t)
 {
 	switch (t) {
@@ -143,11 +148,29 @@ alp_inference_dtype_t tfl_dtype_to_alp(TfLiteType t)
 	case kTfLiteInt32:
 		return ALP_INFERENCE_DTYPE_INT32;
 	default:
-		return ALP_INFERENCE_DTYPE_F32;
+		return ALP_INFERENCE_DTYPE_F32; /* unreachable: refused by all_tensor_dtypes_known() */
 	}
 }
 
-void register_default_ops(tflite::MicroMutableOpResolver<32> &r)
+/* True when @p t has an alp_inference dtype.  int64, bool, int4, complex ...
+ * have none; reporting them as F32 made the app reinterpret 1- or 8-byte
+ * elements as floats. */
+bool tfl_dtype_known(TfLiteType t)
+{
+	switch (t) {
+	case kTfLiteFloat32:
+	case kTfLiteFloat16:
+	case kTfLiteInt8:
+	case kTfLiteUInt8:
+	case kTfLiteInt16:
+	case kTfLiteInt32:
+		return true;
+	default:
+		return false;
+	}
+}
+
+void register_default_ops(tflite::MicroMutableOpResolver<32> &r, bool allow_ethos_u)
 {
 	/* Minimum op set for the v0.2 reference MobileNetV2.  Vela-
      * compiled models replace the bulk of these with Ethos-U
@@ -170,7 +193,12 @@ void register_default_ops(tflite::MicroMutableOpResolver<32> &r)
 	r.AddRelu6();
 	r.AddLogistic();
 #if defined(ALP_INFERENCE_TFLM_HAS_ETHOS_U)
-	r.AddEthosU();
+	/* Skipped on an explicit BACKEND_CPU pin, so the pin cannot offload. */
+	if (allow_ethos_u) {
+		r.AddEthosU();
+	}
+#else
+	(void)allow_ethos_u;
 #endif
 }
 
@@ -256,6 +284,23 @@ bool all_tensor_ranks_fit(tflite::MicroInterpreter *interp)
 	return true;
 }
 
+/** True when every input/output tensor's type has an alp_inference dtype
+ *  (see tfl_dtype_known()).  Called next to all_tensor_ranks_fit(). */
+bool all_tensor_dtypes_known(tflite::MicroInterpreter *interp)
+{
+	for (size_t i = 0; i < interp->inputs_size(); ++i) {
+		if (!tfl_dtype_known(interp->input(i)->type)) {
+			return false;
+		}
+	}
+	for (size_t i = 0; i < interp->outputs_size(); ++i) {
+		if (!tfl_dtype_known(interp->output(i)->type)) {
+			return false;
+		}
+	}
+	return true;
+}
+
 /* True when the model carries the Ethos-U custom op, i.e. it dispatches onto the
  * NPU.  NPU routing is OP-driven (the "ethos-u" custom op the Vela compiler
  * fuses in), NOT cfg->format-driven: a Vela model is still a .tflite flatbuffer
@@ -296,7 +341,7 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 	 * src/inference_dispatch.c: a pinned open the serving backend
 	 * cannot honour returns NOSUPPORT).  This vtable serves the CPU
 	 * TFLM executor and -- when the Ethos-U op-resolver entry is
-	 * compiled in -- the ethos_u_aen / ethos_u_n93 registrations.
+	 * compiled in -- the ethos_u_aen registration.
 	 * DRP-AI3 and DEEPX DX-M1 are A55/Linux-side engines (issues
 	 * #58/#59): no Zephyr registry backend can ever serve those
 	 * pins, so reject them here instead of failing deep inside the
@@ -310,6 +355,20 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		break;
 #endif
 	default:
+		return ALP_ERR_NOSUPPORT;
+	}
+
+	/* accel_unit_mask: the CPU executor has no selectable unit (0 only).  The
+	 * Ethos-U path serves the single NPU instance visible to this core, so bit
+	 * 0 is accepted when it is compiled in and the caller did not pin CPU.
+	 * Unverified for multi-NPU parts. */
+	uint32_t allowed_mask = 0u;
+#if defined(ALP_INFERENCE_TFLM_HAS_ETHOS_U)
+	if (cfg->backend != ALP_INFERENCE_BACKEND_CPU) {
+		allowed_mask = 1u;
+	}
+#endif
+	if ((cfg->accel_unit_mask & ~allowed_mask) != 0u) {
 		return ALP_ERR_NOSUPPORT;
 	}
 
@@ -354,6 +413,12 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		return ALP_ERR_INVAL;
 	}
 
+	/* A CPU pin cannot honour a Vela model: the dispatcher contract is NOSUPPORT. */
+	if (cfg->backend == ALP_INFERENCE_BACKEND_CPU && model_uses_ethos_u(st->model)) {
+		delete st;
+		return ALP_ERR_NOSUPPORT;
+	}
+
 	/* Arena selection.  Dispatch onto the Ethos-U NPU is OP-driven, not
 	 * format-driven: a model routes to the NPU when it carries the "ethos-u"
 	 * custom op (model_uses_ethos_u), regardless of cfg->format -- a Vela model
@@ -393,7 +458,9 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		st->own_arena  = true;
 	}
 
-	register_default_ops(st->resolver);
+	/* A CPU pin must not offload: leave the Ethos-U op out of the resolver as a second
+	 * line of defence (a Vela model was already refused with NOSUPPORT above). */
+	register_default_ops(st->resolver, cfg->backend != ALP_INFERENCE_BACKEND_CPU);
 
 	st->interp = new (std::nothrow)
 	    tflite::MicroInterpreter(st->model, st->resolver, st->arena_buf, st->arena_size);
@@ -410,13 +477,15 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		return ALP_ERR_IO;
 	}
 
-	if (!all_tensor_ranks_fit(st->interp)) {
-		/* alp_inference_tensor_t's shape[] has exactly 4 slots; refuse the
-		 * model rather than let tflm_get_input()/tflm_get_output() hand
-		 * back a shape silently truncated to the first 4 dims (issue
-		 * #1729). NOSUPPORT, not IO: the model loaded and allocated fine,
-		 * it is this portable descriptor that has no slot for its rank --
-		 * same posture the ORT and DEEPX backends already take. */
+	if (!all_tensor_ranks_fit(st->interp) || !all_tensor_dtypes_known(st->interp)) {
+		/* alp_inference_tensor_t's shape[] has exactly 4 slots; refuse a model
+		 * rather than let tflm_get_input()/tflm_get_output() hand back a shape
+		 * silently truncated to the first 4 dims (issue #1729).
+		 * Also refuse a tensor type with no alp dtype (int64, bool, ...) instead
+		 * of reporting it as F32 (issue #2978).  NOSUPPORT, not IO: the model
+		 * loaded and allocated fine, it is this portable descriptor that has no
+		 * slot for the rank or dtype -- same posture the ORT and DEEPX backends
+		 * already take. */
 		delete st->interp;
 		if (st->own_arena) alp_slot_release(&g_default_arena_in_use);
 		delete st;
@@ -492,10 +561,10 @@ static void tflm_close(alp_inference_backend_state_t *state)
 }
 
 /* Shared ops vtable.  Exported via the C ABI as
- * alp_inference_tflm_ops so the ethos_u_aen / ethos_u_n93
- * backends can register against the same body without
+ * alp_inference_tflm_ops so the ethos_u_aen
+ * backend can register against the same body without
  * duplicating it -- the only thing that changes across the
- * three registrations is silicon_ref + vendor + priority. */
+ * registrations is silicon_ref + vendor + priority. */
 const alp_inference_ops_t alp_inference_tflm_ops = {
 	/* .open        */ tflm_open,
 	/* .num_inputs  */ tflm_num_inputs,

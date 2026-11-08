@@ -16,7 +16,10 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+
 from pathlib import Path
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -76,7 +79,7 @@ class TestWestLibrariesEmit(unittest.TestCase):
             out = rv.stdout
             self.assertIn("name: aws-iot-device-sdk-embedded-C", out)
             self.assertIn("url: https://github.com/aws/aws-iot-device-sdk-embedded-C.git", out)
-            self.assertIn("revision: v3.1.5", out)
+            self.assertIn("revision: 202412.00", out)
             self.assertIn("path: modules/lib/aws-iot-device-sdk-embedded-C", out)
             self.assertIn("name: azure-sdk-for-c", out)
             self.assertIn("url: https://github.com/Azure/azure-sdk-for-c.git", out)
@@ -85,7 +88,8 @@ class TestWestLibrariesEmit(unittest.TestCase):
 
     def test_top_level_industrial_scripting_libraries_emit_exact_west_projects(self) -> None:
         """CANopenNode and MicroPython carry exact west project pins: the
-        optional Zephyr module pin for CANopenNode and the not-in-tree
+        self-contained external-module pin for CANopenNode (independent of
+        Zephyr's optional.yaml, which v4.5 drops) and the not-in-tree
         upstream source pin for MicroPython."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
@@ -104,6 +108,18 @@ class TestWestLibrariesEmit(unittest.TestCase):
             self.assertIn("url: https://github.com/zephyrproject-rtos/canopennode", out)
             self.assertIn("revision: dec12fa3f0d790cafa8414a4c2930ea71ab72ffd", out)
             self.assertIn("path: modules/lib/canopennode", out)
+            # Independent of Zephyr's optional group: a self-contained
+            # project entry (absolute url, no remote/groups) and no import.
+            frag = yaml.safe_load(out)
+            projects = {p["name"]: p for p in frag["manifest"]["projects"]}
+            can = projects["canopennode"]
+            self.assertTrue(can["url"].startswith("https://"), msg=can)
+            self.assertEqual(can["revision"], "dec12fa3f0d790cafa8414a4c2930ea71ab72ffd")
+            self.assertEqual(can["path"], "modules/lib/canopennode")
+            self.assertNotIn("remote", can)
+            self.assertNotIn("groups", can)
+            self.assertNotIn("import", can)
+            self.assertNotIn("import", frag["manifest"])
             self.assertIn("name: micropython", out)
             self.assertIn("url: https://github.com/micropython/micropython.git", out)
             self.assertIn("revision: v1.24.1", out)

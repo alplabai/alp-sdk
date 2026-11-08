@@ -198,3 +198,79 @@ def test_prerelease_suffix_leaking_into_pyproject_fails(tmp_path):
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 1
     assert "pyproject.toml" in proc.stdout + proc.stderr
+
+
+def _distro_conf(root: Path, line: str):
+    conf = root / "meta-alp-sdk" / "conf" / "distro"
+    conf.mkdir(parents=True, exist_ok=True)
+    (conf / "alp.conf").write_text(f'DISTRO = "alp"\n{line}\n', encoding="utf-8")
+
+
+def test_yocto_hardcoded_distro_version_fails(tmp_path):
+    _scaffold(tmp_path)
+    _distro_conf(tmp_path, 'DISTRO_VERSION = "0.7.0"')
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "alp.conf" in proc.stdout + proc.stderr
+
+
+def test_yocto_derived_distro_version_passes(tmp_path):
+    _scaffold(tmp_path)
+    _distro_conf(tmp_path, 'DISTRO_VERSION := "${@derive(d)}"')
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_real_meta_alp_sdk_derives_distro_version():
+    proc = _run()
+    assert "HARDCODED" not in proc.stdout + proc.stderr
+
+
+def _recipe_pv_check():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("cvds", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_recipe_pv_prerelease_uses_tilde():
+    assert _recipe_pv_check().expected_recipe_pv("0.17.0-rc2") == "0.17.0~rc2"
+    assert _recipe_pv_check().expected_recipe_pv("0.17.0") == "0.17.0"
+    assert _recipe_pv_check().expected_recipe_pv("0.17.1") == "0.17.1"
+    assert _recipe_pv_check().expected_recipe_pv("1.0.0-rc.1") == "1.0.0~rc.1"
+
+
+def test_sibling_recipe_without_shared_pv_fails(tmp_path):
+    mod = _recipe_pv_check()
+    r = tmp_path / "meta-alp-sdk/recipes-core/alp-chips/alp-chips_0.6.bb"
+    r.parent.mkdir(parents=True)
+    src = 'SRC_URI = "git://github.com/alplabai/alp-sdk.git;branch=main"\n'
+    r.write_text(src + 'PV = "0.6.0"\n', encoding="utf-8")
+    assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
+    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\n", encoding="utf-8")
+    assert mod.check_sibling_recipes_use_shared_pv(tmp_path) == []
+    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\nPV = \"0.6.0\"\n", encoding="utf-8")
+    assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
+    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\nPV ?= \"0.6.0\"\n", encoding="utf-8")
+    assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
+
+
+def test_real_sibling_recipes_use_shared_pv():
+    mod = _recipe_pv_check()
+    assert mod.check_sibling_recipes_use_shared_pv(REPO) == []
+
+
+def test_recipe_pv_drift_detected(tmp_path):
+    mod = _recipe_pv_check()
+    recipe = tmp_path / "meta-alp-sdk/recipes-core/alp-sdk/alp-sdk-version.inc"
+    recipe.parent.mkdir(parents=True)
+    recipe.write_text('PV      = "0.6.0"\n', encoding="utf-8")
+    assert mod.check_yocto_recipe_pv(tmp_path, "0.17.0-rc2")
+    recipe.write_text('PV      = "0.17.0~rc2"\n', encoding="utf-8")
+    assert mod.check_yocto_recipe_pv(tmp_path, "0.17.0-rc2") == []
+
+
+def test_real_recipe_pv_in_sync():
+    mod = _recipe_pv_check()
+    assert mod.check_yocto_recipe_pv(REPO, mod.declared_version_full(REPO)) == []

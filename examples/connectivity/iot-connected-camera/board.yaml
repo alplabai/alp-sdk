@@ -3,9 +3,9 @@
 #
 # Customer workflow: `tan init --from-example connectivity/iot-connected-camera`, change `som.sku` to
 # your V2N MPN, edit `preset:` if you fork the X-EVK, and
-# `tan build`.  CMakeLists.txt invokes scripts/alp_project.py
-# at configure time and layers the generated alp.conf over
-# prj.conf via EXTRA_CONF_FILE.
+# `tan build`, which plans alp.conf from this file; twister and a bare
+# west build read the pre-generated generated/alp.conf instead
+# (scripts/gen_example_alp_conf.py).
 
 som:
   sku: E1M-V2N101          # Renesas RZ/V2N -- DRP-AI3 on-die NPU

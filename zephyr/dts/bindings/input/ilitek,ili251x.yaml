@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Ilitek ILI251x capacitive touch controller (ILI2511 on the Riverdi
+  RVT121HVDFWCA0-B 12.1" panel), on-bus I2C, 7-bit address 0x41.
+
+  int-gpios is optional: when absent, the driver polls at
+  CONFIG_INPUT_ILI251X_PERIOD_MS instead of waiting for an interrupt (the
+  E1M-EVK runs this way -- the touch INT pad lands on the CC3501E
+  co-processor, not the Alif core).
+
+compatible: "ilitek,ili251x"
+
+include: [i2c-device.yaml, touchscreen-common.yaml]
+
+properties:
+  reset-gpios:
+    type: phandle-array
+    description: |
+      Active-low reset line. Optional: when absent the driver skips the
+      reset pulse and relies on the controller's power-on state.
+
+  int-gpios:
+    type: phandle-array
+    description: |
+      Active-low, open-drain interrupt line. Optional: see above.

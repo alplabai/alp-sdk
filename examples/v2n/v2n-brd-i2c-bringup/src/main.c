@@ -430,7 +430,9 @@ static void probe_gd32(alp_i2c_t *bus)
 		return;
 	}
 
-	gd32g553_t mcu;
+	/* static: the context holds the 256-byte SPI frame buffers (unused on
+	 * this I2C-only path, but part of the struct) -- keep it off the stack. */
+	static gd32g553_t mcu;
 
 	alp_status_t s = gd32g553_init(&mcu, NULL, bus, GD32G553_BRIDGE_DEFAULT_I2C_ADDR);
 	if (s != ALP_OK) {

@@ -5,7 +5,8 @@ Read a button and toggle an LED -- both as plain GPIO, through the
 
 This example is also the **canonical demonstration of the board.yaml
 + loader workflow**: every `CONFIG_*` knob the build needs comes from
-`board.yaml` -> `scripts/alp_project.py` -> `build/generated/alp.conf`.
+`board.yaml` -> `tan build` -> `alp.conf` (`scripts/gen_example_alp_conf.py`
+writes `generated/alp.conf` for twister and a bare `west build`).
 
 ## The interesting part: pin-as-GPIO
 
@@ -46,9 +47,24 @@ the same pad -- the silicon is shared.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```bash
+# writes examples/peripheral-io/gpio-button-led/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/gpio-button-led
 west build -b native_sim/native/64 examples/peripheral-io/gpio-button-led \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 ```
 
@@ -64,5 +80,6 @@ needs to change.
   pin-array invariant.
 - [`docs/board-config-schema.md`](../../../docs/board-config-schema.md)
   -- the authoritative field reference for `board.yaml`.
-- [`scripts/alp_project.py`](../../../scripts/alp_project.py) -- the
-  loader this example's `CMakeLists.txt` invokes.
+- [`scripts/gen_example_alp_conf.py`](../../../scripts/gen_example_alp_conf.py)
+  -- writes the per-core `generated/alp.conf` for twister and a bare
+  `west build`; `tan build` plans the same fragment itself.

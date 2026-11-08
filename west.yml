@@ -16,13 +16,11 @@
 #     release after re-verifying every wrapped peripheral on the
 #     target SoMs.  See docs/zephyr-version-policy.md for the full
 #     policy + LTS migration notes.
-#   - hal_renesas / hal_nxp: imported via Zephyr's own west.yml (the
-#     name-allowlist below lets them through the import filter).
+#   - hal_renesas: imported via Zephyr's own west.yml (the
+#     name-allowlist below lets it through the import filter).
 #     Zephyr v4.4 pins specific revisions; we follow what Zephyr ships.
 #     hal_renesas covers the RZ/V2N + RZ/V2L + RZ/V2H BSP under
-#     `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/`; hal_nxp covers
-#     i.MX 93 (MIMX9301..9352) and i.MX 95 under
-#     `mcux/mcux-sdk-ng/devices/i.MX/i.MX93/`.
+#     `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/`.
 #   - hal_alif: NOT in Zephyr's modules tree as of v3.7, but Alif
 #     publishes a fully Apache-2.0-licensed Zephyr module of their
 #     own at github.com/alifsemi/hal_alif (zephyr/module.yml shape,
@@ -44,7 +42,7 @@
 #     (`sdk-alif` / `zephyr_alif`) is the OPT-IN path (vendor-sdks
 #     group) for customers who want Alif's whole Zephyr tree or its
 #     newest fork-only bits; alp-sdk deliberately does NOT base on it
-#     -- one upstream Zephyr base serves Alif + Renesas + NXP.  See
+#     -- one upstream Zephyr base serves Alif + Renesas.  See
 #     docs/getting-started.md §8 for the decision tree.
 #
 #     Two more Alif-specific pieces (alif_dave2d-driver,
@@ -55,7 +53,7 @@
 #     AEN customers.
 #
 # When upgrading the Zephyr pin: change `revision:` below, rerun
-# `west update`, verify the modules/hal/{renesas,nxp} revs that
+# `west update`, verify the modules/hal/renesas rev that
 # ship with the new Zephyr tag still satisfy the SoMs we target
 # (see docs/os-support-matrix.md), bump pr-twister.yml's `--mr` to
 # match, and add a CHANGELOG entry.
@@ -75,8 +73,6 @@ manifest:
       url-base: https://github.com/alifsemi
     - name: renesas
       url-base: https://github.com/renesas
-    - name: nxp-mcuxpresso
-      url-base: https://github.com/nxp-mcuxpresso
     # extras-tier1 community-library remotes (§D.lib batch).
     - name: olikraus           # u8g2
       url-base: https://github.com/olikraus
@@ -103,6 +99,10 @@ manifest:
                               # earlier comment here claiming otherwise).
     - name: micro-ROS
       url-base: https://github.com/micro-ROS
+    - name: aws                # AWS IoT Device SDK for Embedded C (extras-cloud)
+      url-base: https://github.com/aws
+    - name: azure              # Azure SDK for Embedded C (extras-cloud)
+      url-base: https://github.com/Azure
     - name: arm-software    # CMSIS-Stream, CMSIS-CV, Arm-2D
       url-base: https://github.com/ARM-software
     # extras-cpp remotes (Task 0 3p-library-examples batch): three
@@ -145,9 +145,21 @@ manifest:
   #                    bumps land alongside the library knob in that
   #                    library's `integration.zephyr.hw_backends:` block
   #                    in `metadata/libraries/<name>.yaml`.
+  # `extras-cloud`   - aws-iot-device-sdk-embedded-C (202412.00 LTS, MIT)
+  #                    + azure-sdk-for-c (1.5.0, MIT): source pins only,
+  #                    matching metadata/libraries/{aws-iot,azure-iot}.yaml
+  #                    (ADR 0018 Tier B; no upstream Zephyr module.yml, so
+  #                    the in-tree glue under vendors/{aws,azure}-iot/ builds
+  #                    them under CONFIG_ALP_AWS_IOT / CONFIG_ALP_AZURE_IOT;
+  #                    nightly-cloud-sdks.yml is the build lane).  Disabled by default
+  #                    so workspaces stay light; flip via
+  #                    `west update --group-filter +extras-cloud`.  The AWS
+  #                    repo vendors coreMQTT/coreHTTP/... as git submodules;
+  #                    its project sets `submodules: true` so west
+  #                    initialises them.
   # `vendor-sdks`    - public vendor SDK repos pinned to the
   #                    verified tags (Alif sdk-alif, Renesas
-  #                    rzv-fsp, NXP mcuxsdk-manifests).  Carries
+  #                    rzv-fsp).  Carries
   #                    vendor-specific licensing -- see
   #                    docs/getting-started.md §8 and
   #                    docs/vendor-partnerships.md for the licence
@@ -189,8 +201,12 @@ manifest:
   #                    -- but the five aen-npu-inference* apps still
   #                    set CONFIG_TENSORFLOW_LITE_MICRO=y, so the
   #                    allowlist entry stays load-bearing).
-  #                    canopennode/chre/thrift/zephyr-lang-rust are
-  #                    the group's other members but aren't
+  #                    On v4.4.x canopennode/chre/thrift/zephyr-lang-rust
+  #                    are the group's other members (v4.5 drops
+  #                    canopennode/chre/thrift; CANopenNode source then
+  #                    comes from the manifest's own
+  #                    integration.zephyr.west pin through
+  #                    --emit west-libraries).  They aren't
   #                    name-allowlisted, so this only pulls in
   #                    tflite-micro -- it does not widen the fetch
   #                    set. hal_ethos_u does NOT need this: it's in
@@ -200,6 +216,7 @@ manifest:
     - -extras-lwrb-nanopb
     - -extras-tier1
     - -extras-cpp
+    - -extras-cloud
     - -vendor-sdks
     - +optional
 
@@ -209,8 +226,8 @@ manifest:
     # Ensemble SoC + boards ARE in the upstream Zephyr tree as of
     # v4.4, but the hal_alif module is not a Zephyr-managed project).
     # Default-enabled (no group) so AEN builds work out of the
-    # box -- matches how Zephyr's own west.yml ships hal_renesas /
-    # hal_nxp for the other vendor families.  Pinned to a verified
+    # box -- matches how Zephyr's own west.yml ships hal_renesas for
+    # the Renesas family.  Pinned to a verified
     # tagged release; bumps coordinate with the Zephyr-LTS cycle.
     - name: hal_alif
       remote: alifsemi
@@ -229,10 +246,8 @@ manifest:
           # we import it as a separate top-level project below
           # against the Alif-maintained release at
           # github.com/alifsemi/hal_alif (Apache-2.0).
-          # hal_renesas covers RZ/V2N (V2N + V2N-M1 SoMs);
-          # hal_nxp covers i.MX 93 (E1M-NX9101).
+          # hal_renesas covers RZ/V2N (V2N + V2N-M1 SoMs).
           - hal_renesas
-          - hal_nxp
           # Upstream littlefs C library (modules/fs/littlefs, group
           # "fs" in Zephyr's own west.yml).  Backs
           # CONFIG_FILE_SYSTEM_LITTLEFS (config FILE_SYSTEM_LITTLEFS
@@ -270,7 +285,7 @@ manifest:
           - cmsis
           # cmsis_6 provides cmsis_core.h for Cortex-M targets on Zephyr
           # v4.4 (the legacy `cmsis` module now serves Cortex-A/R only).
-          # Required by the RZ/V2N + i.MX93 M33/M-class cores.
+          # Required by the RZ/V2N M33 and the Alif M-class cores.
           - cmsis_6
           - cmsis-dsp
           # cmsis-nn (modules/lib/cmsis-nn) is CMSIS-DSP's Cortex-M
@@ -390,14 +405,15 @@ manifest:
         - extras-lwrb-nanopb
 
     # micro-ROS Zephyr module for the ADR 0018 Zephyr+ROS 2 flagship.
-    # Pinned to the Humble branch revision verified on 2026-07-05; the
+    # Pinned to the last Humble-branch commit that still clones Humble sources
+    # (8477de12; the branch tip cfbddc5e clones Jazzy, upstream PR #162); the
     # module's modules/libmicroros/Kconfig exposes the real master enable
     # symbol CONFIG_MICROROS.  Kept default-enabled so a board.yaml
     # `libraries: [micro-ros]` selection can build in the standard
     # alp-sdk workspace without an out-of-band EXTRA_ZEPHYR_MODULES path.
     - name: micro_ros_zephyr_module
       remote: micro-ROS
-      revision: cfbddc5e4334317a1036e883ce8f6af12b1da66a
+      revision: 8477de124763e4701f8029d01216d6f6b524dde9
       path: modules/lib/micro_ros_zephyr_module
 
     # ---------------------------------------------------------------
@@ -414,6 +430,25 @@ manifest:
     # ships its compile-time profile + HW-accelerator binding under
     # metadata/library-profiles/<name>/.
     # ---------------------------------------------------------------
+    - name: aws-iot-device-sdk-embedded-C
+      remote: aws
+      repo-path: aws-iot-device-sdk-embedded-C
+      revision: "202412.00"       # annotated tag object
+                                  # 6d82c0be02db96c3df6da9e1295bb9e33dc006da,
+                                  # peeled commit
+                                  # da99638ec373c791a45557b0cd91fc20968d492d.
+      path: modules/lib/aws-iot-device-sdk-embedded-C
+      submodules: true
+      groups:
+        - extras-cloud
+    - name: azure-sdk-for-c
+      remote: azure
+      repo-path: azure-sdk-for-c
+      revision: 1.5.0             # tag commit
+                                  # 6d6e634a3bb7f4d6bb5666ec8e1005ecd248e635.
+      path: modules/lib/azure-sdk-for-c
+      groups:
+        - extras-cloud
     - name: u8g2
       remote: olikraus
       repo-path: u8g2
@@ -615,13 +650,12 @@ manifest:
     #     or the Helium image-processing kernels on AEN silicon
     #     enable this group; default builds skip the download.
     #
-    #   * Bare-metal-mirror pins for Renesas + NXP
-    #     (renesas/rzv-fsp, nxp-mcuxpresso/mcuxsdk-manifests).
-    #     DUPLICATIVE with hal_renesas / hal_nxp which Zephyr
-    #     ships in its modules tree -- pinned here for customers
-    #     doing bare-metal builds outside Zephyr.  Also serves as
-    #     a customer-visible audit trail of the upstream version
-    #     we cross-verified hal_renesas / hal_nxp against.
+    #   * Bare-metal-mirror pin for Renesas (renesas/rzv-fsp).
+    #     DUPLICATIVE with hal_renesas which Zephyr ships in its
+    #     modules tree -- pinned here for customers doing
+    #     bare-metal builds outside Zephyr.  Also serves as a
+    #     customer-visible audit trail of the upstream version
+    #     we cross-verified hal_renesas against.
     #
     # Disabled by default via the `vendor-sdks` group; customer
     # builds enable by including the group in their workspace's
@@ -650,12 +684,6 @@ manifest:
       remote: renesas
       revision: v3.1.0
       path: modules/vendors/rzv-fsp
-      groups:
-        - vendor-sdks
-    - name: mcuxsdk-manifests
-      remote: nxp-mcuxpresso
-      revision: v26.03.00
-      path: modules/vendors/mcuxsdk-manifests
       groups:
         - vendor-sdks
 

@@ -45,7 +45,7 @@
 # (measured via `--emit dts-partitions`) -- there is no free MRAM left
 # to place any of them, including `settings` / `app_data`.
 #
-# Real customer shipping variants fork this for V2N or i.MX 93
+# Real customer shipping variants fork this for V2N
 # boards; the SDK's declarative surface stays identical across
 # SoMs.
 libraries:
@@ -119,28 +119,27 @@ chips:
 # (OPTIGA/OTP fuse) isn't built yet, so this board.yaml doesn't claim
 # one.
 #
-# `key_file:` is the SIGNING key (it becomes
-# `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE`, which imgtool signs with and
-# from which MCUboot extracts the public half), so it must be a
-# PRIVATE PEM -- never a `.pub.pem`.  This points at the committed
-# shared development key, matching `zephyr/sysbuild/aen/sysbuild.conf`:
-# the factory MCUboot on pre-provisioned modules trusts it (#2421), and
-# it is public, so it gives no security.
-# Despite this example's name, a production image is re-signed in the
-# manufacturing CA's HSM and never uses a build-time key from the repo
-# (see keys/README.md).
+# There is deliberately no `signing:` block.  `signing.key_file` is the
+# SIGNING key (it becomes `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE`) and is
+# resolved relative to this directory, where no key lives.  Left unset,
+# the orchestrator passes the committed shared development key
+# `keys/mcuboot_shared_dev_ecdsa_p256.pem` as an absolute, SDK-anchored
+# -D, matching `zephyr/sysbuild/aen/sysbuild.conf`: the factory MCUboot
+# on pre-provisioned modules trusts it (#2421), and it is public, so it
+# gives no security.  Despite this example's name, a production image is
+# re-signed in the manufacturing CA's HSM and never uses a build-time
+# key from the repo (see keys/README.md).
 boot:
   method: mcuboot
-  signing:
-    algorithm: ecdsa_p256
-    key_file:  keys/mcuboot_shared_dev_ecdsa_p256.pem
 
 # ----------------------------------------------------------------
 # OTA (project-wide).
 # ----------------------------------------------------------------
 # Mender HTTPS-poll fabric with anti-downgrade floor + automatic
 # rollback on health-check failure.  The tenant token stays
-# outside the repo; it's injected by the device provisioning step.
+# outside the repo: the `${MENDER_TENANT_TOKEN}` placeholder is
+# skipped by the Yocto emit; set the real token in conf/local.conf
+# (meta-alp-sdk/README.md) or the device provisioning step.
 ota:
   provider:        mender
   artifact_name:   production-deployment
@@ -178,8 +177,8 @@ ota:
 # OPTIGA Trust M under `on_module:` but the part is DNP (`assembled:
 # false` on its i2c_devices entry), and the loader refuses an
 # `optiga_trust_m` root on a SKU that does not carry the part (#2316).
-# On a SKU with OPTIGA fitted (E1M-AEN501/601/701) switch this to
-# `optiga_trust_m` for a hardware trust root.
+# Every E1M-AEN SKU shares this SoM PCB with OPTIGA DNP (#2958), so
+# `tfm_internal` is the root on all of them.
 security:
   psa:
     persistent_slots: 32

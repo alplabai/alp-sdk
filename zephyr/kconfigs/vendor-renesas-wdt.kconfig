@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Renesas RZ/V2N CM33 watchdog (WDT0) -- vendored+adapted FSP r_wdt module and a
+# thin Zephyr glue driver.  BENCH-UNVERIFIED.
+
+# Upstream Zephyr's `renesas,rz-wdt` driver cannot bind RZ/V2N (no rzv r_wdt in
+# hal_renesas; its two builds are RZ/A overflow and RZ/T2M+RZ/N2L ICU), so this is
+# a distinct compatible `renesas,rzv-wdt`.  Driver:
+# zephyr/drivers/watchdog/wdt_renesas_rzv.c; binding:
+# zephyr/dts/bindings/watchdog/renesas,rzv-wdt.yaml.
+config WDT_RENESAS_RZV
+	bool "Renesas RZ/V2N watchdog (vendor-ext, bench-unverified)"
+	default y
+	depends on WATCHDOG
+	depends on DT_HAS_RENESAS_RZV_WDT_ENABLED
+	select USE_RZ_FSP_WDT_RZV
+	help
+	  Enable the RZ/V2N CM33 WDT0 driver.  Reset-only: an expiry resets the
+	  whole SoC (CPG_ERRORRST_SEL2), so on an E1M-X V2N SoM it resets the whole
+	  module.  Backs <alp/wdt.h> through the portable Zephyr backend.
+
+config USE_RZ_FSP_WDT_RZV
+	bool
+	help
+	  Compile the vendored FSP r_wdt module
+	  (zephyr/drivers/watchdog/r_wdt/r_wdt.c), selected by WDT_RENESAS_RZV.
+	  NOT a hal_renesas symbol (USE_RZ_FSP_WDT gates the rza/rzn/rzt r_wdt in
+	  hal_renesas, which has no rzv one) -- the module lives entirely inside this
+	  SDK, so alp-sdk's own zephyr/CMakeLists.txt gates on it directly.

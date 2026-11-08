@@ -119,7 +119,7 @@
                   "direct",
                   "TBD"
                 ],
-                "description": "Same vocabulary as the SoM preset's pad_route_entry.dispatch (som-preset-v1.schema.json) -- a typo here would otherwise validate and silently reach scripts/gen_cc3501e_gpio_routes.py as a no-match, dropping the pad instead of failing the build."
+                "description": "Same vocabulary as the SoM preset's pad_route_entry.dispatch (som-preset-v2.schema.json) -- a typo here would otherwise validate and silently reach scripts/gen_cc3501e_gpio_routes.py as a no-match, dropping the pad instead of failing the build."
               },
               "dispatch_pin": {
                 "type": [

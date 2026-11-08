@@ -30,7 +30,6 @@ families:
   - aen
   - v2n
   - v2n-m1
-  - imx93   # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
@@ -70,3 +69,5 @@ physical:
     - { role: decouple, value: 100nF, net: VDDIO, refdes_prefix: C }
     - { role: pullup,   value: 4k7,   net: SCL,   refdes_prefix: R }
     - { role: pullup,   value: 4k7,   net: SDA,   refdes_prefix: R }
+tracking:
+  blocker: "no child issue filed; not scheduled, deferred until a product selects the part"

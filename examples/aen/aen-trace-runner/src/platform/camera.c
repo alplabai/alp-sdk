@@ -45,9 +45,9 @@ int tr_camera_open(void)
 	cfg.format = ALP_PIXFMT_GREY8;
 
 	if (!IS_ENABLED(CONFIG_VIDEO)) {
-		/* Display-only build (TR_CAMERA=OFF): no camera is expected, so this
-		 * is a configuration fact, not a failure -- the game runs attract/tilt. */
-		printk("camera  : not built (display-only; -DTR_CAMERA=ON to enable)\n");
+		/* Display-only build: no camera is expected, so this is a configuration
+		 * fact, not a failure -- the game runs attract/tilt. */
+		printk("camera  : not built (display-only; -DTR_INPUT_NPU=ON for the HP camera)\n");
 		return -1;
 	}
 

@@ -900,6 +900,30 @@ def test_diff_still_reports_removed_when_not_allowlisted(tmp_path):
     assert msgs == ["REMOVED macro alp/board.h::FOO_MACRO"], msgs
 
 
+def test_diff_reports_deleted_header_as_allowed_only_when_every_symbol_is_allowlisted(tmp_path):
+    """A header deleted on purpose reads as one ALLOWED line per symbol when
+    every symbol has an allowlist entry; one unexplained symbol keeps the
+    single `REMOVED header` line."""
+    src = "#define A_MACRO 1\n#define B_MACRO 2\n"
+    prev = {"alp/gone.h": _extract_src(tmp_path, src, "prev.h")}
+    entry = _adc_allowlist_entry(header="alp/gone.h", replacement=None)
+
+    both = {
+        ("alp/gone.h", "macro", "A_MACRO"): dict(entry, symbol="A_MACRO"),
+        ("alp/gone.h", "macro", "B_MACRO"): dict(entry, symbol="B_MACRO"),
+    }
+    msgs = abi.diff({"headers": prev}, {"headers": {}}, removed_allowlist=both)
+    assert msgs == [
+        "ALLOWED macro alp/gone.h::A_MACRO (intentional removal, #1622 -> no replacement)",
+        "ALLOWED macro alp/gone.h::B_MACRO (intentional removal, #1622 -> no replacement)",
+    ], msgs
+
+    one = {("alp/gone.h", "macro", "A_MACRO"): dict(entry, symbol="A_MACRO")}
+    msgs = abi.diff({"headers": prev}, {"headers": {}}, removed_allowlist=one)
+    assert msgs == ["REMOVED header alp/gone.h"], msgs
+    assert abi.diff({"headers": prev}, {"headers": {}}) == ["REMOVED header alp/gone.h"]
+
+
 def test_load_removed_allowlist_missing_file_returns_empty(tmp_path):
     """No allowlist file yet is the normal pre-#1622 state, not an error."""
     assert abi.load_removed_allowlist(tmp_path / "does-not-exist.json") == {}
@@ -1113,3 +1137,17 @@ def test_include_graph_handles_a_top_level_if_above_the_guard(tmp_path):
 
     # The guard is detected, so the include one level inside it still counts.
     assert "alp/always.h" in graph["alp/facade.h"], graph["alp/facade.h"]
+
+
+def test_hw_rev_override_block_does_not_replace_default_macro(tmp_path):
+    """A `#ifdef ALP_<BOARD>_HW_REV_<REV>` override is opt-in (#2889): the
+    snapshot keeps the default build's value, not the last #define seen."""
+    snap = _extract_src(
+        tmp_path,
+        "#define EVK_PIN_LED_RED ALP_E1M_GPIO_PWM0\n"
+        "#ifdef ALP_E1M_EVK_HW_REV_R3\n"
+        "#undef EVK_PIN_LED_RED\n"
+        "#define EVK_PIN_LED_RED ALP_E1M_GPIO_PWM3\n"
+        "#endif\n",
+    )
+    assert snap["macros"]["EVK_PIN_LED_RED"]["value"] == "ALP_E1M_GPIO_PWM0"

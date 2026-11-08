@@ -31,7 +31,7 @@ gets its own file, patch releases included). The file's content is the
 release body **exactly as it should appear** on the GitHub Release page:
 nothing is rewrapped or summarised further downstream.
 
-Shape (see `v0.16.0` or later releases at
+Shape (see [`v0.17.0.md`](v0.17.0.md) or later releases at
 <https://github.com/alplabai/alp-sdk/releases> for real examples):
 
 ```
@@ -54,9 +54,16 @@ Shape (see `v0.16.0` or later releases at
 
 ## Verifying this release
 
-The source tarball carries a SLSA L3 in-toto provenance attestation:
+The source tarball carries a SLSA L3 in-toto provenance attestation,
+attached as `alp-sdk-v<N>.tar.gz.intoto.jsonl`. Download both, then verify
+with [slsa-verifier](https://github.com/slsa-framework/slsa-verifier):
 
-    gh attestation verify <downloaded-tarball> --repo alplabai/alp-sdk
+    slsa-verifier verify-artifact alp-sdk-v<N>.tar.gz \
+        --provenance-path alp-sdk-v<N>.tar.gz.intoto.jsonl \
+        --source-uri github.com/alplabai/alp-sdk --source-tag v<N>
+
+`gh attestation verify` does not work for alp-sdk releases: the provenance
+is not stored in the GitHub attestations API.
 
 ---
 

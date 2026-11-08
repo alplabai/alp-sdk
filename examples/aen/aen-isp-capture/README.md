@@ -9,7 +9,7 @@ driving a real ISP rather than a raw sensor capture (see
 `examples/aen/aen-camera-firstlight` for that raw-capture proof instead).
 Mirrors Alif's own `sdk-alif` `samples/drivers/viewfinder` recipe. See
 `docs/camera-shields.md` for the full driver/shield/control reference and
-`changelog.d/2287.md` for the IMX296 bring-up's bench history.
+the `CHANGELOG.md` entries tagged (#2287) for the IMX296 bring-up's bench history.
 
 ## OV5647 (default) vs. IMX296 (`-DAEN_ISP_IMX296=ON`)
 
@@ -21,6 +21,8 @@ Mirrors Alif's own `sdk-alif` `samples/drivers/viewfinder` recipe. See
 | AWB/CCM calibration | hal_alif patch 0008, fitted to this module | **none — falls through to the stock ARX3A0 defaults; colour is NOT calibrated for IMX296** |
 | AE envelope | hal_alif patch 0011 | hal_alif patch 0013 |
 | Bench status | bench-verified (see `docs/camera-shields.md`) | data path bench-verified (run 297, ISP-Pico + AE, runs 298-310); colour uncalibrated, image quality not verified |
+
+Standalone Zephyr bench app (no `board.yaml`, so it is not buildable with `tan build`); the commands below only work from an alp-sdk checkout. Targets shown are E1M-AEN803; the AEN801 overlay also exists (use `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`).
 
 ```bash
 # OV5647 (default):
@@ -44,14 +46,14 @@ west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
     "-DAEN_ISP_IMX296=ON"
 # flash + run per docs/aen-bench-bringup.md.
 
-# IMX335, AE off (issue #2327 Stage B, BUILD-ONLY -- never run on silicon):
+# IMX335, AE off (issue #2327 Stage B, AE-off variant, BUILD-ONLY -- not bench-run):
 west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
     examples/aen/aen-isp-capture -- \
     "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
     "-DSHIELD=e1m_evk_rpi_csi innomaker_cam_imx335" \
     "-DAEN_ISP_IMX335=ON" "-DEXTRA_CONF_FILE=overlay-no-ae.conf"
 
-# IMX335, AE on (hal_alif patch 0014's envelope, BUILD-ONLY):
+# IMX335, AE on (hal_alif patch 0014's envelope; bench-verified, run 332 and again 2026-10-07: 60 YUV420 1280x960 frames, `ae_stable=1` from f45, Y mean 146):
 west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
     examples/aen/aen-isp-capture -- \
     "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \

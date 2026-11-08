@@ -44,6 +44,13 @@ helper-MCU-bridge precedent, with its own toolchain, its own version axis
 and its build outside the Zephyr gate.  Only that row's "ships from
 `firmware/<bridge>/prebuilt/`" clause should be read as cc3501e-only.
 
+## Amendment (2026-10-08 — the in-tree `firmware/gd32-bridge` path has moved out)
+
+The `firmware/gd32-bridge` path used above no longer exists in alp-sdk. Per
+[ADR 0031](0031-bridge-firmware-lives-in-its-own-repositories.md) the tree was
+removed in 00627b88a (#1370, #1805) and lives in `alplabai/gd32-bridge-firmware`;
+run the build there. The text above is left as written.
+
 ## Context
 
 The E1M-AEN family carries a TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor.

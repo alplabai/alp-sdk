@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * ponytail: local copy of alp-sdk-lcd's e1m_evk_rpi_csi shield's own
+ * ponytail: local copy of the e1m_evk_rpi_csi shield's own
  * per-board completion -- its boards/ only ships
  * alp_e1m_aen80{1,3}_m55_he_..._rtss_he.overlay (both just
  * `#include "e1m_aen.dtsi"`), so on rtss_hp neither
@@ -25,17 +25,16 @@
  * boards/<board>.overlay slot in SHIELD list order, same mechanism
  * e1m_evk_rpi_csi's own boards/ directory already uses for rtss_he.
  *
- * UPSTREAM HOME: this file's content belongs at
- * alp-sdk-lcd/zephyr/boards/shields/e1m_evk_rpi_csi/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay
- * as a plain `#include "e1m_aen.dtsi"` (byte-identical to the HE variant) --
- * once that lands, delete this whole hp_vision/boards/shields/tr_hp_csi_complete/
- * directory AND drop it from hp_vision/CMakeLists.txt's SHIELD list; a real
+ * UPSTREAM HOME (now landed, #2809, so this local shield is redundant): this
+ * file's content lives at
+ * zephyr/boards/shields/e1m_evk_rpi_csi/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay
+ * as a plain `#include "e1m_aen.dtsi"` (identical to the HE variant apart from
+ * the target named in its header) -- this whole
+ * hp_vision/boards/shields/tr_hp_csi_complete/ directory can be deleted AND
+ * dropped from hp_vision/CMakeLists.txt's SHIELD list; the real
  * e1m_evk_rpi_csi per-board overlay makes this ordering trick unnecessary.
- * Out of trace-runner's own repo scope to land there directly (a different
- * repo, its own gates); local detour authorized 2026-09-24 rather than
- * block this phase on it.
  *
- * CONFIRMATION THIS IS NOT AN HE-ONLY PATH: alp-sdk-lcd's
+ * CONFIRMATION THIS IS NOT AN HE-ONLY PATH:
  * zephyr/dts/alif/ensemble_e8_peripherals.dtsi declares i2c1 (0x49011000),
  * csi (0x49033000), cam (0x49030000) and dphy (0x49033000/0x49032000/
  * 0x4903F000) ONCE, in the file both the rtss_he AND rtss_hp board .dts
@@ -53,7 +52,7 @@
  * stands) -- this confirms only that nothing in the devicetree SOURCE
  * declares or implies an HE-only restriction.
  *
- * The content below is alp-sdk-lcd's e1m_aen.dtsi verbatim (E1M-EVK J5
+ * The content below is zephyr/boards/shields/e1m_evk_rpi_csi/boards/e1m_aen.dtsi verbatim (E1M-EVK J5
  * camera connector, SoC side; see that file's own header for the full
  * rationale -- csi_i2c = E1M I2C1 SCL P3_7/SDA P7_2, CSI mux SEL = P12_5
  * hogged low for input A = J5, D-PHY id 0).

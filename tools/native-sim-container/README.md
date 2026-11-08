@@ -76,10 +76,11 @@ Any argv after the image name is exec'd verbatim inside the baked workspace
 twister to a single example instead of the whole suite:
 
 ```sh
-podman run --rm -v "$PWD":/work/alp-sdk:z alp-native-sim \
+podman run --rm -v "$PWD":/work/alp-sdk:z alp-native-sim sh -c '
+    python3 /work/alp-sdk/scripts/gen_example_alp_conf.py /work/alp-sdk/examples/peripheral-io/hello-world &&
     python3 zephyr/scripts/twister \
       --testsuite-root /work/alp-sdk/examples/peripheral-io/hello-world \
-      -p native_sim/native/64 --inline-logs --no-detailed-test-id
+      -p native_sim/native/64 --inline-logs --no-detailed-test-id'
 ```
 
 ## Bumping the Zephyr pin

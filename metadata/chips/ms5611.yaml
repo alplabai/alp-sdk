@@ -29,7 +29,6 @@ families:
   - aen
   - v2n
   - v2n-m1
-  - imx93   # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
@@ -68,3 +67,5 @@ physical:
     # "VDD Capacitor From VDD to GND 100nF min" per the datasheet's
     # electrical-characteristics table.
     - { role: decouple, value: 100nF, net: VDD, refdes_prefix: C }
+tracking:
+  blocker: "ADR 0017 tier decision pending"

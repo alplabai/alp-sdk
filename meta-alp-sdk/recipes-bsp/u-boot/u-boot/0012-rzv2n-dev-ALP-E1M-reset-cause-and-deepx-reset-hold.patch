@@ -1,0 +1,173 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Mon, 5 Oct 2026 20:19:16 +0000
+Subject: [PATCH] rzv2n-dev: ALP E1M report the SoC reset cause and hold the
+ DX-M1 in reset after a watchdog reset
+
+After a SoC-only watchdog reset (hang injection, alp-sdk#1153) the
+peripherals that do not share the SoC reset keep stale state, and nothing
+in the boot log said why the board had restarted.
+
+board_late_init() now starts by reading CPG_ERROR_RST2 (CPG_base 0x1042_0000
++ 0x0B40, RZ/V2N manual R01UH1071EJ0120 Rev.1.20 s4.4.4.15): bit1 =
+WDT_CA55, bit0 = WDT_CM33. The register survives an error system reset
+(s4.4.6.5.4). One "ALP: reset cause: WDT CA55 / WDT CM33 / power-on or
+software" line is printed, the WDT flags are cleared (write 1 to the flag
+and its write enable, bit16+n), and the cause is exported as env
+alp_reset_cause and as /chosen/alp,reset-cause (wdt-ca55, wdt-cm33,
+wdt-ca55-cm33, por-or-sw) so Linux and provisioning can read it.
+
+On a v2n-m1 SoM (existing EEPROM gate) a WDT reset additionally asserts
+M1_RESET (PA6) low and holds it before the existing DEEPX rail (0004) /
+PCIe (0001) sequence releases it, so the DX-M1 restarts from reset instead
+of staying half-alive behind a re-training PCIe RC. The hold time is a
+placeholder pending the DEEPX datasheet minimum.
+
+GD32_NRST (P74, shared with PMIC GPIO4, topology unconfirmed), the PHYs and
+the PMIC are deliberately not touched.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 109 ++++++++++++++++++++++++++++
+ 1 file changed, 109 insertions(+)
+
+diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index 96fe07ef..043c66e9 100644
+--- a/board/renesas/rzv2n-dev/rzv2n-dev.c
++++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
+@@ -903,6 +903,108 @@ done:
+ 	       CLK5L_SE1_DIV4_CTRL_WANT, CLK5L_SE3_CTRL_WANT);
+ }
+ 
++/*
++ * ALP E1M V2N family: record why the SoC last reset.
++ *
++ * CPG_ERROR_RST2 (CPG_base 0x1042_0000 + 0x0B40, RZ/V2N manual R01UH1071EJ0120
++ * Rev.1.20 s4.4.4.15) latches the error reset factor: bit0 = WDT_CM33
++ * (iwdt_nmiundf), bit1 = WDT_CA55 (iwdt_nmiundf).  The register is NOT reset
++ * by an error system reset (s4.4.6.5.4), so it still holds the cause here,
++ * after the reset.  A flag clears by writing 1 to it together with its write
++ * enable (bit16+n); a write without the enable bit is ignored.  Only the two
++ * WDT bits are consumed (and cleared) here; any other latched error factor is
++ * left as-is and just shown in the raw value.
++ *
++ * The cause is published as env alp_reset_cause (U-Boot prompt / scripts;
++ * note bootcmd's "env default -a" clears it before boot, so it is not seen by
++ * the kernel) and as /chosen/alp,reset-cause by ft_system_setup() (the
++ * channel Linux and provisioning read).  Tokens: wdt-ca55, wdt-cm33,
++ * wdt-ca55-cm33, por-or-sw.
++ */
++#define ALP_CPG_ERROR_RST2		0x10420B40UL
++#define ALP_ERROR_RST2_WDT_CM33		BIT(0)
++#define ALP_ERROR_RST2_WDT_CA55		BIT(1)
++#define ALP_ERROR_RST2_WDT_MASK		(ALP_ERROR_RST2_WDT_CM33 | ALP_ERROR_RST2_WDT_CA55)
++
++static const char *alp_reset_cause = "por-or-sw";
++static bool alp_reset_is_wdt;
++
++static void alp_reset_cause_init(void)
++{
++	u32 rst = readl((void *)ALP_CPG_ERROR_RST2);
++	u32 wdt = rst & ALP_ERROR_RST2_WDT_MASK;
++	const char *text;
++
++	switch (wdt) {
++	case ALP_ERROR_RST2_WDT_CA55:
++		text = "WDT CA55";
++		alp_reset_cause = "wdt-ca55";
++		break;
++	case ALP_ERROR_RST2_WDT_CM33:
++		text = "WDT CM33";
++		alp_reset_cause = "wdt-cm33";
++		break;
++	case ALP_ERROR_RST2_WDT_MASK:
++		text = "WDT CA55 + CM33";
++		alp_reset_cause = "wdt-ca55-cm33";
++		break;
++	default:
++		text = "power-on or software";
++		alp_reset_cause = "por-or-sw";
++		break;
++	}
++
++	/* Write 1 to the flag and 1 to its write enable (bit16+n). */
++	if (wdt)
++		writel((wdt << 16) | wdt, (void *)ALP_CPG_ERROR_RST2);
++
++	alp_reset_is_wdt = !!wdt;
++	printf("ALP: reset cause: %s (CPG_ERROR_RST2=0x%08x)\n", text, rst);
++
++	if (env_set("alp_reset_cause", alp_reset_cause))
++		printf("ALP: failed to set env alp_reset_cause\n");
++}
++
++/*
++ * After a SoC-only watchdog reset the DX-M1 is not reset with the SoC: it
++ * keeps its PCIe link state and stale firmware, so the RC would train against
++ * a half-alive endpoint.  Assert M1_RESET (PA6, active-low) here so the
++ * existing 0004 rail / 0001 PCIe sequence releases a freshly reset chip.
++ *
++ * ALP_M1_RESET_HOLD_MS is a placeholder: 10 ms is a conservative guess, NOT
++ * the DEEPX datasheet minimum reset pulse width -- confirm against the DX-M1
++ * datasheet and set it to that value.
++ *
++ * Deliberately NOT done from the SoC here: driving GD32_NRST (P74 is shared
++ * with PMIC GPIO4 and that topology is unconfirmed), resetting the Ethernet
++ * PHYs, or touching the PMIC (no MR, no PMIC watchdog).  A WDT reset leaves
++ * the GD32 and the PHYs running with whatever state they had.
++ */
++#define ALP_M1_RESET_HOLD_MS		10
++
++static void alp_deepx_hold_reset(void)
++{
++	alp_gpio_output(10, 6, 0);	/* PA6 M1_RESET asserted */
++	mdelay(ALP_M1_RESET_HOLD_MS);
++	printf("ALP: DEEPX DX-M1 held in reset after WDT reset (%d ms)\n",
++	       ALP_M1_RESET_HOLD_MS);
++}
++
++static void alp_publish_reset_cause(void *blob)
++{
++	int node, ret;
++
++	node = fdt_find_or_add_subnode(blob, 0, "chosen");
++	if (node < 0) {
++		printf("ALP: /chosen not available (%d), reset cause not published\n", node);
++		return;
++	}
++
++	ret = fdt_setprop_string(blob, node, "alp,reset-cause", alp_reset_cause);
++	if (ret)
++		printf("ALP: failed to publish /chosen/alp,reset-cause (%d)\n", ret);
++}
++
+ /*
+  * ft_board_setup() is already defined by rcar-common's v2-common.c, and
+  * EVT_FT_FIXUP never reaches the kernel blob without OFNODE_MULTI_TREE, so
+@@ -913,6 +1015,8 @@ int ft_system_setup(void *blob, struct bd_info *bd)
+ {
+ 	int node, ret;
+ 
++	alp_publish_reset_cause(blob);
++
+ 	if (!alp_sku[0])
+ 		return 0;
+ 
+@@ -1229,12 +1333,17 @@ int board_late_init(void)
+ 	bool v2n_m1;
+ 	bool rail_ok = true;
+ 
++	alp_reset_cause_init();
+ 	alp_gd32_nrst_release();
+ 	alp_clk5l_fixup();
+ 
+ 	v2n_m1 = alp_som_is_v2n_m1();
+ 	alp_eth_mac_bringup();
+ 
++	/* Hold the DX-M1 in reset across a watchdog reset; 0001 releases it. */
++	if (alp_reset_is_wdt && v2n_m1)
++		alp_deepx_hold_reset();
++
+ 	if (IS_ENABLED(CONFIG_ALP_E1M_DEEPX_RAIL) || v2n_m1)
+ 		rail_ok = alp_deepx_rail_bringup();
+ 

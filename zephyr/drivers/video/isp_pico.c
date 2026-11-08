@@ -349,8 +349,14 @@ static int isp_attach_buffer_to_hw(const struct device *dev, struct video_buffer
 		if (!i) {
 			planes[i] = POINTER_TO_UINT(local_to_global(vbuf->buffer));
 		} else {
-			size_plane = fourcc_to_plane_size(channel->output_fmt.pixelformat,
-					i - 1, vbuf->size);
+			/* Split the NEGOTIATED frame, not the whole buffer: a buffer
+			 * larger than the frame would put the chroma planes at the
+			 * wrong offset (isp_enqueue() guarantees size >= frame). */
+			size_plane = fourcc_to_plane_size(
+			    channel->output_fmt.pixelformat, i - 1,
+			    alp_isp_frame_size(channel->output_fmt.pixelformat,
+					       channel->output_fmt.width,
+					       channel->output_fmt.height));
 			if (size_plane == 0 || size_plane > vbuf->size) {
 				LOG_ERR("Unsupported format!");
 				return -ENOTSUP;
@@ -754,16 +760,26 @@ int isp_set_fmt(const struct device *dev,
 			return ret;
 		}
 
-		/* v4.4 video-API shim (Alp Lab AB): video_set_format lost its `ep`
-		 * arg; force the forwarded fmt->type to OUTPUT so the controller
-		 * (a capture device) accepts it from its OUTPUT POV.
+		/*
+		 * alp-sdk#2256 "Next step": in TPG mode (config->controller ==
+		 * NULL, no camera port@0 wired -- see the same guard at
+		 * isp_stream_start()/isp_apply_mrsz(), above) there is no camera
+		 * pipeline to forward the format to; the TPG is the ISP's own
+		 * internal input source. Skip the controller call and cache the
+		 * format directly.
+		 *
+		 * v4.4 video-API shim (Alp Lab AB): video_set_format lost its
+		 * `ep` arg; force the forwarded fmt->type to OUTPUT so the
+		 * controller (a capture device) accepts it from its OUTPUT POV.
 		 */
-		fmt->type = VIDEO_BUF_TYPE_OUTPUT;
-		ret = video_set_format(config->controller, fmt);
-		fmt->type = VIDEO_BUF_TYPE_INPUT;
-		if (ret) {
-			LOG_ERR("Failed to set desired format on camera pipeline!");
-			return ret;
+		if (config->controller) {
+			fmt->type = VIDEO_BUF_TYPE_OUTPUT;
+			ret = video_set_format(config->controller, fmt);
+			fmt->type = VIDEO_BUF_TYPE_INPUT;
+			if (ret) {
+				LOG_ERR("Failed to set desired format on camera pipeline!");
+				return ret;
+			}
 		}
 
 		/* Cache the desired input format. */
@@ -2550,6 +2566,22 @@ static int isp_enqueue(const struct device *dev, struct video_buffer *buf)
 		return -ENOBUFS;
 	}
 
+	/*
+	 * The frame has to FIT.  The MI DMA writes the whole negotiated frame
+	 * from buf->buffer, so a smaller buffer is overrun into adjacent SRAM
+	 * (isp_dequeue() only warns after the fact).  Same check the CPI driver
+	 * makes in alif_cam_enqueue() (#1825).
+	 */
+	const struct channel_parameters *ch = &data->init_cfg.channel;
+	uint32_t frame_size = alp_isp_frame_size(ch->output_fmt.pixelformat, ch->output_fmt.width,
+						 ch->output_fmt.height);
+
+	if (frame_size > buf->size) {
+		LOG_ERR("Frame needs %u bytes, buffer holds %u -- refusing to DMA past the end",
+			frame_size, (uint32_t)buf->size);
+		return -EINVAL;
+	}
+
 	buf->bytesused = 0;
 
 	/*
@@ -2763,6 +2795,19 @@ static int isp_configure(const struct device *dev)
 	struct port_parameters *port = &data->init_cfg.port;
 	int ret;
 
+	/*
+	 * alp-sdk#2256: check TPG geometry before isp_vsi_init(), not after --
+	 * a bad DT overlay should fail closed before the middleware is
+	 * touched, not leave it half-initialised on the error path below.
+	 */
+	if (config->tpg_img_idx != IMG_DISABLED &&
+	    !isp_tpg_geometry_is_valid(config->tpg_width, config->tpg_height)) {
+		LOG_ERR("TPG enabled but tpg-width/tpg-height are unset in DT "
+			"(%ux%u) -- see zephyr/dts/bindings/video/vsi,isp-pico.yaml",
+			config->tpg_width, config->tpg_height);
+		return -EINVAL;
+	}
+
 	ret = isp_vsi_init(&data->init_cfg);
 	if (ret) {
 		LOG_ERR("Failed to Init ISP device!");
@@ -2812,6 +2857,17 @@ static int isp_configure(const struct device *dev)
 			return -EINVAL;
 		}
 		port->tpg_image_idx = config->tpg_img_idx;
+
+		/*
+		 * alp-sdk#2256: this branch used to leave port_fmt.width/height
+		 * at 0, so VSI_MPI_ISP_SetChnAttr got a 0x0 port rect and
+		 * refused it with -EINVAL.  Geometry is already validated above
+		 * (before isp_vsi_init()), so tpg_width/tpg_height are non-zero
+		 * here -- see isp_tpg_geometry_is_valid()'s comment for why this
+		 * driver cannot default them to a silicon-confirmed value itself.
+		 */
+		port->port_fmt.width = config->tpg_width;
+		port->port_fmt.height = config->tpg_height;
 	}
 
 	port->hdr = LINEAR;
@@ -2932,6 +2988,8 @@ int video_isp_init(const struct device *dev)
 		.tpg_bayer_pattern = DT_INST_ENUM_IDX(i, tpg_bayer_pattern),                  \
 		.tpg_img_idx = DT_INST_ENUM_IDX(i, tpg_image_idx),                            \
 		.tpg_pix_width = DT_INST_ENUM_IDX_OR(i, tpg_pix_width, 2),                    \
+		.tpg_width = DT_INST_PROP_OR(i, tpg_width, 0),                                \
+		.tpg_height = DT_INST_PROP_OR(i, tpg_height, 0),                              \
 		.irqn = DT_INST_IRQ_BY_NAME(i, isp, irq),                                     \
 		.mi_irqn = DT_INST_IRQ_BY_NAME(i, mi_isp, irq),                               \
 	};                                                                                    \

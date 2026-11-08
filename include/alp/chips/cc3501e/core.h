@@ -18,14 +18,13 @@
 #ifndef ALP_CHIPS_CC3501E_CORE_H
 #define ALP_CHIPS_CC3501E_CORE_H
 
-#include <assert.h> /* static_assert (C11) / _Static_assert fallback -- see the
-                      * cc3501e_link_log_entry_t size check below */
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
 
 #include "alp/peripheral.h"
 #include "alp/protocol/cc3501e.h"
+#include "alp/static_assert.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -168,10 +167,8 @@ typedef struct {
 	                                      *   doc comment. */
 } cc3501e_link_log_entry_t;
 
-#if defined(__cplusplus) || (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L)
-static_assert(sizeof(cc3501e_link_log_entry_t) == 20u,
-              "cc3501e_link_log_entry_t drifted from 20 bytes");
-#endif
+ALP_STATIC_ASSERT(sizeof(cc3501e_link_log_entry_t) == 20u,
+                  "cc3501e_link_log_entry_t drifted from 20 bytes");
 
 /** Value cc3501e_request_locked() (cc3501e_core.c) writes into
  *  @ref cc3501e::rx_scratch's byte 0 on every PRE-DECODE exit -- a failed
@@ -210,8 +207,8 @@ struct cc3501e {
 	 *
 	 * Prefer @ref cc3501e_get_capabilities over reasoning from the minor: it
 	 * reports what the build IMPLEMENTS, not what its number implies. */
-	uint8_t     fw_proto_major;
-	uint8_t     fw_proto_minor;
+	uint8_t fw_proto_major;
+	uint8_t fw_proto_minor;
 	/* True when the firmware reported ALP_CC3501E_CAP_FAST_REPLY at the last
 	 * cc3501e_reset(); selects the shorter reply-header gate (#2052).  Sits
 	 * in the padding before @c bus, so the struct layout does not move. */
@@ -291,7 +288,7 @@ struct cc3501e {
 	 * (#2052). */
 	uint64_t last_xfer_end_us;
 	uint8_t  rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
-	uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
+	uint8_t  tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 	/* Per-context decode scratch for the scan/event helpers (issue #740).
 	 * Each of these used to be a function-local `static` buffer in
 	 * cc3501e_wifi.c / cc3501e_ble.c / cc3501e_events.c -- process-global

@@ -20,8 +20,8 @@ Pin down which one BEFORE moving on to `gpio-button-led` or
 
 ## What this shows
 
-* The minimal `board.yaml` v2 shape: `schema_version`, `som.sku`,
-  `board.name`, one `cores.<id>` with an empty `peripherals: []`.
+* The minimal `board.yaml` shape: `som.sku`, `preset`, one
+  `cores.m55_hp` with an empty `peripherals: []`.
 * That `prj.conf` stays empty -- all CONFIG_* selection comes from
   the loader-generated `alp.conf`.
 * The Zephyr boot -> `main()` -> printf path with no peripheral
@@ -29,15 +29,32 @@ Pin down which one BEFORE moving on to `gpio-button-led` or
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+To start your own copy: `tan init --from-example peripheral-io/hello-world`.
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```bash
 # Standalone, native_sim (host binary; no hardware needed):
+# writes examples/peripheral-io/hello-world/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/hello-world
 west build -b native_sim/native/64 examples/peripheral-io/hello-world \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 
 # On real silicon, point -b at the SoM's Zephyr board target.
 # Example for E1M-AEN801:
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/hello-world
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/hello-world -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 
@@ -47,12 +64,17 @@ west flash
 |--------------|----------------------------------------------------------|
 | E1M-AEN      | Alif first USART -> FTDI USB-UART on E1M-EVK (115200 8N1) |
 | E1M-V2N      | Renesas SCIF -> FTDI USB-UART on E1M-X-EVK (115200 8N1)   |
-| E1M-V2N-M1   | Same as V2N                                              |
+| E1M-V2M      | Same as V2N                                              |
 | native_sim   | Host binary stdout                                       |
 
-Open the serial port in your terminal of choice (115200 8N1).
-The recommended cross-platform tool is `tio` -- one binary, one
-syntax on Linux, macOS, and Windows:
+Open the serial port with `tan monitor --port <port>` (115200 8N1):
+
+```bash
+tan monitor --port <your-serial-device>
+```
+
+Any terminal works too; `tio` is a good cross-platform one -- one
+binary, one syntax on Linux, macOS, and Windows:
 
 ```
 tio -b 115200 <your-serial-device>

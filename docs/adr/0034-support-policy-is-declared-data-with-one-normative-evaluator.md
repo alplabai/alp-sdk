@@ -6,6 +6,10 @@ Deciders: alpCaner
 Relates to: [0020](0020-sdk-owns-build-execution.md),
 [0026](0026-tan-owns-the-planner-outright.md)
 
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The `multicore/rpmsg-imx93/m33` example named in the historical note under the evaluator's consumers is deleted.
+
 ## Context
 
 The SDK refuses builds on grounds it presents as facts about silicon. Some of
@@ -61,7 +65,7 @@ inherits that voice.
    `_cross_class_os` this reaches the refusal: an unclassified core has *both*
    real runtimes refused, and the error reads `(unclassified)`.
 3. **The field built to carry the decision is unused.**
-   `metadata/schemas/som-preset-v1.schema.json` `$defs/topology_entry/properties/os`
+   `metadata/schemas/som-preset-v2.schema.json` `$defs/topology_entry/properties/os`
    exists, described as "Default runtime for this core.  Customer's board.yaml
    `cores.<id>.os` overrides", and `loader.py:555` already prefers it:
    `os=str(entry.get("os") or _default_os_from_core_type(soc_core_type))`. All
@@ -114,6 +118,7 @@ it under audit; they do not re-derive it from prose.**
    `alp_project.py` at all. An earlier draft of this clause said 251, which no
    measurement reproduces -- the figure is load-bearing for this clause and for
    the alternative rejected below, so it is stated with its command.
+   (Historical: #866 later retired the 96 `--emit zephyr-conf` configure-time calls; the `--emit ipc-contract-h` configure-time calls in four example `CMakeLists.txt` (`multicore/heterogeneous-offload/m33_sm`, `multicore/rpmsg-aen/m55_hp`, `multicore/rpmsg-imx93/m33`, `multicore/rpmsg-v2n/m33_sm`) and the `west alp-*` commands still reach the evaluator.)
    An evaluator those paths cannot reach is not an option.
 
 3. **Consumers call it or port it under a hash-pinned audit.** No consumer

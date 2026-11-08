@@ -38,11 +38,10 @@ int main(void)
 	printf("[m55-hp] rpmsg-aen producer coming up\n");
 
 	const alp_rpc_config_t cfg = {
-		.name      = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
-		.src_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
-		.dst_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
-		.mbox_ch   = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
-		.cacheable = true, /* AEN MRAM is cacheable (spec §6.8). */
+		.name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
+		.src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
+		.dst_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
+		.mbox_ch = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
 	};
 	alp_rpc_channel_t *ch = alp_rpc_open(&cfg);
 	if (ch == NULL) {

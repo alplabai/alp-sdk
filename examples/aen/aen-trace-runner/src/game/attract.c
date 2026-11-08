@@ -18,8 +18,7 @@ void tr_attract_init(tr_attract_t *a)
 	    0x6a09e667u; /* arbitrary nonzero seed -- see rng_next()'s LCG, which locks at 0 forever from 0. */
 }
 
-tr_attract_ev_t
-tr_attract_step(tr_attract_t *a, tr_track_t *track, bool player_present, uint8_t game_lane)
+tr_attract_ev_t tr_attract_step(tr_attract_t *a, tr_track_t *track, bool player_present)
 {
 	if (!a->active) {
 		if (player_present) {
@@ -43,7 +42,7 @@ tr_attract_step(tr_attract_t *a, tr_track_t *track, bool player_present, uint8_t
 	/* RESYNC SITE: leaving attract into a real run is a discontinuity
 	 * exactly like leaving pause (mode.c) or a run reset -- see
 	 * tr_track_resync()'s contract in vision/track.h. */
-	tr_track_resync(track, game_lane);
+	tr_track_resync(track);
 	return TR_ATTRACT_LEFT;
 }
 

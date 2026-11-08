@@ -1,0 +1,34 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * (G) wake-pad variant: names ONE LPGPIO pad, P15_2, as an ALP_POWER_WAKE_GPIO wake pad, so the
+ * wake-pad branch of the Alif SE STOP backend (alif_se_power_hw.c, compiled only when an
+ * alp,power-wake-gpios node exists, including the PRE_KERNEL_1 boot snapshot hook) is built and
+ * linked.  Select it with
+ *   -DEXTRA_DTC_OVERLAY_FILE=variants/g-wake-pad.overlay
+ *
+ * P15_2 is the OSPI INTn net of the E1M-AEN803, so the SoM claims it: the backend refuses the
+ * pad, ALP_POWER_WAKE_GPIO is never advertised and the STOP cycles run on their timer wakes as
+ * in the default image.  This variant proves the refusal path and the build, not a pad wake.
+ */
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&pinctrl {
+	pinctrl_wake_pads: pinctrl_wake_pads {
+		group0 {
+			pinmux = <PIN_P15_2__LPGPIO>;
+			input-enable;
+			bias-pull-up;
+		};
+	};
+};
+
+/ {
+	wake_pads: wake-pads {
+		compatible = "alp,power-wake-gpios";
+		wake-gpios = <&lpgpio 2 GPIO_ACTIVE_LOW>; /* P15_2, SoM-wired: refused at run time */
+		pinctrl-0 = <&pinctrl_wake_pads>;
+		pinctrl-names = "default";
+	};
+};

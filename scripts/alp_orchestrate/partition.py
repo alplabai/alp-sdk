@@ -562,7 +562,7 @@ def _resolve_flash_device(
         # non-Alif SoM, and any Alif SoC/variant that hasn't declared
         # one, short-circuits before this rule even runs -- see
         # `_candidate_regions()`). Mirrored here: refusing
-        # unconditionally would fire on every V2N/V2M/NX9101 preset's
+        # unconditionally would fire on every V2N/V2M preset's
         # `memory_map:` rows, none of which author `write_authority` at
         # all and none of which a customer can fix by authoring a field
         # this guard doesn't even apply to.
@@ -843,7 +843,10 @@ def resolve_storage_partitions(
     orchestrator").  Customers get reproducible per-rebuild addresses
     by declaring stable `name:` slugs; partitions stay at the same
     offset across rebuilds as long as their relative order doesn't
-    change.  Explicit `offset_kib:` is the escape hatch.
+    change.  Adding, renaming or removing an auto-placed partition
+    re-sorts the list and MOVES every later-sorting auto-placed one, so
+    a shipped (OTA'd) product must pin `offset_kib:` on every partition
+    whose contents must survive an update; pins never move.
     """
     if not project.storage:
         return []

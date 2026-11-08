@@ -67,16 +67,12 @@ int main(void)
 
 	/* Endpoints are mirrored relative to the producer's config: this
 	 * side's src is the producer's dst and vice versa, so both ends
-	 * converge on the same pair of RPMsg endpoint ids. cacheable must
-	 * match the producer and the board.yaml `ipc:` block -- the AEN
-	 * carve-out lives in MRAM, which is cacheable on this SoM (spec
-	 * §6.8) because the M55 cores run with caches enabled. */
+	 * converge on the same pair of RPMsg endpoint ids. */
 	const alp_rpc_config_t cfg = {
-		.name      = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
-		.src_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
-		.dst_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
-		.mbox_ch   = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
-		.cacheable = true,
+		.name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
+		.src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
+		.dst_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
+		.mbox_ch = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
 	};
 	alp_rpc_channel_t *ch = alp_rpc_open(&cfg);
 	if (ch == NULL) {
@@ -101,6 +97,15 @@ int main(void)
 	}
 
 	alp_rpc_close(ch);
+	/* Exit status must reflect whether the demo worked: the producer fires
+	 * its samples without waiting for us to subscribe, so a late start
+	 * drops frames.  Report that as a failure (as rpmsg-v2n does) instead
+	 * of letting CI or systemd see success with zero messages. */
+	const unsigned received = atomic_load(&g_received);
+	if (received < DRAIN_COUNT) {
+		printf("[rpmsg-aen] only %u of %u samples received\n", received, DRAIN_COUNT);
+		return 1;
+	}
 	printf("[rpmsg-aen] done\n");
 	return 0;
 }

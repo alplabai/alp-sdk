@@ -83,7 +83,7 @@ def test_omitted_firmware_path_is_legal_and_passes(tmp_path):
 
 
 def test_empty_helper_firmware_list_passes(tmp_path):
-    """helper_firmware: [] (e.g. E1M-NX9101, no helper MCU at all) -> exit 0."""
+    """helper_firmware: [] (a SoM with no helper MCU at all) -> exit 0."""
     _write_preset(tmp_path, "E1M-TEST", "helper_firmware: []\n")
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr

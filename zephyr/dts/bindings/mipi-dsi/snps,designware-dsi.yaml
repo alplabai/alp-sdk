@@ -143,3 +143,16 @@ properties:
     description:
       The lane bandwidth a panel supports (bps).  D-PHY PLL calculations are
       limited to half of this value.
+
+  bl-gpios:
+    type: phandle-array
+    description: |
+      Backlight-enable GPIO, declared directly on THIS (the DSI host) node
+      rather than on a panel child.  Only needed when the panel/bridge is not
+      itself a DSI peripheral node under this one (e.g. a DSI-to-LVDS bridge
+      chip controlled over a separate I2C bus, compatible "ti,sn65dsi83") --
+      such a shield has no panel@N child to carry the property the normal
+      way.  Consumed only by zephyr/soc-bridge/alif/mipi_display_e8.c's
+      backlight pad-mux helper (alif_dsi_panel_bl_pad_to_gpio()), which
+      otherwise only walks this node's children; the property by itself
+      drives nothing -- a gpio-hog (or a driver) still has to set the level.

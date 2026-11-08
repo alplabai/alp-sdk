@@ -71,7 +71,6 @@ def _boot_signing_supported_for_family(
       - Renesas RZ/V2N (+ V2N + DEEPX): `ecdsa_p256`, `rsa2048`,
         `rsa3072`.  ed25519 is excluded (not in the U-Boot
         fit-signature stack used on V2N today).
-      - NXP i.MX 9x: `ecdsa_p256`, `rsa2048`, `rsa3072`.
       - Unknown families: None (validator falls through to the schema
         enum -- don't block on missing capability data for
         in-development presets).
@@ -80,8 +79,6 @@ def _boot_signing_supported_for_family(
     if f.startswith("alif-ensemble"):
         return frozenset({"ecdsa_p256", "ed25519"})
     if f.startswith("renesas-rzv2n"):
-        return frozenset({"ecdsa_p256", "rsa2048", "rsa3072"})
-    if f.startswith("nxp-imx9"):
         return frozenset({"ecdsa_p256", "rsa2048", "rsa3072"})
     return None
 

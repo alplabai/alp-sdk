@@ -11,9 +11,8 @@
  *   (e) close releases handle; NULL inputs are idempotent
  *   (f) sw_fallback NOSUPPORT contract via direct ops-table dispatch
  *   (g) vendor-ext gating: non-Alif handle -> NOT_PRESENT_ON_THIS_SOC
- *       from the Alif SecAES surface; non-NXP handle from the NXP
- *       OTFAD surface
- *   (h) OTFAD window-bounds validation reaches the body
+ *       from the Alif SecAES surface
+ *   (h) a read-only handle: write() and erase() agree
  *   (i) overflow-safe range helper for fixed-capacity backends
  *   (j) SecAES key / key_bytes validation reaches the body, and
  *       NOSUPPORT on a build with no SE transport linked (issue #224)
@@ -41,7 +40,6 @@
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
 #include <alp/ext/alif/storage.h>
-#include <alp/ext/nxp/storage.h>
 #include <alp/storage.h>
 
 #include "../../../../src/backends/storage/storage_ops.h"
@@ -205,16 +203,13 @@ ZTEST(alp_storage_registry, test_vendor_ext_gates_non_matching_backends)
 {
 	/* NULL handle -> INVAL (parameter check fires first). */
 	static const uint8_t key16[16] = { 0 };
-	static const uint8_t iv16[16]  = { 0 };
 	zassert_equal(alp_alif_storage_secaes_key_provision(NULL, key16, 16u), ALP_ERR_INVAL);
-	zassert_equal(alp_nxp_storage_otfad_provision(NULL, 0u, key16, iv16), ALP_ERR_INVAL);
 
 	uint32_t status_out = 0u;
 	zassert_equal(alp_alif_storage_secaes_get_status(NULL, &status_out), ALP_ERR_INVAL);
-	zassert_equal(alp_nxp_storage_otfad_set_window(NULL, 0u, 0u, 1024u), ALP_ERR_INVAL);
 
-	/* Build a fake handle pinned to sw_fallback (vendor != "alif" /
-     * "nxp") -- both vendor ext surfaces must return
+	/* Build a fake handle pinned to sw_fallback (vendor != "alif") --
+     * the Alif vendor ext surface must return
      * NOT_PRESENT_ON_THIS_SOC. */
 	const alp_backend_t *be = alp_backend_select("storage", "alif:ensemble:e7");
 	zassert_not_null(be);
@@ -234,44 +229,9 @@ ZTEST(alp_storage_registry, test_vendor_ext_gates_non_matching_backends)
 	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 	zassert_equal(alp_alif_storage_secaes_get_status(&h, &status_out),
 	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
-	zassert_equal(alp_nxp_storage_otfad_provision(&h, 0u, key16, iv16),
-	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
-	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 0u, 0u, 1024u),
-	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 }
 
-/* ---------- (h) OTFAD window-bounds validation reaches the body ---------- */
-
-ZTEST(alp_storage_registry, test_otfad_window_alignment_validation)
-{
-	/* Synthesise a handle that LOOKS NXP (so the body's vendor-gate
-     * passes) and then exercises the alignment + ordering checks. */
-	static const alp_backend_t fake_nxp_backend = {
-		.silicon_ref = "nxp:imx9:imx93",
-		.vendor      = "nxp",
-		.base_caps   = 0u,
-		.priority    = 100,
-		.ops         = NULL,
-		.probe       = NULL,
-	};
-	struct alp_storage h;
-	memset(&h, 0, sizeof(h));
-	h.in_use  = true;
-	h.backend = &fake_nxp_backend;
-
-	/* Window id out of range -> INVAL. */
-	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 99u, 0u, 1024u), ALP_ERR_INVAL);
-	/* end <= start -> INVAL. */
-	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 0u, 1024u, 1024u), ALP_ERR_INVAL);
-	/* Misaligned start -> INVAL. */
-	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 0u, 512u, 1024u), ALP_ERR_INVAL);
-	/* Misaligned end -> INVAL. */
-	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 0u, 0u, 1500u), ALP_ERR_INVAL);
-	/* Aligned + ordered -> NOSUPPORT (vendor pack not landed). */
-	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 0u, 0u, 1024u), ALP_ERR_NOSUPPORT);
-}
-
-/* ---------- (i) read-only handle: write() and erase() agree ------------- */
+/* ---------- (h) read-only handle: write() and erase() agree ------------- */
 
 ZTEST(alp_storage_registry, test_read_only_handle_write_and_erase_agree)
 {
@@ -302,7 +262,7 @@ ZTEST(alp_storage_registry, test_read_only_handle_write_and_erase_agree)
 	alp_storage_close(h);
 }
 
-/* ---------- (j) overflow-safe range helper for fixed-capacity backends -- */
+/* ---------- (i) overflow-safe range helper for fixed-capacity backends -- */
 
 ZTEST(alp_storage_registry, test_range_in_capacity_accepts_valid)
 {

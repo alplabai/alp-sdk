@@ -163,6 +163,16 @@ struct video_cam_data {
 	bool rearm_pending;
 
 	/*
+	 * Memory-capture mode: set by the ISR when the frame that just ended
+	 * hit a FIFO overrun or BRESP error, consumed by alif_cam_work_helper()
+	 * under `lock`, which then re-captures into the SAME head buffer
+	 * instead of completing it.  Per instance (it used to be a function-local
+	 * static shared by every CPI), so an error on one CPI cannot drop a good
+	 * frame on another.
+	 */
+	bool frame_error;
+
+	/*
 	 * #2287 Stage B (stall-recovery gap found in bench runs 307-310): in ISP-consumer mode, isp_pico.c is the ONLY thing that re-arms the CPI
 	 * (isp_bottom_half()'s successful-attach path, alif_cam_cpi_resume()) -- but
 	 * alif_video_cam_isr()'s own corrupted-frame path (INTR_OUTFIFO_OVERRUN/

@@ -83,9 +83,11 @@ class TestZephyrEmit(unittest.TestCase):
 
     def test_schema_peripherals_emit_storage_network_usb_kconfig(self) -> None:
         """Non-wrapper Zephyr subsystem tokens must not silently no-op."""
+        # Token-to-Kconfig mapping only: the inline V2N101 m33_sm boards are
+        # not a claim that the CM33 owns these peripherals.
         cases = {
             "emmc": {
-                "path": REPO / "examples" / "v2n" / "v2n-emmc-block-stat" / "board.yaml",
+                "periph": "emmc",
                 "core": "m33_sm",
                 "kconfig": [
                     "CONFIG_DISK_ACCESS=y",
@@ -94,7 +96,7 @@ class TestZephyrEmit(unittest.TestCase):
                 ],
             },
             "ethernet": {
-                "path": REPO / "examples" / "v2n" / "v2n-ethernet-dual" / "board.yaml",
+                "periph": "ethernet",
                 "core": "m33_sm",
                 "kconfig": [
                     "CONFIG_NETWORKING=y",
@@ -102,7 +104,7 @@ class TestZephyrEmit(unittest.TestCase):
                 ],
             },
             "flash": {
-                "path": REPO / "examples" / "v2n" / "v2n-xspi-flash-readwrite" / "board.yaml",
+                "periph": "flash",
                 "core": "m33_sm",
                 "kconfig": [
                     "CONFIG_FLASH=y",
@@ -120,7 +122,23 @@ class TestZephyrEmit(unittest.TestCase):
         }
         for periph, case in cases.items():
             with self.subTest(peripheral=periph):
-                rv = _run_loader(input_path=case["path"], core=case["core"])
+                if "periph" in case:
+                    with tempfile.TemporaryDirectory() as td:
+                        path = _write_board(Path(td), f"""
+                            som:
+                              sku: E1M-V2N101
+                            preset: e1m-x-evk
+                            cores:
+                              a55_cluster:
+                                os: "off"
+                              m33_sm:
+                                app: ./src
+                                peripherals:
+                                  - {case["periph"]}
+                        """)
+                        rv = _run_loader(input_path=path, core=case["core"])
+                else:
+                    rv = _run_loader(input_path=case["path"], core=case["core"])
                 self.assertEqual(rv.returncode, 0, msg=rv.stderr)
                 for kconfig in case["kconfig"]:
                     self.assertIn(kconfig, rv.stdout)
@@ -255,6 +273,46 @@ class TestSimConsole(unittest.TestCase):
             out = self._v2n_m33(Path(td), sim_console=True, console="uart")
         self.assertIn("CONFIG_UART_CONSOLE=y", out)
         self.assertNotIn("CONFIG_RAM_CONSOLE=y", out)
+
+
+class TestRamConsoleKeepsAppSize(unittest.TestCase):
+    """`diagnostics.console: ram` must never SHRINK an app-set
+    `CONFIG_RAM_CONSOLE_BUFFER_SIZE` (tan-cli#1401): the generated alp.conf
+    is merged after prj.conf, so a bare `=2048` clobbered an app's 8192 and
+    its console wrapped.  The knob's 2048 is a floor, not an override."""
+
+    def _emit(self, prj_conf: str | None) -> str:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            if prj_conf is not None:
+                (tmp / "src").mkdir()
+                (tmp / "src" / "prj.conf").write_text(prj_conf, encoding="utf-8")
+            path = _write_board(tmp, """
+                som:
+                  sku: E1M-AEN801
+                diagnostics:
+                  console: ram
+                cores:
+                  m55_he:
+                    os: zephyr
+                    app: ./src
+            """)
+            rv = _run_loader(input_path=path, core="m55_he")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        return rv.stdout
+
+    def test_larger_app_size_wins(self) -> None:
+        out = self._emit("CONFIG_RAM_CONSOLE_BUFFER_SIZE=8192\n")
+        self.assertIn("CONFIG_RAM_CONSOLE_BUFFER_SIZE=8192", out)
+        self.assertNotIn("CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048", out)
+
+    def test_smaller_app_size_keeps_floor(self) -> None:
+        out = self._emit("CONFIG_RAM_CONSOLE_BUFFER_SIZE=1024\n")
+        self.assertIn("CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048", out)
+
+    def test_no_app_size_keeps_floor(self) -> None:
+        out = self._emit("CONFIG_FOO=y\n")
+        self.assertIn("CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048", out)
 
 
 class TestAlpBoardDefineEmit(unittest.TestCase):

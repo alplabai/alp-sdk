@@ -68,7 +68,9 @@ upstream-Zephyr build path is **bench-TBD**:
 
 ## Build
 
-Standalone Zephyr app (no `alp_project.py` board.yaml flow):
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout.
+For E1M-AEN803 use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` and the matching
+`boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay`:
 
 ```sh
 export ZEPHYR_BASE=<zephyr-base>
@@ -94,3 +96,14 @@ west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
 **BENCH-VALIDATION app -- not a customer teaching example.**
 ADR 0017 Tier-1.5 (thin in-tree Zephyr driver over the LPTIMER
 registers), INTERIM.
+
+## Alarms keep the count (#2944)
+
+One LPTIMER channel has one `LOADCOUNT` and no compare register, so arming an
+alarm reloads the channel. The driver keeps a software base so
+`counter_get_value()` stays a continuous free-running down-counter across
+`counter_set_channel_alarm()`, the alarm firing and `counter_cancel_channel_alarm()`
+(the ISR and cancel restore free-run, `LOADCOUNT = 0xFFFFFFFF`), and
+`counter_get_top_value()` stays `0xFFFFFFFF`. Residual error: the few ticks
+between reading `CURRENTVAL` and the reload taking effect are lost on each
+`set_alarm`/`cancel_alarm`. Only relative alarms are supported.

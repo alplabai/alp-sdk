@@ -92,6 +92,7 @@
 
 #include "alp_slot_claim.h"
 #include "power_ops.h"
+#include "som_power.h"
 
 /* Held-lock bookkeeping so close() / repeated request_sleep can
  * unwind without leaking pm_policy lock references.  The Power
@@ -274,6 +275,15 @@ static void _timer_expiry(struct k_timer *t)
 
 static K_TIMER_DEFINE(_wake_timer, _timer_expiry, NULL);
 
+#ifdef CONFIG_ZTEST
+/* Test seam: cancel the armed wake timer so the -EAGAIN take-timeout path can run. */
+void alp_power_pm_policy_test_stop_wake_timer(void);
+void alp_power_pm_policy_test_stop_wake_timer(void)
+{
+	k_timer_stop(&_wake_timer);
+}
+#endif
+
 static alp_status_t
 z_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out, uint32_t *wake_caps_out)
 {
@@ -352,8 +362,9 @@ static alp_status_t z_request_sleep(alp_power_backend_state_t *state,
      * requested pm_state happens inside the idle thread while this
      * take blocks. */
 	int64_t before = k_uptime_get();
-	int     err    = k_sem_take(&_wake_sem, K_MSEC(wake_after_ms + 100u));
-	int64_t after  = k_uptime_get();
+	/* 64-bit sum: wake_after_ms + 100u would wrap for wake_after_ms > UINT32_MAX - 100. */
+	int     err   = k_sem_take(&_wake_sem, K_MSEC((int64_t)wake_after_ms + 100));
+	int64_t after = k_uptime_get();
 	k_timer_stop(&_wake_timer);
 
 	/* Re-hold every lock so the system stays ACTIVE until the next
@@ -361,12 +372,16 @@ static alp_status_t z_request_sleep(alp_power_backend_state_t *state,
 	_hold_all_locks(l);
 
 	if (info != NULL) {
-		info->realised_mode = _realised_mode(mode);
+		/* The wake timer did not fire in time; no sleep depth is claimed. */
+		info->realised_mode = (err == 0) ? _realised_mode(mode) : ALP_POWER_MODE_RUN;
 		info->wake_source   = (err == 0) ? (uint32_t)ALP_POWER_WAKE_TIMER : 0u;
 		info->slept_ms      = (uint32_t)((after > before) ? (after - before) : 0);
 	}
 
-	if (err != 0 && err != -EAGAIN) {
+	if (err == -EAGAIN) {
+		return ALP_ERR_TIMEOUT;
+	}
+	if (err != 0) {
 		return ALP_ERR_IO;
 	}
 	return ALP_OK;
@@ -383,11 +398,23 @@ static void z_close(alp_power_backend_state_t *state)
 	state->be_data = NULL;
 }
 
-static const alp_power_ops_t _ops = {
+/* Not static: the Alif STOP backend (alif_se_power.c) forwards SLEEP / DEEP_SLEEP here. */
+const alp_power_ops_t alp_power_pm_policy_ops = {
 	.open                  = z_open,
 	.configure_wake_source = z_configure_wake_source,
 	.request_sleep         = z_request_sleep,
 	.close                 = z_close,
+	.mode_wake_caps        = NULL, /* #2784: every reported bit works in every mode */
+#ifdef CONFIG_ALP_SDK_SOM_POWER
+	/* #2784 U5: the SoM power-domain runtime (som_power.c). */
+	.domain_policy_set = alp_som_power_ops_policy_set,
+	.domain_info       = alp_som_power_ops_domain_info,
+	.boot_wake_info    = alp_som_power_ops_boot_wake_info,
+#else
+	.domain_policy_set = NULL, /* #2784: dispatcher answers NOSUPPORT */
+	.domain_info       = NULL,
+	.boot_wake_info    = NULL,
+#endif
 };
 
 ALP_BACKEND_REGISTER(power,
@@ -397,6 +424,6 @@ ALP_BACKEND_REGISTER(power,
                          .vendor      = "zephyr",
                          .base_caps   = 0u,
                          .priority    = 100,
-                         .ops         = &_ops,
+                         .ops         = &alp_power_pm_policy_ops,
                          .probe       = NULL,
                      });

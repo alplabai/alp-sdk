@@ -1,7 +1,7 @@
 # Vendor-partnership tracker
 
 > **Status:** open — pending vendor confirmation calls.
-> Tracks the four vendor relationships that gate Pillar 9 of
+> Tracks the three vendor relationships that gate Pillar 9 of
 > [`docs/v1.0-readiness.md`](v1.0-readiness.md).
 
 ## Why this doc exists
@@ -10,7 +10,7 @@ Pillar 9 ("ecosystem") of the v1.0 readiness plan depends
 on two external relationships landing:
 
 1. SoC-vendor SDK / HAL pack confirmations (Renesas FSP,
-   Alif Ensemble HAL, NXP MCUXpresso).
+   Alif Ensemble HAL).
 2. OpenEmbedded layerindex registration for `meta-alp-sdk`.
 
 None of these are SDK source-tree changes; they're meta-work
@@ -106,7 +106,7 @@ We pin v2.3.0 (see `west.yml`); steady release cadence
 (v2.2.0 2026-03-27, v2.1.0 Dec 2025, v2.0.0 Nov 2025).  Standard Zephyr-module
 shape (`zephyr/module.yml` + `zephyr/Kconfig` + root
 `CMakeLists.txt`) -- structurally indistinguishable from
-`zephyrproject-rtos/hal_renesas` / `hal_nxp`.  Our `west.yml`
+`zephyrproject-rtos/hal_renesas`.  Our `west.yml`
 imports it **unconditionally** as a top-level project so the
 HAL is on every workspace.
 
@@ -184,7 +184,7 @@ Agreement) for the differentiating drivers**:
 | `alif_ml-embedded-evaluation-kit`   | Ethos-U eval-kit fork                      |
 | `alif_ensemble-cmsis-dfp`           | CMSIS Device Family Pack                   |
 
-Same pattern as NXP: Alif's forks of upstream OSS keep
+Alif's forks of upstream OSS keep
 upstream's permissive licensing; their proprietary
 differentiating drivers (DAVE2D, Ethos-U eval kit, ISP
 helpers) ride a vendor-specific licence.  Source-visible
@@ -208,7 +208,7 @@ DAVE2D + Ethos-U + CSI driver repos are **already public**
   both already public (vendor-licensed, source-visible).
 - [x] **Alif-licence acknowledgement in v1.0 docs.**  Section 8
   of `docs/getting-started.md` now carries a per-vendor licence
-  table covering Alif / Renesas / NXP / DEEPX (landed §C.36).
+  table covering Alif / Renesas / DEEPX (landed §C.36).
 - 📋 **Dual-image build flow.**  The §C.30 HE-side peer image
   needs sysbuild glue that builds both HP + HE halves in one
   invocation.  This is an in-tree v0.4 gap (under
@@ -300,75 +300,6 @@ NOSUPPORT knobs, and V2M HIL acceptance items remain open.
 **Next action**: Ping DEEPX customer support about the
 `meta-deepx-m1` LICENSE.
 
-## NXP (i.MX 93 family)
-
-**Surface impact**: `examples/imx93-*` (none today, planned)
-+ Yocto layer + the `<alp/storage.h>` OTFAD backend that
-ships when NXP's FlexSPI OTFAD driver stabilises.
-
-**Status update 2026-05-14 (verified against upstream)**:
-
-**Zephyr-integration status (§C.40 cross-check)**: Zephyr's
-`hal_nxp` module mirrors MCUXpresso under
-`mcux/mcux-sdk-ng/devices/i.MX/i.MX93/` -- 10 i.MX 93 SKU
-device-headers (MIMX9301 .. MIMX9352) in tree.  Zephyr v3.7
-pins revision `862e0015...`.  E1M-NX9101's target part
-(MIMX9352) is covered.  No extra customer-side setup needed
-for Zephyr builds once `hal_nxp` is in the name-allowlist
-(landed §C.40).  Bare-metal MCU customers pull the
-manifest-aware MCUXpresso directly via our `vendor-sdks`
-group (pinned to v26.03.00 for audit clarity).
-
-NXP publishes the MCUXpresso SDK on GitHub as a manifest
-repo at
-[`github.com/nxp-mcuxpresso/mcuxsdk-manifests`](https://github.com/nxp-mcuxpresso/mcuxsdk-manifests).
-Latest stable tag **v26.03.00** (Q1 2026), prerelease tags
-for v26.06.00 (Q2 2026) already in flight.  Layout:
-
-- `west.yml` -- Zephyr-style west manifest aggregating the
-  per-component repos (HAL, RTOS, examples).
-- `boards/` -- 11 i.MX 9x board manifests: `mcimx93evk`,
-  `mcimx93autoevk`, `mcimx93qsb`, `mcimx93wevk`,
-  `frdmimx95`, `imx95verdinevk`, plus several i.MX 95 EVK
-  variants.
-
-**License is the NXP-specific `LA_OPT_Online Code Hosting
-NXP_Software_License v1.4` (May 2025)** -- not Apache /
-BSD.  Source-visible but with NXP terms (acceptance of the
-licence implied by clone / install / use).  Customers
-integrating against MCUXpresso are already familiar with
-this; it's not a Yocto / Zephyr-LTS-style permissive
-licence.
-
-The mcuxsdk-manifests covers the **MCU-side** of i.MX 9x
-(the Cortex-M33 cores running real-time workloads).  The
-**Yocto / Linux-side** (Cortex-A55 application processor)
-ships through `meta-imx` -- a separate release cycle.
-
-**Open items**:
-
-- [x] **i.MX 9x MCU-side SDK availability.**  Public at
-  `github.com/nxp-mcuxpresso/mcuxsdk-manifests` v26.03.00
-  with `mcimx93evk` + 3 other i.MX 93 board manifests
-  in-tree.
-- [x] **NXP-licence acknowledgement in v1.0 docs.**  Section 8
-  of `docs/getting-started.md` now carries the per-vendor licence
-  table covering all four vendors (landed §C.36).
-- 📋 **i.MX 93 Yocto BSP confirmation.**  meta-imx releases
-  cycle quarterly; v1.0 of the SDK aligns to whichever
-  meta-imx release ships closest to our v1.0 tag.  No open
-  technical issues; tracking the calendar.
-- 📋 **OTFAD inline-AES driver upstreaming.**  The
-  `<alp/storage.h>` inline-AES surface (`alp_storage_configure_inline_aes`)
-  reaches NXP silicon through NXP's OTFAD driver; that
-  driver is mainline in Linux but not yet in Zephyr.  No
-  public Zephyr issue or PR exists as of 2026-07-08; Alp-side
-  tracking remains in `alplabai/alp-sdk#456` until an upstream
-  tracker is filed.
-
-**Next action**: 2026-Q3 sync after the v26.06.00 MCUXpresso
-release stabilises + meta-imx mickledore ships.
-
 ## alp-zephyr-modules repo (empty scaffold, not in use)
 
 **Surface impact**: none today.  Customer board-file
@@ -426,7 +357,7 @@ Each weekly partnership-review cycle:
    commit / Issue that closed them.
 3. New blocking items get added with an owner + next action.
 
-When all four vendors clear, Pillar 9 flips to ✅ in the
+When all three vendors clear, Pillar 9 flips to ✅ in the
 readiness doc and this file gets archived under
 `docs/archive/2026-vendor-partnerships.md` as a record of
 what the engagement looked like at v1.0.

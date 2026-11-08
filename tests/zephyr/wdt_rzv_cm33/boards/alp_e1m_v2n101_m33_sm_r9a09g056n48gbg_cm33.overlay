@@ -1,0 +1,10 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/*
+ * Enable the CM33's own watchdog (WDT0).  Disabled by default in the generated
+ * board dts because an expiry resets the whole SoM; this build-only test turns it
+ * on to prove the node, the renesas,rzv-wdt driver and the vendored r_wdt compile.
+ */
+&wdt0 {
+	status = "okay";
+};

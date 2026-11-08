@@ -7,8 +7,7 @@ or ST-Link), an external 5 V bench supply, and a USB-UART
 adapter.
 
 > Peer docs: [`bring-up-v2n.md`](bring-up-v2n.md),
-> [`bring-up-v2n-m1.md`](bring-up-v2n-m1.md),
-> [`bring-up-imx93.md`](bring-up-imx93.md).  This guide covers the
+> [`bring-up-v2n-m1.md`](bring-up-v2n-m1.md).  This guide covers the
 > AEN family specifically (AEN301..801 plus AEN803, Alif Ensemble silicon).
 
 ## 0. Pre-flight
@@ -77,13 +76,12 @@ Inventory check before powering anything:
 > back, though, so "pinctrl applied without error" is measured and "the
 > pads carry the intended function" is not. **Keep MCUboot slots and
 > any storage partition on MRAM regardless of SKU anyway** -- for a
-> reason that outlived the pinctrl one: `flash_ospi_alif.c` now registers
-> a `flash_driver_api` (#915), but only its `read`/`read_jedec_id`/
-> `sfdp_read` side; `write`/`erase` are deliberate fail-closed `-ENOTSUP`
-> stubs (the fitted IS25WX256 needs an Octal-DDR mode switch this driver
-> does not yet drive, see that file's own header). There is still no
-> write/erase path for a partition to sit on. That gap is
-> alp-sdk#915 -- recheck this paragraph when **that** issue closes.
+> reason that outlived the pinctrl one: `flash_ospi_alif.c` registers
+> a `flash_driver_api` (#915) with `read`/`read_jedec_id`/`sfdp_read`
+> and, since #915, `write`/`erase` over an Octal-DDR mode switch (2-byte
+> write granularity, 4 KiB erase alignment). The MRAM rule stands
+> because the driver exposes no `page_layout`, so a partition cannot be
+> laid over it yet.
 
 ## 1. First-power smoke test
 
@@ -101,6 +99,12 @@ core rail.  Check the EN strap on the board first, then the
 PMIC's `EVENT_00` status register over BRD_I2C.
 
 ## 2. SWD probe attach
+
+> On the E1M EVK 2641-R3 the on-board RP2040 (`U55`, CMSIS-DAP) is the
+> primary debug probe and J-Link is the optional alternative
+> ([`aen-rp2040-debug-probe.md`](aen-rp2040-debug-probe.md)). The RP2040 path
+> is not bench-verified and its attach steps are TBD; the J-Link steps below
+> are the proven ones.
 
 1. Wire the SWD probe to the board's debug header
    (SWDIO/SWCLK/nRST/GND).  Power the board (probe stays
@@ -212,9 +216,12 @@ SoM preset at `metadata/e1m_modules/<SKU>.yaml` automatically).
    produces the signed artefact Option B flashes:
 
    ```bash
+   # writes examples/peripheral-io/gpio-button-led/generated/alp.conf, which west reads below (#866)
+   python3 scripts/gen_example_alp_conf.py examples/peripheral-io/gpio-button-led
    west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
        examples/peripheral-io/gpio-button-led \
-       --sysbuild -- -DSB_CONF_FILE=$PWD/zephyr/sysbuild/aen/sysbuild.conf
+       --sysbuild -- -Dgpio-button-led_EXTRA_CONF_FILE=generated/alp.conf -DSB_CONF_FILE=$PWD/zephyr/sysbuild/aen/sysbuild.conf \
+       -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="$PWD/keys/mcuboot_shared_dev_ecdsa_p256.pem"
    west flash    # REFUSES (alp-sdk#2274) -- see docs/aen-provisioning.md §0.5.
    ```
 
@@ -364,7 +371,9 @@ BRD_I2C.  (It is the AEN sibling of the V2N variant -- identical
 BRD_I2C to portable bus 2.)
 
 ```bash
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-secure-element-sign
+# writes examples/aen/aen-secure-element-sign/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/aen/aen-secure-element-sign
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-secure-element-sign -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 
@@ -552,7 +561,9 @@ top of the per-subsystem checks.
    carrier board for the carrier-accurate routing:
 
    ```bash
-   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
+   # writes examples/peripheral-io/gpio-button-led/generated/alp.conf, which west reads below (#866)
+   python3 scripts/gen_example_alp_conf.py examples/peripheral-io/gpio-button-led
+   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led -- -DEXTRA_CONF_FILE=generated/alp.conf
    west flash
    ```
 
@@ -587,7 +598,9 @@ top of the per-subsystem checks.
    `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`.
 
    ```bash
-   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer
+   # writes examples/multicore/mproc-mailbox/peer/generated/alp.conf, which west reads below (#866)
+   python3 scripts/gen_example_alp_conf.py examples/multicore/mproc-mailbox/peer
+   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer -- -DEXTRA_CONF_FILE=generated/alp.conf
    # peer image: -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/multicore/mproc-mailbox
    west flash
    ```
@@ -604,7 +617,9 @@ top of the per-subsystem checks.
    reports the detected variant:
 
    ```bash
-   west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/edgeai-vision-aen
+   # writes examples/aen/edgeai-vision-aen/generated/alp.conf, which west reads below (#866)
+   python3 scripts/gen_example_alp_conf.py examples/aen/edgeai-vision-aen
+   west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/edgeai-vision-aen -- -DEXTRA_CONF_FILE=generated/alp.conf
    west flash
    ```
 
@@ -633,10 +648,7 @@ top of the per-subsystem checks.
       AEN801), and runs the first inference on the NPU.
 
    3. Confirm the prediction matches the reference output within
-      floating-point tolerance -- the same end-to-end gate the
-      i.MX 93 bring-up uses in
-      [`bring-up-imx93.md`](bring-up-imx93.md) §6.3, here driven
-      from the M55 side rather than from Linux.
+      floating-point tolerance, driven from the M55 side.
 
    If the `.alpmodel` has no Ethos-U blob the loader falls back to
    the CPU path -- correct behaviour, but it means the Vela target
@@ -691,7 +703,7 @@ Once §6's runbook passes:
   PHY-reset-release.
 
 More patterns in [`docs/troubleshooting.md`](troubleshooting.md);
-ask on [community.alplab.ai](https://community.alplab.ai/) for
+open a [GitHub issue](https://github.com/alplabai/alp-sdk/issues) for
 anything not covered here.
 
 ## See also

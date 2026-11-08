@@ -4,7 +4,7 @@ Every chip below carries `physical:` data with `provenance: web_provisional` —
 
 Priority: the AEN801 reference-carrier set (icm42670, tas2563, ina236, bmi323, bmp581, cam_mux_pi3wvr626, tcal9538) and the `⚠️ PAD MAP MISSING` rows (datasheet ball-map was not public — need internal/NDA source or a maintainer pin table).
 
-Generated 2026-07-06 — 78 provisional parts.
+Generated 2026-07-06 — 77 provisional parts.
 
 | Chip | Package | Pins | Visibility | Note |
 |------|---------|------|------------|------|
@@ -58,7 +58,6 @@ Generated 2026-07-06 — 78 provisional parts.
 | `ov5645` | 66-pin CSP3 | 41 | public |  |
 | `ov7670` | 24-ball CSP2 | 21 | public |  |
 | `ov9281` | 64-pin CSP5 (4 NC) | 49 | public |  |
-| `pca9451a` | HVQFN56 | 31 | public |  |
 | `pi3dbs12212` | X2QFN-18 | 19 | public |  |
 | `qmc5883l` | LGA-16 | 11 | public |  |
 | `quectel_bg77` | SMD LGA module, 94 LGA pads | 0 | public | module |

@@ -13,17 +13,7 @@ built on the **E1M open-standard form factor**. It gives you one C/C++ API
 vendor's SDK on top of ARM CMSIS. Change `som.sku:` in a project's
 `board.yaml`, rebuild, ship — within a SoM family, no source changes.
 
-> [!WARNING]
-> **Partially silicon-verified.** Every chip driver, peripheral wrapper, and
-> example builds clean and passes CI on `native_sim`. Two SoM families carry
-> real-silicon evidence today: **E1M-X V2N** (GD32-bridge stack, verified
-> v0.6) and **E1M-AEN801** (peripheral matrix + NPU inference + CC3501E
-> bridge, verified v0.8). The rest (i.MX 93, V2M/DEEPX, AEN301/401/501/601/701)
-> remain pre-silicon. Per-feature status: [`docs/test-plan.md`](docs/test-plan.md);
-> full caveats: [Status](README.md#status) below.
-
 Rendered docs: [**docs.alplab.ai/sdk/introduction**](https://docs.alplab.ai/sdk/introduction) ·
-community: [**community.alplab.ai**](https://community.alplab.ai/) ·
 issues: [**github.com/alplabai/alp-sdk/issues**](https://github.com/alplabai/alp-sdk/issues)
 
 ## Quickstart
@@ -104,7 +94,7 @@ without rewriting the layer above.
   │               │    │                                                                        │
   │               │    │  Inference  ──  the .alpmodel runtime (where on-device AI runs)        │
   │               │    │  ─ alp_inference_open_alpmodel()  loads the fat .alpmodel              │
-  │               │    │  ─ selects the blob: silicon-ref + SRAM-fit + preferred_backend        │
+  │               │    │  ─ selects the blob: silicon-ref + SRAM-fit + SoM auto_order          │
   │               │    │  ─ dispatches →  Ethos-U · DRP-AI3 · DEEPX DX-M1 · CPU / TFLM          │
   │               │    │                                                                        │
   │               │    │  IoT / BLE               Security               Storage                │
@@ -117,7 +107,7 @@ without rewriting the layer above.
   │               │    │                                                                        │
   │               │    │  Heterogeneous IPC:  <alp/rpc.h> · <alp/system_ipc.h> · <alp/mproc.h>  │
   │               │    │     framed RPMsg/OpenAMP · auto endpoint IDs · mailbox/shmem/hwsem     │
-  │               │    │  Vendor escape hatches:  <alp/ext/{alif, renesas, nxp, deepx}>         │
+  │               │    │  Vendor escape hatches:  <alp/ext/{alif, renesas, deepx}>              │
   │               │    │                                                                        │
   │               │    │  ── 80+ Tier-1 chip drivers + Tier-2 community repo:                   │
   │               │    │        lsm6dso, bmi323, bmp581, icm42670, ina236, tmp112,              │
@@ -134,7 +124,7 @@ without rewriting the layer above.
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
-  │ Vendor SDK    │ ─► │  Alif Ensemble (AEN) · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1      │
+  │ Vendor SDK    │ ─► │  Alif Ensemble (AEN) · Renesas RZ/V2N · DEEPX DX-M1                    │
   │               │    │  NPU runtimes dispatched into: Ethos-U/Vela · DRP-AI · DEEPX dx_rt     │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
@@ -165,10 +155,7 @@ See [ADR 0001](docs/adr/0001-wrapper-on-top-of-zephyr.md) and
 
 Swap-and-run is measured **within** a SoM family, against the generated
 swap-test matrix: the 7 released E1M-AEN SKUs pass all three canonical
-examples (21 / 24 E1M cells — the remaining 3 are `E1M-NX9101`, a
-placeholder MPN whose only hw_rev is `status: tbd`, refused by the
-hw_rev-buildable gate and so not yet buildable at all), and the 6 E1M-X
-SKUs pass two of three (12 / 18 cells — `adc-voltmeter` fails on all
+examples (all 21 E1M cells), and the 6 E1M-X SKUs pass two of three (12 / 18 cells — `adc-voltmeter` fails on all
 six). Matrix at
 [`docs/portability-matrix.md`](docs/portability-matrix.md). Crossing
 between E1M and E1M-X is intentionally out of scope: they're separate
@@ -187,7 +174,6 @@ examples: [`docs/portability.md`](docs/portability.md).
 | **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M101` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55) · Zephyr (M33 system manager) |
 | **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M102` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
 | **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M103` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
-| **E1M-i.MX93** | E1M (35×35 mm) | TBD | NXP i.MX 93 (2× A55 + M33 + Ethos-U65) | ~0.5 TOPS | Yocto · Zephyr |
 
 All modules share the **E1M open-standard form factor** — pinout + mechanical
 spec in [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec) (pinned
@@ -210,6 +196,32 @@ editing, a GUI configurator, and `tan` wrappers, install the
 [`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)
 extension (a separate repo).
 
+## Alp Platform releases
+
+![One platform version pins five owned components, records the upstream pins and lists the validated hardware](docs/images/platform-stack.svg)
+
+An **Alp Platform** release is one version number for a tested stack: the Alp
+SDK, [`tan`](https://github.com/alplabai/tan-cli), the
+[VS Code extension](https://github.com/alplabai/alp-sdk-vscode) and the GD32
+and CC3501E bridge firmware, built and bench-validated together on real
+modules. Each component keeps its own SemVer and gates; the SDK version below
+is unchanged by it.
+
+- **Version:** `YY.M.MICRO[-rcN]`, for example `26.11.0`. The month is never
+  zero-padded (`27.2`, not `27.02`). The first line is **26.11** (November
+  2026); a new line ships every one to two months.
+- **Pin a workspace:** tan 0.8.0, shipping with the 26.11 line, adds a
+  platform command that pins a workspace to a line; `tan doctor` then reports any
+  component that differs from the manifest.
+- **Lock file:** when a workspace is pinned, `alp.lock` records
+  `platform: {version, manifestSha256}` and `verify_lock` reports a changed pin
+  or an SDK version that differs from the pinned one. Without a pin the lock is
+  unchanged.
+- **Support:** the latest line gets every fix; the previous line gets security
+  and brick-risk fixes for three months after the next line ships.
+
+Pinning a platform never flashes firmware.
+
 ## Development hosts
 
 First-class on **Linux**, **macOS**, and **Windows 11/10** (native
@@ -222,14 +234,13 @@ upstream `bitbake` constraint. Per-OS quickstart + gotchas:
 
 ## Status
 
-**Current ramp — paper-correct, mostly pre-HIL; partial silicon-verified
-additions.** Code merged ≠ verified: every claim is tracked in
+**Verification status.** Code merged ≠ verified: every claim is tracked in
 [`docs/test-plan.md`](docs/test-plan.md), and a release doesn't tag until
 its gating rows flip to ✅. Treat register addresses, timing values, and
 per-SoM accelerator wiring as paper-correct only until their test-plan row
 flips. Silicon-verified today: the V2N GD32-bridge campaign (since v0.6)
-and AEN801 (15/17 peripheral apps) + CC3501E (Wi-Fi/BLE, GPIO proxy) since
-v0.8; breadth beyond these families remains pre-HIL. Per-driver status also
+AEN801 (15/17 peripheral apps) + CC3501E (Wi-Fi/BLE, GPIO proxy) since
+v0.8, and E1M-V2M103 (DEEPX DX-M1 inference, GD32 bridge, provisioning flow); breadth beyond these families remains pre-HIL. Per-driver status also
 lives in `metadata/chips/<name>.yaml`'s `verification:` block and as
 `@par Verification status: [UNTESTED]` Doxygen tags.
 
@@ -239,8 +250,8 @@ silicon-verified via self-hosted HiL · `<alp/mproc.h>` shmem/hwsem on
 Zephyr · `<alp/power.h>` fleshed out · concurrent multi-NPU dispatch on
 V2M101 · Mender OTA E2E on a V2N101 fleet · ABI snapshot frozen for v1.0 ·
 ≤30-day customer onboarding dry-run · v1.0.0 after first customer pilot.
-Deferred indefinitely past v1.0: the Ubuntu backend, NXP NX9101 silicon
-enablement, FreeRTOS/ThreadX/NuttX backends.
+Deferred indefinitely past v1.0: the Ubuntu backend and
+FreeRTOS/ThreadX/NuttX backends.
 
 - Doc navigation hub: [`docs/README.md`](docs/README.md)
 - Per-(library × OS × SoM) status: [`docs/os-support-matrix.md`](docs/os-support-matrix.md)

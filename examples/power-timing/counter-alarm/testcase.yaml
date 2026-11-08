@@ -9,6 +9,7 @@ sample:
 
 tests:
   alp_sdk.example.counter_alarm.e1m_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
@@ -28,6 +29,7 @@ tests:
           - "\\[counter\\] done"
 
   alp_sdk.example.counter_alarm.e1m_x_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     platform_allow:

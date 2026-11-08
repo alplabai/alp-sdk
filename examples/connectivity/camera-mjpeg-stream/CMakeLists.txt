@@ -2,36 +2,18 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-# Resolve the alp-sdk root.  In-tree the SDK is the example's
-# grandparent directory; out-of-tree customers point ALP_SDK_ROOT
-# at their checkout.
-if(DEFINED ENV{ALP_SDK_ROOT})
-    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
-else()
-    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
+# SoM facts follow the board being built, not board.yaml's static som.sku
+# (#2597): gen_example_alp_conf.py writes generated/<sku>/alp.conf for a twin
+# SKU whose fragment differs (e.g. AEN803's populated OSPI memories).
+# Two if()s on purpose: CMake expands ${CMAKE_MATCH_1} before it evaluates the
+# if(), so in one combined condition EXISTS would test "generated//alp.conf"
+# (always there) and every board would be sent to a per-SKU file, written or not.
+if(BOARD MATCHES "^alp_e1m_(aen[0-9]+)")
+    if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/generated/${CMAKE_MATCH_1}/alp.conf")
+        string(REPLACE "generated/alp.conf" "generated/${CMAKE_MATCH_1}/alp.conf"
+               EXTRA_CONF_FILE "${EXTRA_CONF_FILE}")
+    endif()
 endif()
-
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
-            --input ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --emit zephyr-conf --core m55_he
-            --output ${_alp_generated}
-    RESULT_VARIABLE _alp_rv
-    OUTPUT_VARIABLE _alp_stdout
-    ERROR_VARIABLE  _alp_stderr
-)
-if(NOT _alp_rv EQUAL 0)
-    message(FATAL_ERROR
-        "alp_project.py failed (rv=${_alp_rv}); "
-        "check ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml.\n"
-        "stderr: ${_alp_stderr}")
-endif()
-
-# Layer generated CONFIG_* over prj.conf via EXTRA_CONF_FILE.
-list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(camera_mjpeg_stream LANGUAGES C)

@@ -23,4 +23,4 @@ tests:
       - heterogeneous
       - rpmsg
     build_only: true
-    extra_args: CONFIG_ALP_SDK_RPC=y
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf CONFIG_ALP_SDK_RPC=y

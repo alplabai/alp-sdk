@@ -12,6 +12,7 @@ sample:
 
 tests:
   alp_sdk.examples.aen.cc3501e_companion_tour.native_sim:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim/native/64
     tags:

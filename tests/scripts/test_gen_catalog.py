@@ -124,11 +124,6 @@ def test_named_instance_and_ext_mem_spi_presence():
     assert aen["xspi_ospi"] is True
     assert aen["sd1"] is False
     assert aen["wifi_sdio"] is False
-    # NX9101 has no pin-mux table at all yet -- named-instance keys default
-    # False (absence of routing evidence), not omitted.
-    nx = soms["E1M-NX9101"]["soc_peripherals"]
-    assert nx["sd1"] is False
-    assert nx["wifi_sdio"] is False
 
 
 def test_topology_os_is_structural():
@@ -199,18 +194,6 @@ def test_declares_read_from_raw_board_yaml():
     }
 
 
-def test_facets_omitted_not_guessed_when_topology_unresolvable():
-    """rpmsg-imx93's only hw_rev is `status: tbd` -- `load_board_yaml` raises
-    rather than resolving a topology. The catalog must omit the
-    topology-derived facets for that one entry (absence, not a guess), while
-    the YAML-derived `declares` stays present."""
-    e = _example("examples/multicore/rpmsg-imx93")
-    assert "cores" not in e
-    assert "coreCount" not in e
-    assert "osSet" not in e
-    assert "declares" in e
-
-
 def test_unexpected_topology_failure_warns_on_stderr():
     """`_resolved_core_facets` must not blanket-swallow every orchestrator
     failure silently. Only `SdkRevisionNotBuildable` -- the SoM hw_rev whose
@@ -263,7 +246,7 @@ def test_boot_single_slot_matches_orchestrator_predicate():
         "E1M-AEN301": True, "E1M-AEN401": True, "E1M-AEN501": True,
         "E1M-AEN601": True, "E1M-AEN701": True, "E1M-AEN801": True,
         "E1M-AEN803": True,
-        "E1M-NX9101": False, "E1M-V2M101": False, "E1M-V2M102": False,
+        "E1M-V2M101": False, "E1M-V2M102": False,
         "E1M-V2M103": False,
         "E1M-V2N101": False, "E1M-V2N102": False, "E1M-V2N103": False,
     }
@@ -329,22 +312,22 @@ def test_catalog_is_valid_json_on_disk():
 def test_expected_not_buildable_case_stays_silent():
     """The other half, and the one that keeps the channel worth reading.
 
-    rpmsg-imx93's SoM hw_rev is `status: tbd`, so its facets are legitimately
-    absent on every run. Warning about it each time would be a permanent
-    false alarm printed by every regen and every CI `--check`, which trains
-    the reader to ignore the exact stderr line the test above exists to make
-    visible.
+    A SoM hw_rev whose `status:` refuses a build (`tbd` / `reserved`) has
+    facets that are legitimately absent. Warning about it each time would be
+    a permanent false alarm printed by every regen and every CI `--check`,
+    which trains the reader to ignore the exact stderr line the test above
+    exists to make visible.
 
     Pinned separately from the warn case because a single test asserting only
     "the synthetic failure warns" passes identically whether or not the
     expected case is excluded -- it cannot tell the two apart.
     """
-    board_yaml = REPO / "examples" / "multicore" / "rpmsg-imx93" / "board.yaml"
-    assert board_yaml.is_file(), "rpmsg-imx93 moved -- repoint this test"
-
+    board_yaml = REPO / "examples" / "aen" / "aen-analog-validate" / "board.yaml"
     err = io.StringIO()
-    with redirect_stderr(err):
-        facets = gc._resolved_core_facets(board_yaml)
+    with patch.object(gc, "load_board_yaml",
+                       side_effect=gc.SdkRevisionNotBuildable("hw_rev is tbd")):
+        with redirect_stderr(err):
+            facets = gc._resolved_core_facets(board_yaml)
 
     assert facets is None, "a non-buildable hw_rev must yield no resolved facets"
     assert err.getvalue() == "", (

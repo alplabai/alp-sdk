@@ -1,5 +1,7 @@
 # Plan: intra-family portability proof + remaining cleanups + doc push
 
+> **Note (2026-10-10):** E1M-NX9101 / NXP i.MX 93 was removed in #2781 / #2782 (67ed22d86; the module was never produced): the NX9101 / i.MX 93 references below describe a family that no longer exists; the E1M family is Alif Ensemble only.
+
 > **Historical transcript.** Session brief dated 2026-05-18. Landed as
 > part of v0.6.0 (2026-06-06) -- intra-family portability is proven
 > (`docs/portability-matrix.md`, `docs/portability.md`, ADR 0011); see

@@ -5,6 +5,7 @@
 #define _POSIX_C_SOURCE 199309L /* clock_gettime */
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -14,10 +15,16 @@
 #include "../../src/ipc/tr_aring.h"
 #include "../../src/ipc/tr_mbox.h"
 #include "../../src/ipc/tr_memmap.h"
+#include "hud_screens.h"
+#ifdef TR_PARTNER_LOGO_HEADER
+#include TR_PARTNER_LOGO_HEADER /* tr_partner_logo[]: the pixels hud.c was built with */
+#endif
 
 static uint16_t fb[TR_HUD_W * TR_HUD_H], ref[TR_HUD_W * TR_HUD_H];
 
-#define MIDDLE (1u << 3 | 1u << 4 | 1u << 5) /* hud.c T_MIDL, T_POP, T_MIDR */
+#define MIDDLE    (1u << 3 | 1u << 4 | 1u << 5 | 1u << 6) /* hud.c T_MIDL, T_POP, T_MIDR, T_STRIP */
+#define T_PWR_BIT (1u << 7)                               /* hud.c T_PWR: the power graph */
+#define T_INV_BIT (1u << 8)                               /* hud.c T_INV */
 
 static uint64_t now_ns(void)
 {
@@ -47,7 +54,8 @@ static void same_as_scratch(const tr_hud_t *h, const tr_hud_view_t *v)
 	                 v,
 	                 tr_hz_to40(h->frame - 1u),
 	                 h->popup_start,
-	                 h->zone_start); /* the HUD's 40 Hz clock */
+	                 h->zone_start,
+	                 h->vol_start); /* the HUD's 40 Hz clock */
 	assert(memcmp(fb, ref, sizeof(fb)) == 0);
 }
 
@@ -125,6 +133,20 @@ int main(void)
 		 * see platform/rail5v_power.c's header comment). A label reading
 		 * "SOM 1234 mW" here is exactly the claim the maintainer rejected. */
 		assert(strcmp(v.perf[5], "5V 1234 mW SoM+LCD") == 0);
+		/* The HP holds I2C2 for its amp bring-up (platform/bus2_he.h): the reading is stale and
+		 * the line says so ("--"), not a frozen number; 0 mW is a real reading, not "--". */
+		r.now_us += 500000u;
+		r.flips += 20u;
+		r.rail5v_mw = -1;
+		assert(tr_perf_sample(&p, &r, &mem, &v) && strcmp(v.perf[5], "5V -- mW SoM+LCD") == 0);
+		r.now_us += 500000u;
+		r.flips += 20u;
+		r.rail5v_mw = 0;
+		assert(tr_perf_sample(&p, &r, &mem, &v) && strcmp(v.perf[5], "5V 0 mW SoM+LCD") == 0);
+		r.now_us += 500000u;
+		r.flips += 20u;
+		r.rail5v_mw = 1234;
+		assert(tr_perf_sample(&p, &r, &mem, &v));
 		/* 39 flips in 1.000 s after a hold: 39.0, not a stale 40. */
 		r.now_us += 1000000u;
 		r.flips += 39u;
@@ -228,7 +250,7 @@ int main(void)
 				assert(m[i].base + m[i].size <= m[j].base || m[j].base + m[j].size <= m[i].base);
 			}
 		}
-		assert(TR_HUD_FB >= TR_FB_A + TR_FB_SIZE && TR_HUD_FB >= TR_MHU0_WINDOW_HI &&
+		assert(TR_HUD_FB >= TR_FB_A + TR_FB_SLOT_SIZE && TR_HUD_FB >= TR_MHU0_WINDOW_HI &&
 		       TR_HUD_FB + TR_HUD_FB_SIZE <= 0x023FE000u);
 		/* The renderer's buffers are counted where render.c puts them
 		 * (both use tr_memmap.h), and the P10 ring + the stub's park page
@@ -244,6 +266,9 @@ int main(void)
 			         { "A32 DL", TR_MEM_A32_DL },
 			         { "A32 bins", TR_MEM_A32_BINS },
 			         { "A32 stacks", TR_MEM_A32_STACKS },
+			         { "camera pool", TR_MEM_CAM_POOL },
+			         { "A32 gate", TR_MEM_A32_GATE },
+			         { "FB B", TR_FB_B },
 			         { "HUD", TR_HUD_FB },
 			         { "A32 zone tex", TR_MEM_A32_ZTEX },
 			         { "A32 zone idx", TR_MEM_A32_ZIDX } };
@@ -354,7 +379,8 @@ int main(void)
 			uint32_t fr = tr_hz_to40(h.frame - 1u), age = fr - h.zone_start;
 			int      rows;
 
-			tr_hud_paint_all(none, &v, fr, h.popup_start, h.zone_start - TR_HUD_ZONE_FRAMES);
+			tr_hud_paint_all(
+			    none, &v, fr, h.popup_start, h.zone_start - TR_HUD_ZONE_FRAMES, h.vol_start);
 			rows = memcmp(&fb[300 * TR_HUD_W],
 			              &none[300 * TR_HUD_W],
 			              (TR_HUD_H - 300) * TR_HUD_W * 2) != 0;
@@ -362,7 +388,7 @@ int main(void)
 			if (age < TR_HUD_ZONE_FRAMES) {
 				assert(rows);
 				seen++;
-				assert(f == 0u || (dirty & ~(1u << 6)) == 0u); /* T_INV only */
+				assert(f == 0u || (dirty & ~T_INV_BIT) == 0u); /* T_INV only */
 				repaints += (dirty >> 6) & 1u;
 			} else {
 				assert(!rows);
@@ -414,8 +440,8 @@ int main(void)
 		tr_hs_init(&hs);
 		tr_hud_view_set(&v, &ts, TR_BANNER_ATTRACT, true, TR_HUD_INVITE_TILT);
 		tr_hud_view_booth(&v, &hs, NULL);
-		tr_hud_paint_all(a, &v, 0u, 0u - TR_HUD_POPUP_FRAMES, off);
-		tr_hud_paint_all(b, &v, P, 0u - TR_HUD_POPUP_FRAMES, P + off);
+		tr_hud_paint_all(a, &v, 0u, 0u - TR_HUD_POPUP_FRAMES, off, 0u - TR_HUD_VOL_FRAMES);
+		tr_hud_paint_all(b, &v, P, 0u - TR_HUD_POPUP_FRAMES, P + off, 0u - TR_HUD_VOL_FRAMES);
 		assert(memcmp(a, b, sizeof(a)) == 0); /* empty table: the logo stays */
 		(void)tr_hs_insert(&hs, 15230u, "ACE");
 		(void)tr_hs_insert(&hs, 12480u, "E8 ");
@@ -427,8 +453,8 @@ int main(void)
 		for (uint32_t k = 0; k < 4u; k++) {
 			uint32_t fl = 2u * k * P, ft = fl + P; /* a logo page, then a table page */
 
-			tr_hud_paint_all(a, &v, fl, 0u - TR_HUD_POPUP_FRAMES, fl + off);
-			tr_hud_paint_all(b, &v, ft, 0u - TR_HUD_POPUP_FRAMES, ft + off);
+			tr_hud_paint_all(a, &v, fl, 0u - TR_HUD_POPUP_FRAMES, fl + off, 0u - TR_HUD_VOL_FRAMES);
+			tr_hud_paint_all(b, &v, ft, 0u - TR_HUD_POPUP_FRAMES, ft + off, 0u - TR_HUD_VOL_FRAMES);
 			assert(memcmp(a, b, 140 * row) == 0); /* above the card: untouched */
 			assert(memcmp(a + 140 * TR_HUD_W, b + 140 * TR_HUD_W, 160 * row) !=
 			       0); /* the card's middle turns */
@@ -436,7 +462,7 @@ int main(void)
 			       0); /* the invitation row: not */
 			assert(alpha_px(b, 60, 150, 660, 296) > 8000u);
 			/* the zone's name over the table page: only its row changes */
-			tr_hud_paint_all(c, &v, ft, 0u - TR_HUD_POPUP_FRAMES, ft);
+			tr_hud_paint_all(c, &v, ft, 0u - TR_HUD_POPUP_FRAMES, ft, 0u - TR_HUD_VOL_FRAMES);
 			assert(memcmp(b, c, 300 * row) == 0);
 			assert(memcmp(b + 300 * TR_HUD_W, c + 300 * TR_HUD_W, 52 * row) != 0);
 		}
@@ -458,18 +484,20 @@ int main(void)
 		 * cap spreads that over two frames (case 8) */
 		assert(turns >= 2u && worst <= 720u * 160u + 720u * 52u);
 		printf("hud: high-score page turn repaints %u px\n", (unsigned)worst);
-		/* with the HE's cap (hud_l2.c HUD_PX_BUDGET 110,000) a turn is never
-		 * split: every frame's card middle is wholly one page or the other */
-		{
+		/* with the HE's cap (hud_l2.c HUD_PX_BUDGET 110,000) a turn is never split: every
+		 * frame's card middle -- the three middle tiles AND the tagline strip's end (T_STRIP) --
+		 * is wholly one page or the other. 100,000 is the margin case: the group (97.6 k px)
+		 * fits it and the strip behind it (3 k) would not, were it not part of the group. */
+		for (int bi = 0; bi < 2; bi++) {
 			static uint16_t lp[TR_HUD_W * TR_HUD_H], tp[TR_HUD_W * TR_HUD_H];
 			tr_hud_t        hb;
 			uint32_t        seen_t = 0;
 			const size_t    mrow   = 160u * TR_HUD_W * 2u;
 
-			tr_hud_paint_all(lp, &v, 0u, 0u - TR_HUD_POPUP_FRAMES, off);
-			tr_hud_paint_all(tp, &v, P, 0u - TR_HUD_POPUP_FRAMES, P + off);
+			tr_hud_paint_all(lp, &v, 0u, 0u - TR_HUD_POPUP_FRAMES, off, 0u - TR_HUD_VOL_FRAMES);
+			tr_hud_paint_all(tp, &v, P, 0u - TR_HUD_POPUP_FRAMES, P + off, 0u - TR_HUD_VOL_FRAMES);
 			tr_hud_init(&hb);
-			hb.budget = 110000u;
+			hb.budget = bi ? 100000u : 110000u;
 			for (uint32_t f = 0; f < TR_HZ_FRAMES(3u * P); f++) {
 				px = tr_hud_update(&hb, fb, &v, &dirty);
 				if (f < 3u) {
@@ -544,8 +572,13 @@ int main(void)
 			ts.popup_mult = hsp ? 0u : 5u;
 			ts.combo      = hsp ? 0u : 5u;
 			tr_hud_view_set(&v, &ts, TR_BANNER_NONE, false, TR_HUD_INVITE_TILT);
-			tr_hud_paint_all(a, &v, 0u, 0u, 0u - TR_HUD_ZONE_FRAMES);
-			tr_hud_paint_all(b, &v, 0u, 0u - TR_HUD_POPUP_FRAMES, 0u - TR_HUD_ZONE_FRAMES);
+			tr_hud_paint_all(a, &v, 0u, 0u, 0u - TR_HUD_ZONE_FRAMES, 0u - TR_HUD_VOL_FRAMES);
+			tr_hud_paint_all(b,
+			                 &v,
+			                 0u,
+			                 0u - TR_HUD_POPUP_FRAMES,
+			                 0u - TR_HUD_ZONE_FRAMES,
+			                 0u - TR_HUD_VOL_FRAMES);
 			for (int y = 0; y < TR_HUD_H; y++) {
 				for (int x = 0; x < TR_HUD_W; x++) {
 					bool in_pop = y >= 140 && y < 300 && x >= 220 && x < 500;
@@ -555,6 +588,211 @@ int main(void)
 			}
 			assert(alpha_px(a, 220, 140, 500, 300) > alpha_px(b, 220, 140, 500, 300) + 1500u);
 		}
+	}
+
+	/* 6b. The power graph (the +5V net, T_PWR): readouts, scale, gaps, the tile, the layout. */
+	{
+		int16_t w[TR_PWR_N];
+		int32_t now, avg, peak;
+
+		/* the maths, by hand: a gap is not a zero */
+		for (int i = 0; i < TR_PWR_N; i++) {
+			w[i] = TR_PWR_GAP;
+		}
+		assert(tr_hud_pwr_stats(w, &now, &avg, &peak) == 0 && now == -1 && avg == -1 && peak == -1);
+		int32_t lo, span;
+
+		tr_hud_pwr_scale(w, &lo, &span);
+		assert(lo == 0 && span == TR_PWR_MIN_SPAN_MW); /* no data: the minimum span */
+		w[TR_PWR_N - 1] = 2000;
+		w[TR_PWR_N - 2] = 2210;
+		w[TR_PWR_N - 4] = 0; /* a real zero counts: avg of 2000, 2210, 0 */
+		assert(tr_hud_pwr_stats(w, &now, &avg, &peak) == 3 && now == 2000 && peak == 2210 &&
+		       avg == 1403);
+		w[TR_PWR_N - 1] = TR_PWR_GAP; /* the newest is a gap: "now --", the rest stands */
+		assert(tr_hud_pwr_stats(w, &now, &avg, &peak) == 2 && now == -1 && avg == 1105 &&
+		       peak == 2210);
+		/* the scale is tight on the data: 0..2210 -> span 2762.5 up to 2800, centred 1105 - 1400 < 0 -> 0 */
+		tr_hud_pwr_scale(w, &lo, &span);
+		assert(lo == 0 && span == 2800 && span >= 2210 - 0);
+		/* the real case: 4.85 W with ~50 mW swings fills the box, it does not sit in a 5000 mW one */
+		for (int i = 0; i < TR_PWR_N; i++) {
+			w[i] = (int16_t)(4825 + (i % 2) * 50);
+		}
+		tr_hud_pwr_scale(w, &lo, &span);
+		assert(span == 100 &&
+		       lo == 4800); /* range 50 x 1.25 = 62.5 -> the 100 minimum; centre 4850 */
+		for (int i = 0; i < TR_PWR_N; i++) {
+			assert(w[i] >= lo && w[i] <= lo + span); /* every sample inside */
+			w[i] = TR_PWR_GAP;
+		}
+		w[3] = 4000;
+		w[4] = 4400; /* range 400 x 1.25 = 500; centre 4200 - 250 = 3950 */
+		tr_hud_pwr_scale(w, &lo, &span);
+		assert(span == 500 && lo == 3950 && lo % TR_PWR_STEP_MW == 0 && span % TR_PWR_STEP_MW == 0);
+		assert(4000 >= lo && 4400 <= lo + span);
+		w[4] = 4390; /* flooring the bottom must never push the top out: the peak stays inside */
+		tr_hud_pwr_scale(w, &lo, &span);
+		assert(4390 <= lo + span && 4000 >= lo && lo % TR_PWR_STEP_MW == 0);
+		for (int i = 0; i < TR_PWR_N; i++) {
+			w[i] = TR_PWR_GAP;
+		}
+		w[TR_PWR_N - 1] = 40; /* near zero: the bottom is clamped at 0 */
+		tr_hud_pwr_scale(w, &lo, &span);
+		assert(lo == 0 && span == 100 && 40 <= span);
+
+		/* the readouts fit the panel's 100 px at the worst int16 width, and so do the titles */
+		assert(tr_hud_text_w(TR_HUD_FONT_TINY, "+5V net") <=
+		       92); /* PWR_W 100 less a 4 px inset each side */
+		assert(tr_hud_text_w(TR_HUD_FONT_TINY, "(SoM+LCD)") <=
+		       92); /* PWR_W 100 less a 4 px inset each side */
+		assert(tr_hud_text_w(TR_HUD_FONT_TINY, "now 32767") <=
+		       92); /* PWR_W 100 less a 4 px inset each side */
+		assert(tr_hud_text_w(TR_HUD_FONT_TINY, "avg 32767") <=
+		       92); /* PWR_W 100 less a 4 px inset each side */
+		assert(tr_hud_text_w(TR_HUD_FONT_TINY, "pk 32767") <=
+		       92); /* PWR_W 100 less a 4 px inset each side */
+
+		/* a sample sequence with gaps (the HP holding I2C2 for a stretch): the tile alone moves,
+		 * and every update equals a scratch paint */
+		tr_hud_t      hp;
+		tr_hud_view_t pv;
+		uint32_t      d2;
+
+		tr_hud_init(&hp);
+		view_play(&pv, 0u, 0u);
+		memset(fb, 0xA5, sizeof(fb));
+		(void)tr_hud_update(&hp, fb, &pv, &d2);
+		same_as_scratch(&hp, &pv);
+		for (uint32_t n = 0; n < 250u; n++) {
+			int16_t sample = (n / 30u) % 3u == 1u ? (int16_t)TR_PWR_GAP
+			                                      : (int16_t)(1800 + (int)(n * 37u % 900u));
+
+			/* oldest first: shift the window and append, as the platform ring reads out */
+			memmove(pv.pwr, pv.pwr + 1, (TR_PWR_N - 1) * sizeof(pv.pwr[0]));
+			pv.pwr[TR_PWR_N - 1] = sample;
+			pv.pwr_seq++;
+			px = tr_hud_update(&hp, fb, &pv, &d2);
+			assert(d2 == T_PWR_BIT && px > 0u && px <= 110u * 132u);
+			same_as_scratch(&hp, &pv);
+		}
+		/* unchanged: nothing repaints */
+		assert(tr_hud_update(&hp, fb, &pv, &d2) == 0u && d2 == 0u);
+		/* a sample window with a gap in it paints a hole, not a bar: the gap's column keeps the
+		 * panel's own pixels (as with no samples at all), its neighbours carry the bar */
+		{
+			static uint16_t bare[TR_HUD_W * TR_HUD_H];
+			tr_hud_view_t   g = pv;
+			const int       y = 202 + 24; /* mid-graph */
+
+			g.pwr_seq = 0u; /* nothing sampled: the empty panel */
+			tr_hud_paint_all(bare, &g, 0u, 0u, 0u, 0u - TR_HUD_VOL_FRAMES);
+			for (int i = 0; i < TR_PWR_N; i++) {
+				g.pwr[i] = 1000;
+			}
+			g.pwr[40] = TR_PWR_GAP;
+			g.pwr_seq = 99u;
+			tr_hud_paint_all(ref, &g, 0u, 0u, 0u, 0u - TR_HUD_VOL_FRAMES);
+			assert(ref[y * TR_HUD_W + 614 + 40] == bare[y * TR_HUD_W + 614 + 40]);
+			assert(ref[y * TR_HUD_W + 614 + 39] != bare[y * TR_HUD_W + 614 + 39]);
+			assert(ref[y * TR_HUD_W + 614 + 41] != bare[y * TR_HUD_W + 614 + 41]);
+			/* and a real zero is a bar of one pixel, not a hole */
+			g.pwr[40] = 0;
+			tr_hud_paint_all(ref, &g, 0u, 0u, 0u, 0u - TR_HUD_VOL_FRAMES);
+			assert(ref[(202 + 47) * TR_HUD_W + 614 + 40] != bare[(202 + 47) * TR_HUD_W + 614 + 40]);
+		}
+
+		/* The graph is a LINE, tightly scaled: the rail really sits at ~4.85 W with ~50 mW swings, so a
+		 * filled area on a 500 mW minimum span was a flat solid block. A flat series draws a thin line,
+		 * not a block (few pixels per column), and a +-25 mW wobble reaches many distinct rows. */
+		{
+			static uint16_t bare[TR_HUD_W * TR_HUD_H];
+			tr_hud_view_t   g = pv;
+			enum {
+				GX = 614,
+				GY = 202,
+				GH = 48
+			}; /* the graph box: hud.c PWR_GX / PWR_GY / PWR_GH */
+			int worst_col = 0, rows = 0;
+			int row_hit[GH] = { 0 };
+
+			g.pwr_seq = 0u;
+			tr_hud_paint_all(bare, &g, 0u, 0u, 0u, 0u - TR_HUD_VOL_FRAMES);
+
+			/* a flat 4850 mW */
+			for (int i = 0; i < TR_PWR_N; i++) {
+				g.pwr[i] = 4850;
+			}
+			g.pwr_seq = 500u;
+			tr_hud_paint_all(ref, &g, 0u, 0u, 0u, 0u - TR_HUD_VOL_FRAMES);
+			for (int x = GX; x < GX + TR_PWR_N; x++) {
+				int n = 0;
+
+				for (int y = GY; y < GY + GH; y++) {
+					n += ref[y * TR_HUD_W + x] != bare[y * TR_HUD_W + x];
+				}
+				worst_col = n > worst_col ? n : worst_col;
+				assert(n >= 1); /* and it is there in every column */
+			}
+			assert(worst_col <= 3); /* a line, not a filled block */
+
+			/* a +-25 mW wobble around 4850 mW, 12 samples a period */
+			static const int16_t wob[12] = { 0, 12, 22, 25, 22, 12, 0, -12, -22, -25, -22, -12 };
+
+			for (int i = 0; i < TR_PWR_N; i++) {
+				g.pwr[i] = (int16_t)(4850 + wob[i % 12]);
+			}
+			g.pwr_seq = 501u;
+			tr_hud_paint_all(ref, &g, 0u, 0u, 0u, 0u - TR_HUD_VOL_FRAMES);
+			worst_col = 0;
+			for (int x = GX; x < GX + TR_PWR_N; x++) {
+				int n = 0;
+
+				for (int y = GY; y < GY + GH; y++) {
+					if (ref[y * TR_HUD_W + x] != bare[y * TR_HUD_W + x]) {
+						n++;
+						row_hit[y - GY] = 1;
+					}
+				}
+				worst_col = n > worst_col ? n : worst_col;
+			}
+			for (int r = 0; r < GH; r++) {
+				rows += row_hit[r];
+			}
+			assert(rows >= 20); /* the swing is visible: it spans many rows of the box */
+			assert(worst_col <=
+			       12); /* ... as a connected line (one step between neighbours), not a fill */
+		}
+
+		/* the layout: the cards end where the power column begins, in EVERY screen -- the
+		 * margins around the panel (x 610..612 and 712..720, rows 168..170 and 298..300) stay
+		 * transparent, and the quiet screens leave the panel's own rows to it */
+		for (uint8_t mode = TR_HUD_PLAY; mode <= TR_HUD_INITIALS; mode++) {
+			tr_hud_view_t m;
+
+			view_play(&m, 1234u, 56u);
+			m.mode     = mode;
+			m.banner   = TR_BANNER_STAND;
+			m.best     = 99999u;
+			m.new_best = 1;
+			m.hs.n     = 5;
+			for (int i = 0; i < m.hs.n; i++) {
+				m.hs.e[i].score = 4000u - 100u * (uint32_t)i;
+				memcpy(m.hs.e[i].name, "ABC", 4);
+			}
+			tr_hud_paint_all(ref,
+			                 &m,
+			                 250u,
+			                 0u,
+			                 0u,
+			                 0u - TR_HUD_VOL_FRAMES); /* a table page for the attract card */
+			assert(alpha_px(ref, 610, 140, 612, 300) == 0u);
+			assert(alpha_px(ref, 712, 140, TR_HUD_W, 300) == 0u);
+			assert(alpha_px(ref, 612, 168, 712, 170) == 0u);
+			assert(alpha_px(ref, 612, 298, 712, 300) == 0u);
+			assert(alpha_px(ref, 612, 170, 712, 298) > 8000u); /* the panel itself is there */
+		}
+		printf("hud power: readouts, scale, gaps, tile, layout ok\n");
 	}
 
 	/* 7. Screen changes + a scripted mix: always equal to scratch. */
@@ -593,7 +831,8 @@ int main(void)
 			 * the half layout's road and runner stay clear (polish round:
 			 * the old card covered rows 140..348 edge to edge). */
 			assert(v.mode == TR_HUD_ATTRACT && alpha_px(fb, 16, 74, 388, 138) > 20000u);
-			assert(alpha_px(fb, 20, 172, 700, 298) == 0u);
+			assert(alpha_px(fb, 20, 172, 610, 298) ==
+			       0u); /* left of the power panel (x 612..712) */
 		}
 	}
 	uint64_t dt = now_ns() - t0;
@@ -617,8 +856,174 @@ int main(void)
 		} while (p1 != 0u && frames < 10u);
 		assert(frames >= 3u &&
 		       frames <= 5u); /* 253,440 px at <= 100,000 a frame, then one quiet frame */
-		tr_hud_paint_all(ref, &v, tr_hz_to40(hc.frame - 1u), hc.popup_start, hc.zone_start);
+		tr_hud_paint_all(
+		    ref, &v, tr_hz_to40(hc.frame - 1u), hc.popup_start, hc.zone_start, hc.vol_start);
 		assert(memcmp(fb, ref, sizeof(fb)) == 0);
+	}
+
+	/* 11. The attract header card is pinned (hud_screens.h): six fixed screens hash to what origin/dev
+	 * painted. A build WITHOUT a partner logo must match all six in full -- the ALP LAB banner alone,
+	 * exactly as before. A build WITH one changes the header card and nothing else: the two attract
+	 * screens match outside it (x 16 .. 399, y 74 .. 137), and the play, crash, banner and initials
+	 * screens, which have no header card, match in full (no logo anywhere but the attract header). */
+	{
+		static uint16_t       g[TR_HUD_W * TR_HUD_H];
+		static const uint32_t full[SCR_N] = {
+			[SCR_PLAY] = 0xA5195B46u,  [SCR_ATTRACT] = 0x2AC2A7A7u, [SCR_TABLE] = 0x4860E7CAu,
+			[SCR_CRASH] = 0x7F53952Au, [SCR_BANNER] = 0x57AFC2E8u,  [SCR_INITIALS] = 0xE3F894E1u
+		};
+		static const uint32_t rest[SCR_N] = { [SCR_ATTRACT] = 0x66BCBC9Fu,
+			                                  [SCR_TABLE]   = 0x2F1B8E72u };
+
+		for (int i = 0; i < SCR_N; i++) {
+			bool attract = i == SCR_ATTRACT || i == SCR_TABLE;
+
+			scr_paint(i, g);
+			if (attract && TR_PANEL_HZ != 40) {
+				continue; /* the tagline names the refresh: another hash at 30 Hz */
+			}
+			if (attract) {
+				assert(scr_hash(g, true) == rest[i]);
+			}
+#ifdef TR_PARTNER_LOGO_HEADER
+			if (!attract) {
+				assert(scr_hash(g, false) == full[i]);
+			}
+#else
+			assert(scr_hash(g, false) == full[i]);
+#endif
+		}
+	}
+#ifdef TR_PARTNER_LOGO_HEADER
+	/* 12. The co-brand header (TR_PARTNER_LOGO_HEADER; runner.sh builds this test against a SYNTHETIC
+	 * header): ALP LAB left, a divider, the partner's logo right, both centred in the card, which keeps
+	 * its place and height, stays in its tiles and 8 px short of the stats panel; the logo's own
+	 * pixels land where they should; and the update stays free (a static attract view repaints
+	 * nothing, and equals a scratch paint). */
+	{
+		tr_hud_partner_layout_t l;
+		tr_hud_t                hl;
+		tr_hud_view_t           vl;
+		tr_score_t              ls;
+		const uint16_t          panelpx = (uint16_t)(10u << 12 | 0x013u); /* C_PANEL at A_PANEL */
+
+		tr_hud_partner_layout(&l);
+		/* the card: today's place and height, wide enough (never narrower than the banner it
+		 * replaces), in the score tiles (hud.c T_SCORE / T_SUB: x < 400, y < 140), 8 px or more
+		 * short of the stats panel (hud.c PERF_X 454) */
+		assert(l.card_x == 16 && l.card_y == 74 && l.card_h == 64 && l.card_w >= 372);
+		assert(l.card_x + l.card_w <= 400 && l.card_y + l.card_h <= 140);
+		assert(l.card_x + l.card_w + 8 <= 454);
+		/* both marks fit the card, are the same height class (<= 45) and centred vertically */
+		assert(l.alp_h <= 45 && l.logo_h <= 45 && l.alp_w == 210);
+		assert(abs((l.alp_y - l.card_y) - (l.card_y + l.card_h - l.alp_y - l.alp_h)) <= 1);
+		assert(abs((l.logo_y - l.card_y) - (l.card_y + l.card_h - l.logo_y - l.logo_h)) <= 1);
+		/* left to right: padding, ALP LAB, gap, divider, gap, partner, padding */
+		assert(l.alp_x - l.card_x >= 12 && l.div_x - (l.alp_x + l.alp_w) >= 12);
+		assert(l.logo_x - (l.div_x + 1) >= 12 && l.card_x + l.card_w - (l.logo_x + l.logo_w) >= 12);
+		assert(l.div_y >= l.card_y + 8 && l.div_y + l.div_h <= l.card_y + l.card_h - 8);
+
+		tr_score_init(&ls);
+		ls.best = 5000u;
+		memset(&vl, 0, sizeof(vl));
+		tr_hud_view_set(&vl, &ls, TR_BANNER_ATTRACT, true, TR_HUD_INVITE_STEP_IN);
+		tr_hud_init(&hl);
+		(void)tr_hud_update(&hl, fb, &vl, NULL);
+		same_as_scratch(&hl, &vl);
+		assert(tr_hud_update(&hl, fb, &vl, NULL) == 0u); /* a static header repaints nothing */
+		assert(fb[(l.card_y + 2) * TR_HUD_W + l.card_x + l.card_w / 2] == panelpx);
+		for (int y = 0; y < l.logo_h;
+		     y++) { /* the partner's pixels: opaque ones land, clear ones leave the card */
+			for (int x = 0; x < l.logo_w; x++) {
+				uint16_t c = TR_PARTNER_LOGO_PX(y * l.logo_w + x);
+				uint16_t o = fb[(l.logo_y + y) * TR_HUD_W + l.logo_x + x];
+
+				assert(c >> 12 != 15u || o == c);
+				assert(c >> 12 != 0u || o == panelpx);
+			}
+		}
+		assert(alpha_px(fb, l.alp_x, l.alp_y, l.alp_x + l.alp_w, l.alp_y + l.alp_h) >
+		       1500u); /* ALP LAB */
+		assert((fb[(l.div_y + l.div_h / 2) * TR_HUD_W + l.div_x] >> 12) != 0u &&
+		       fb[(l.div_y + l.div_h / 2) * TR_HUD_W + l.div_x] != panelpx); /* the divider */
+		/* the card's tail pixel is clear of the header's neighbours: BEST above, the tagline strip below */
+		assert(alpha_px(fb, l.card_x, l.card_y + l.card_h, l.card_x + l.card_w, 140) == 0u);
+		printf("hud: co-brand header %d x %d at (%d, %d): ALP LAB %d x %d | partner %d x %d\n",
+		       l.card_w,
+		       l.card_h,
+		       l.card_x,
+		       l.card_y,
+		       l.alp_w,
+		       l.alp_h,
+		       l.logo_w,
+		       l.logo_h);
+	}
+#endif
+
+	/* 9. The volume popup ("VOLUME n%" / "MUTE"): a change of vol_seq shows it over the bottom row for
+	 * exactly TR_HUD_VOL_FRAMES of the 40 Hz clock, counted from the update that saw the change, on
+	 * any screen; incremental == from scratch every frame, and the row goes back to what the screen
+	 * has once it ends. The window is checked against the clock here, not against the HUD's own
+	 * vol_start, so a popup that starts or ends a frame off is caught. */
+	for (int attract = 0; attract < 2; attract++) {
+		tr_hud_t      hv;
+		tr_hud_view_t vv;
+		unsigned      i, u0 = 0, pops = 0;
+		bool          armed = false;
+
+		tr_hud_init(&hv);
+		view_play(&vv, 1234u, 56u);
+		if (attract) {
+			tr_hud_view_set(&vv, &s, TR_BANNER_ATTRACT, true, TR_HUD_INVITE_NONE);
+		}
+		tr_hud_view_vol(&vv, 100u, 0u); /* the HE's boot value: no change seen, no popup */
+		for (i = 0; i < 4u; i++) {
+			tr_hud_update(&hv, fb, &vv, &dirty);
+			assert(alpha_px(fb, 240, 300, 480, TR_HUD_H) == 0u || attract);
+		}
+		uint32_t before = alpha_px(fb, 0, 300, TR_HUD_W, TR_HUD_H);
+
+		for (i = 0; i < 120u; i++) {
+			if (i == 0u || i == 30u) { /* a change, then a second one that restarts the popup */
+				tr_hud_view_vol(&vv, i == 0u ? 40u : 0u, i == 0u ? 1u : 2u);
+				u0    = hv.frame; /* the update below is the one that sees it */
+				armed = true;
+			}
+			uint32_t vpx = tr_hud_update(&hv, fb, &vv, &dirty);
+
+			same_as_scratch(&hv, &vv);
+			/* the HUD budget: only the bottom-row tile (720 x 52) ever repaints for it */
+			assert(vpx <= (uint32_t)TR_HUD_W * (TR_HUD_H - 300) && (dirty & ~(1u << 8)) == 0u);
+			bool want = armed && tr_hz_to40(hv.frame - 1u) - tr_hz_to40(u0) < TR_HUD_VOL_FRAMES;
+			/* on the popup's frames the row carries the panel and text; off them, what it had */
+			bool shown = alpha_px(fb, 240, 300, 480, TR_HUD_H) != 0u && !attract;
+
+			if (!attract && tr_hz_to40(hv.frame - 1u) - tr_hz_to40(u0) >= 8u && want) {
+				assert(shown); /* faded in: a panel and text over the row's middle */
+			}
+			if (!want) {
+				assert(!shown);
+			}
+			pops += want;
+		}
+		assert(pops >= 30u);
+		assert(alpha_px(fb, 0, 300, TR_HUD_W, TR_HUD_H) == before); /* the row is back */
+	}
+
+	/* 10. The knob popup names its subject: the same level as BRIGHTNESS paints differently from
+	 * VOLUME, and flipping the subject alone (same seq-less view) repaints the row. */
+	{
+		tr_hud_t        hk;
+		tr_hud_view_t   kv;
+		static uint16_t va[TR_HUD_W * TR_HUD_H], vb[TR_HUD_W * TR_HUD_H];
+
+		tr_hud_init(&hk);
+		view_play(&kv, 1234u, 56u);
+		tr_hud_view_vol(&kv, 60u, 1u);
+		tr_hud_paint_all(va, &kv, 8u, 0u - TR_HUD_POPUP_FRAMES, 0u - TR_HUD_ZONE_FRAMES, 0u);
+		tr_hud_view_vol_kind(&kv, TR_HUD_KNOB_BRIGHTNESS);
+		tr_hud_paint_all(vb, &kv, 8u, 0u - TR_HUD_POPUP_FRAMES, 0u - TR_HUD_ZONE_FRAMES, 0u);
+		assert(memcmp(va, vb, sizeof(va)) != 0);
 	}
 
 	printf("hud: %u px repainted over %u frames, host %.2f ns/px (%.1f ms total)\n",

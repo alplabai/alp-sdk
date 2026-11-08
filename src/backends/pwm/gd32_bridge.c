@@ -104,6 +104,13 @@ br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabiliti
 	if (cfg->channel_id >= ALP_E1M_X_PWM_COUNT) {
 		return ALP_ERR_INVAL;
 	}
+	/* The bridge protocol has no polarity field (gd32g553_pwm_set() takes
+	 * only channel / period / duty), so an inverted output cannot be
+	 * honoured.  Refuse it rather than open a channel whose every duty is
+	 * the complement of what the caller asked for. */
+	if (cfg->polarity == ALP_PWM_POLARITY_INVERTED) {
+		return ALP_ERR_NOSUPPORT;
+	}
 	/* Probe the supervisor up-front: with no SPI/I2C bus configured
      * this returns ALP_ERR_NOT_READY, which the dispatcher relays. */
 	gd32g553_t  *ctx = NULL;
@@ -140,6 +147,21 @@ br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabiliti
 	bs->period_ns  = h->period_ns;
 	bs->duty_ns    = 0u;
 
+	/* Start at 0 % duty as alp_pwm_open() promises: a channel left running
+	 * by an earlier session or by GD32 firmware state must not keep its old
+	 * duty after open returns. */
+	s = alp_z_v2n_supervisor_acquire(&ctx);
+	if (s != ALP_OK) {
+		_free_state(bs);
+		return s;
+	}
+	s = gd32g553_pwm_set(ctx, bs->channel_id, bs->period_ns, 0u);
+	alp_z_v2n_supervisor_release();
+	if (s != ALP_OK) {
+		_free_state(bs);
+		return s;
+	}
+
 	st->dev        = NULL; /* bridge sentinel */
 	st->channel_id = cfg->channel_id;
 	st->be_data    = bs;
@@ -166,9 +188,15 @@ static alp_status_t br_set_period(alp_pwm_backend_state_t *st, uint32_t period_n
 	gd32g553_t  *ctx = NULL;
 	alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
 	if (s != ALP_OK) return s;
-	s = gd32g553_pwm_set(ctx, bs->channel_id, period_ns, bs->duty_ns);
+	/* <alp/pwm.h>: the duty is reset to 0 % on a period change, so the
+	 * caller must re-arm.  Send 0, not the old duty_ns -- the old value
+	 * would keep the output driving (or be rejected as duty > period). */
+	s = gd32g553_pwm_set(ctx, bs->channel_id, period_ns, 0u);
 	alp_z_v2n_supervisor_release();
-	if (s == ALP_OK) bs->period_ns = period_ns;
+	if (s == ALP_OK) {
+		bs->period_ns = period_ns;
+		bs->duty_ns   = 0u;
+	}
 	return s;
 }
 
@@ -246,6 +274,14 @@ static void br_capture_close(alp_pwm_backend_state_t *st)
 static void br_close(alp_pwm_backend_state_t *st)
 {
 	if (st->be_data != NULL) {
+		/* Release the timer claim so a sibling channel's single-pulse is not
+		 * left BUSY.  Firmware below protocol 0.17 gives NOSUPPORT and
+		 * nothing is sent; any other error is not actionable here. */
+		gd32g553_t *ctx = NULL;
+		if (alp_z_v2n_supervisor_acquire(&ctx) == ALP_OK) {
+			(void)gd32g553_pwm_stop(ctx, ((gd32_pwm_state_t *)st->be_data)->channel_id);
+			alp_z_v2n_supervisor_release();
+		}
 		_free_state((gd32_pwm_state_t *)st->be_data);
 		st->be_data = NULL;
 	}

@@ -15,21 +15,43 @@ into eMMC boot partition 1 before the unit has any bootloader of its own:
 4. ``em_dcid`` runs ``EM_DCID`` and parses the CID the writer prints.
 
 Every prompt and error string is a module constant, copied from the
-Flash Writer's own output. The ROM banner has not been checked on this
-bench yet (see ``ROM_BANNER``). All console traffic goes through
+Flash Writer's own output. The ROM banner was checked on the bench on
+2026-10-01 ("SCI Download mode (Normal SCI boot)"). All console traffic goes through
 ``provision.bench.Console``; nothing here loops on console input itself.
 """
 
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 
 from provision.bench import BenchError, Console
 from provision.gates import BL2_MMC_SECTOR, FIP_SECTOR  # noqa: F401  (re-exported)
 
-# --- prompts (module constants; the ROM banner is still to be confirmed on the bench) ---
-ROM_BANNER = r"SCI Download mode"
+# --- prompts (module constants) ---
+ROM_BANNER = r"SCI Download mode\s*\(Normal SCI boot\)"
+# The ROM falls back to SCI download when the selected boot source has no valid
+# image. That mode still offers `-- Load Program to SRAM`, but the tool refuses it:
+# only the normal banner proves DSW1 is in SCIF mode 3.
+ROM_FALLBACK = r"SCI Download mode\s*\(Due to parameter error\)"
+ROM_FALLBACK_MSG = (
+    "boot ROM fell back to SCI download because the selected boot source has no valid "
+    "image (blank xSPI/eMMC, or DSW1 not in mode 3); set DSW1 to mode 3 for a clean "
+    "SCIF bootstrap"
+)
+# The ROM answers this to the first S-record when the load address is not one it accepts
+# (the SoC is not running on the CA55). Seen on bench 2026-10-02, unit 2026W38-0005, caused
+# by a broken PMIC programming patch.
+ROM_ADDRESS_ERROR = r"Address Error!!!"
+ROM_ADDRESS_ERROR_MSG = (
+    "boot ROM rejected the Flash Writer load address: the SoC is probably not booting on the "
+    "CA55 (boot-CPU select / PMIC programming); supply current around 50 mA at 15 V instead of "
+    "~90 mA confirms it"
+)
+# The ROM still prints after the banner; stream only after its full prompt line.
+ROM_READY = r"Load Program to SRAM\s*-+\r?\n"
+ROM_SETTLE_S = 0.3
 WRITER_PROMPT = r"\n>"
 AREA_PROMPT = r"Select area\(0-2\)>"
 SECTOR_PROMPT = r"Please Input Start Address in sector :"
@@ -47,7 +69,7 @@ WRITER_ERROR = (r"[^\r\n]*(?:ERROR!|ERR!|\bERR\b|FAIL|Syntax Error|Pa[lr]am Erro
                 r"|Size Over|Boundary Error|Unwritable Index|CMD8 error)[^\r\n]*")
 
 BOOT1_AREA = 1
-EXT_CSD_WRITES = ((177, 0x02), (179, 0x08))   # BOOT_BUS_CONDITIONS, PARTITION_CONFIG=boot1
+EXT_CSD_WRITES = ((177, 0x02), (179, 0x08))   # BOOT_BUS_CONDITIONS, PARTITION_CONFIG=boot partition 1
 
 CHUNK = 4096            # bytes per write while streaming an image
 SREC_DATA_LEN = 32      # data bytes per S3 record
@@ -71,6 +93,11 @@ def bin_to_srec(data: bytes, load_addr: int) -> bytes:
     return b"".join(out)
 
 
+def _crlf(blob: bytes) -> bytes:
+    """Normalise line endings to CRLF; the ROM rejects an LF-only S-record file."""
+    return re.sub(rb"\r?\n", b"\r\n", blob)
+
+
 def _stream(console: Console, blob: bytes) -> None:
     for i in range(0, len(blob), CHUNK):
         console.write(blob[i:i + CHUNK])
@@ -85,12 +112,21 @@ def _ask(console: Console, prompt: str, what: str, timeout: float = PROMPT_TIMEO
     return m
 
 
-def load_writer(console: Console, mot: Path, timeout: float = 120.0) -> None:
-    """Wait for the boot-ROM banner, stream the Flash Writer ``.mot``, wait for its prompt."""
+def load_writer(console: Console, mot: Path, timeout: float = 120.0, banner_seen: bool = False) -> None:
+    """Wait for the boot-ROM banner (unless ``banner_seen``: detect already
+    consumed it and left the unit at the ROM prompt), stream the Flash Writer
+    ``.mot``, wait for its prompt."""
     image = Path(mot).read_bytes()
-    console.expect(ROM_BANNER, timeout)
-    _stream(console, image)
-    console.expect(WRITER_PROMPT, timeout)
+    if not banner_seen:
+        key, _ = console.expect_any({"ok": ROM_BANNER, "fallback": ROM_FALLBACK}, timeout)
+        if key == "fallback":
+            raise BenchError(ROM_FALLBACK_MSG)
+    console.expect(ROM_READY, timeout)
+    time.sleep(ROM_SETTLE_S)
+    _stream(console, _crlf(image))
+    key, _ = console.expect_any({"err": ROM_ADDRESS_ERROR, "ok": WRITER_PROMPT}, timeout)
+    if key == "err":
+        raise BenchError(ROM_ADDRESS_ERROR_MSG)
 
 
 def em_w(console: Console, area: int, start_sector: int, program_start: int,

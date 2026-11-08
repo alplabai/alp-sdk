@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Internal: shared TFLM ops vtable + variant helpers reused by the
- * vendor-specific Ethos-U backends (ethos_u_aen on AEN family,
- * ethos_u_n93 on i.MX 93).  The Ethos-U backends register the same
+ * vendor-specific Ethos-U backend (ethos_u_aen on AEN family).
+ * The Ethos-U backend registers the same
  * vtable against a higher-priority silicon_ref + vendor pair so
  * the registry routes their builds through TFLM with AddEthosU()
  * compiled in via the per-vendor backend gate.

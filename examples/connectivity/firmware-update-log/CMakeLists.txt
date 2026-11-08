@@ -32,4 +32,11 @@ endif()
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(firmware_update_log)
+
+# flash-update-log-dual.sh greps the build's .config for FIREWALL_PROVEN, and the
+# HE client only reports HW_ENFORCED with it. Fail the configure step if the
+# profile was requested but the Kconfig did not derive it.
+if(ALP_AEN_UPDATE_LOG_FIREWALL_PROVEN AND NOT CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN)
+  message(FATAL_ERROR "ALP_AEN_UPDATE_LOG_FIREWALL_PROVEN=ON but the app-immutable profile did not derive CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN")
+endif()
 target_sources(app PRIVATE src/main.c)

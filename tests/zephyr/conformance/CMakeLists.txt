@@ -44,9 +44,18 @@ if(CONFIG_ALP_SDK_TESTING)
         src/behavior_adc.c
         src/behavior_can.c
         src/behavior_storage.c
+        src/behavior_button_led.c
     )
+    # behavior_button_led.c snapshots state inside alp_gpio_irq_disable() to prove
+    # the press-callback swap masks the IRQ first (#2987 item 149).
+    zephyr_ld_options(-Wl,--wrap=alp_gpio_irq_disable)
 else()
     target_sources(app PRIVATE
         src/main.c
     )
+    # native_sim only: needs the zephyr,adc-emul controller (adc0) and
+    # its 16-bit channel@1 from boards/native_sim*.overlay.
+    if(CONFIG_ADC_EMUL)
+        target_sources(app PRIVATE src/behavior_adc_emul.c)
+    endif()
 endif()

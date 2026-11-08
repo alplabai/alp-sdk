@@ -8,25 +8,48 @@
  * @brief Alp SDK persistent-storage abstraction (QSPI / OSPI / SD).
  *
  * Backends registered on Zephyr:
+ *   - **zephyr_littlefs** (silicon_ref `"*"`, priority 110, tried
+ *     FIRST): real littlefs-file-backed device
+ *     (`<mnt_point>/alp_storage.bin`) for
+ *     INTERNAL_FLASH/QSPI_FLASH/OSPI_FLASH; erase is emulated by
+ *     overwriting the region with 0xFF.  `instance_id` is the flash-area
+ *     ID of the partition.  The mount is found by its BACKING partition,
+ *     not its name: the generated `alp_storage_mounts[]` entry whose
+ *     `storage_dev == PARTITION_ID(<name>_partition)` and whose
+ *     `mnt_point` is currently mounted (any board.yaml `mount:` such as
+ *     `/lfs/settings`).  It accepts an open only for a FS_LITTLEFS
+ *     mount; otherwise it declines with ALP_ERR_NOSUPPORT and
+ *     `alp_storage_open` falls through to zephyr_flash.  zephyr_flash
+ *     in turn returns ALP_ERR_BUSY for a flash-area that backs ANY
+ *     mounted filesystem listed in `alp_storage_mounts[]`, so such a
+ *     partition is never reachable as raw flash through this API (raw
+ *     writes would corrupt the volume).  A mount made by hand with
+ *     fs_mount() that is not in `alp_storage_mounts[]` is not detected.
+ *     Same SD_MMC / `configure_inline_aes` ALP_ERR_NOSUPPORT posture as
+ *     zephyr_flash.
  *   - **zephyr_flash** (silicon_ref `"*"`, priority 100): real
  *     `<zephyr/storage/flash_map.h>` `flash_area_*` backing for
  *     INTERNAL_FLASH/QSPI_FLASH/OSPI_FLASH (`kind`); `instance_id`
  *     maps to a flash-area ID.  Returns ALP_ERR_NOSUPPORT for
  *     `kind == ALP_STORAGE_KIND_SD_MMC` (no flash_area backing for
- *     SD/MMC; `alp_storage_open` fails outright -- there is no
- *     fallback to a second backend) and for `configure_inline_aes`
+ *     SD/MMC; `alp_storage_open` then tries the next-ranked backend,
+ *     zephyr_disk) and for `configure_inline_aes`
  *     (no inline-AES path on plain Zephyr flash -- a higher-priority
  *     vendor backend implements it once one lands).
- *   - **zephyr_littlefs** (silicon_ref `"*"`, priority 90): real
- *     littlefs-file-backed device
- *     (`/lfs<instance_id>/alp_storage.bin`) for
- *     INTERNAL_FLASH/QSPI_FLASH/OSPI_FLASH; erase is emulated by
- *     overwriting the region with 0xFF.  Same SD_MMC /
- *     `configure_inline_aes` ALP_ERR_NOSUPPORT posture as
- *     zephyr_flash.
+ *   - **zephyr_disk** (silicon_ref `"*"`, priority 80): real
+ *     `<zephyr/storage/disk_access.h>` backing for
+ *     `ALP_STORAGE_KIND_SD_MMC`; byte-addressed read/write over the
+ *     disk's sectors (read-modify-write for unaligned edges),
+ *     get_info reports sector size as block_size/erase_size, sync is
+ *     DISK_IOCTL_CTRL_SYNC.  The disk is named by
+ *     `CONFIG_ALP_SDK_STORAGE_ZEPHYR_DISK_NAME` (default `"SD"`);
+ *     `instance_id` is ignored.  `erase` and `configure_inline_aes`
+ *     are ALP_ERR_NOSUPPORT.  Declines every other `kind`.
  *   - **sw_fallback** (priority 0): every op past open/close
- *     returns ALP_ERR_NOSUPPORT; wins only when neither Zephyr
- *     backend links (e.g. a trimmed `native_sim` image).
+ *     returns ALP_ERR_NOSUPPORT; reached when every higher backend
+ *     is absent or declines the `kind` (e.g. a trimmed `native_sim`
+ *     image), so open can then succeed into a handle whose ops all
+ *     return ALP_ERR_NOSUPPORT.  Off by default on silicon.
  *   - **alp_testing** (file `testing_drv.c`; priority 255,
  *     `CONFIG_ALP_SDK_TESTING_STORAGE`): fault-injectable test
  *     double for host/unit tests -- not present in a shipping
@@ -144,9 +167,9 @@ typedef struct {
  *         (no backend registered for the active silicon),
  *         ALP_ERR_NOT_IMPLEMENTED (registered backend has no open
  *         hook), ALP_ERR_NOMEM (handle-pool or backend-state
- *         allocation failure), ALP_ERR_NOSUPPORT (@c kind ==
- *         ALP_STORAGE_KIND_SD_MMC -- neither zephyr_flash nor
- *         zephyr_littlefs backs SD/MMC today), or a backend I/O
+ *         allocation failure), ALP_ERR_NOSUPPORT (no registered
+ *         backend serves @c kind -- backends are tried in priority
+ *         order and each declines the kinds it does not serve), or a backend I/O
  *         failure (ALP_ERR_NOT_READY / ALP_ERR_BUSY /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_OUT_OF_RANGE)
  *         translated from the underlying flash-area / littlefs
@@ -333,8 +356,7 @@ typedef struct {
  * @brief Configure on-the-fly inline AES for an open storage device.
  *
  * Backends with an inline-AES capable controller (AEN-family
- * OSPI / HexSPI with the SecAES block; future i.MX 93 FlexSPI
- * with the OTFAD module) program the controller's key / IV
+ * OSPI / HexSPI with the SecAES block) program the controller's key / IV
  * registers and enable the inline path before this function
  * returns.  Subsequent @ref alp_storage_read / @ref alp_storage_write
  * calls transparently encrypt + decrypt; XIP code execution

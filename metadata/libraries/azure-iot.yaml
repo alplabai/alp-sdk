@@ -12,18 +12,14 @@
 #     https://github.com/Azure/azure-sdk-for-c.git @ 1.5.0
 #     (tag commit 6d6e634a3bb7f4d6bb5666ec8e1005ecd248e635).
 #   As with aws-iot.yaml, the Azure SDK for Embedded C is a generic CMake C SDK
-#   with NO official upstream Zephyr module.yml or master Kconfig symbol, so
-#   packaging/build glue remains a follow-up.  The source revision is now
-#   reproducible and `--emit west-libraries` can produce a concrete west
-#   project entry.
+#   with NO official upstream Zephyr module.yml or Kconfig symbol; the Zephyr
+#   build glue is in-tree (vendors/azure-iot/).
 #
-# Enablement is BY MODULE PRESENCE, not a Kconfig gate.  There is no single
-# upstream `CONFIG_AZURE_IOT=y` enable symbol to transcribe (the SDK is a set
-# of protocol-serialization helpers configured in app code, not one Zephyr
-# master switch).  `integration.zephyr` therefore carries `module:` + a `west:`
-# pin and NO `kconfig:`; inventing a symbol is forbidden (ADR 0018).  The
-# emitter renders the selection tag with no CONFIG line until packaging
-# confirms a real enable symbol, if one exists.
+# Enablement: `CONFIG_ALP_AZURE_IOT=y` (zephyr/Kconfig.alp-libraries, `depends on
+# ALP_SDK`).  The upstream SDK has no zephyr/module.yml or Kconfig of its own,
+# so the symbol is alp-sdk's own gate over in-tree build glue under
+# vendors/azure-iot/ that compiles the west-pinned checkout; see that README.
+# Needs `west update --group-filter +extras-cloud`.
 #
 # Version:  `1.5.0` -- exact upstream release tag from
 #   github.com/Azure/azure-sdk-for-c.
@@ -52,9 +48,10 @@ requires:
 
 integration:
   zephyr:
-    # Enable-by-presence source pin (see header): the REAL upstream repo is
-    # named, with NO invented Kconfig.  Emit renders a library tag plus a west
-    # project entry, but no CONFIG line until Zephyr packaging confirms one.
+    # Alp-owned enable symbol over in-tree glue (vendors/azure-iot/); the real
+    # upstream repo is named by `module:` + the exact west pin below.
+    kconfig:
+      - CONFIG_ALP_AZURE_IOT=y
     module: azure-sdk-for-c
     west:
       name: azure-sdk-for-c

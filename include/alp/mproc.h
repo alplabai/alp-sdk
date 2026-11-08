@@ -24,7 +24,7 @@
  * surface carries OpenAMP / RPMsg framing, looks up endpoint IDs +
  * mailbox channels + carve-out addresses from the build-time-generated
  * `<alp/system_ipc.h>`, and works identically on every heterogeneous
- * SoM (AEN E5+, V2N, V2M, NX9).  rpc.h is the right answer for almost
+ * SoM (AEN E5+, V2N, V2M).  rpc.h is the right answer for almost
  * every "two cores talk to each other" use case; mproc.h is the
  * escape hatch when you need to bypass RPMsg overhead.
  *
@@ -37,7 +37,7 @@
  * The @ref alp_core_id_t enum enumerates every core that appears in
  * any shipped SoM preset's `topology:` block, so apps can address
  * peers on AEN (M55-HP / M55-HE / A32 cluster), V2N (M33-SM / A55
- * cluster), V2M (same as V2N), or NX9 (M33 / A55 cluster) through
+ * cluster), or V2M (same as V2N) through
  * the same surface.  Adding a new SoM SKU MUST extend the enum and
  * the test in `tests/scripts/test_core_id_enum_coverage.py` enforces
  * that.
@@ -46,7 +46,20 @@
  *   - `alp_mbox_*` -- Zephyr backend functional since v0.4 (DT-anchored
  *     MBOX devices via the `alp-mboxN` aliases, with optional nanopb
  *     framing).  Yocto backend is a shim only; GD32 backend is
- *     NOSUPPORT.
+ *     NOSUPPORT.  A controller whose frames are one-directional in
+ *     hardware (Alif MHUv2: a frame is a sender or a receiver) is
+ *     split into two aliases per channel: `alp-mboxN` is the sender
+ *     frame (@ref alp_mbox_send), the optional `alp-mbox-rxN` is the
+ *     receiver frame (@ref alp_mbox_set_callback / close).  Without
+ *     `alp-mbox-rxN` both directions use `alp-mboxN`.  A controller
+ *     with no message payload (`mbox_mtu_get()` == 0, again MHUv2)
+ *     carries each message in a 64-byte slot at the end of
+ *     `alp-shmem0` and rings a payload-less doorbell: at most 60
+ *     bytes per message (larger fails with ALP_ERR_OUT_OF_RANGE), one
+ *     message in flight, and `alp_mbox_open` fails with
+ *     ALP_ERR_NOT_READY when there is no `alp-shmem0` to hold it.
+ *     Controllers with a payload (`mtu` > 0) refuse messages over
+ *     `mtu` with ALP_ERR_OUT_OF_RANGE.
  *   - `alp_shmem_*` -- Zephyr backend functional since v0.7 via the
  *     DT aliases `alp-shmem0..N` (commit 2e9deec).  Yocto + GD32
  *     backends still return ALP_ERR_NOSUPPORT.
@@ -117,13 +130,8 @@ typedef enum {
 	ALP_CORE_M33_SM      = 6, /**< V2N Cortex-M33 system-manager
                                      (matches `m33_sm` in V2N101/V2M101
                                      topology). */
-	ALP_CORE_A55_CLUSTER = 7, /**< V2N / NX9 Cortex-A55 cluster as a single
+	ALP_CORE_A55_CLUSTER = 7  /**< V2N Cortex-A55 cluster as a single
                                      endpoint (matches `a55_cluster`). */
-
-	/* ---- NXP i.MX 93 (NX9 family) ---- */
-	ALP_CORE_M33 = 8 /**< NX9 Cortex-M33 (no _sm suffix -- NX9's
-                                     M33 doesn't carry the system-manager
-                                     role; matches `m33` in NX9101 topology). */
 } alp_core_id_t;
 
 /* ------------------------------------------------------------------ */
@@ -194,47 +202,9 @@ typedef struct alp_shmem alp_shmem_t;
 
 /** Configuration for a shared-memory region. */
 typedef struct {
-	const char *name;      /**< Region name shared across cores (DT-anchored). */
-	size_t      size;      /**< Required bytes; rounded up to MMU/MPU page. */
-	bool        cacheable; /**< false ⇒ allocate non-cacheable; required for
-                                 the simple "core A writes, core B reads"
-                                 pattern.  Setting it true is currently
-                                 UNSUPPORTED in practice -- see the warning
-                                 below. */
+	const char *name; /**< Region name shared across cores (DT-anchored). */
+	size_t      size; /**< Required bytes; rounded up to MMU/MPU page. */
 } alp_shmem_config_t;
-
-/**
- * @warning **There is no cache-maintenance primitive in this SDK, so
- *          `cacheable = true` has no safe usage today.**
- *
- * `alp_shmem_open()` documents that "cache coherency is the caller's
- * responsibility unless @c cacheable = false", but the SDK gives the caller
- * nothing to discharge that responsibility with.  There is no clean, no
- * invalidate and no barrier helper anywhere on the public `alp_` surface,
- * and the only cache-maintenance calls under `src/` are private to one
- * backend: `sys_cache_data_flush_range()` / `sys_cache_data_flush_and_invd_range()`
- * / `sys_cache_data_invd_range()` around the D/AVE-2D surfaces in
- * `src/backends/gpu2d/alif_dave2d.c` (lines 285, 287, 292).  Nothing on the
- * shared-memory path calls them, and no `arch_dcache_*` or `SCB_*DCache`
- * call exists at all.  So `cacheable = false` is the only setting with
- * defined behaviour on a shared-memory path.
- *
- * The two AEN DMA paths are NOT part of this gap.  `alif_hantro.c` and
- * `alif_isp_pico.c` hand buffers to the Zephyr video drivers, and those
- * drivers do the maintenance: `zephyr/drivers/video/jpeg_hantro_vc9000e.c`
- * flushes+invalidates the input (line 513) and output (line 551) buffers
- * before the encode and invalidates the compressed output afterwards (line
- * 681); `zephyr/drivers/video/isp_pico.c` flushes+invalidates on enqueue
- * (line 2565) and invalidates the captured frame on dequeue (line 2632).
- * The remaining gap is only the shared-memory path above (`cacheable = true`).
- *
- * This is recorded rather than fixed on purpose.  Adding cache maintenance
- * to a shared-memory path without measuring on real silicon trades a visible,
- * documented gap for an intermittent corruption that reproduces once a
- * week.  Closing it needs an owner, bench time on E1M-AEN801, and a
- * measurement -- it is an architecture gap, not a sweep item.  Tracked in
- * issue #2556.
- */
 
 /**
  * @brief Default-initialize an @ref alp_shmem_config_t for region @p id.
@@ -244,27 +214,28 @@ typedef struct {
  * devicetree node, so @c size is advisory / backend-authoritative and
  * open() neither consults nor rejects it -- set it to document the
  * bytes both cores agreed to share (and for a future size-checking
- * backend), not because open() requires it. @c cacheable defaults to
- * false, the documented choice "required for the simple core A writes,
- * core B reads pattern."
+ * backend), not because open() requires it.
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_SHMEM_CONFIG_DEFAULT(id) \
-	((alp_shmem_config_t){ .name = (id), .size = 0u, .cacheable = false })
+#define ALP_SHMEM_CONFIG_DEFAULT(id) ((alp_shmem_config_t){ .name = (id), .size = 0u })
 
 /**
  * @brief Acquire access to a named shared-memory region.
  *
- * Both cores opening the same @c name see the same physical bytes;
- * cache coherency is the caller's responsibility unless
- * @c cacheable = false -- and the SDK currently offers the caller no
- * primitive with which to discharge that responsibility, so
- * @c cacheable = false is the only setting with defined behaviour.  See
- * the warning above @ref alp_shmem_config_t.
+ * Both cores opening the same @c name see the same physical bytes.
+ * Shared-memory carve-outs are non-cacheable by design and the SDK
+ * performs no cache flush or invalidate.  For board.yaml @c ipc:
+ * endpoints the generator emits @c CONFIG_DCACHE=n for every endpoint
+ * core; hand-written firmware must map the carve-out non-cacheable in
+ * the MPU on every core that opens it.  A region left cacheable is not
+ * coherent between cores unless the application does its own cache
+ * maintenance -- the board.yaml @c raw_shmem @c cacheable: @c true
+ * opt-out exists for that case and only suppresses the generated
+ * @c CONFIG_DCACHE=n; the SDK still does no maintenance.
  *
  * @param[in] cfg  Configuration.  Must be non-NULL with a non-empty name.
  * @return Open handle on success, or NULL if the region isn't declared
@@ -282,8 +253,9 @@ alp_shmem_t *alp_shmem_open(const alp_shmem_config_t *cfg);
 /**
  * @brief Get a pointer + length view of the region.
  *
- * Both cores receive the same bytes; cache flush/invalidate is
- * handled by the backend when @c cacheable = false at open.
+ * Both cores receive the same bytes.  The region is mapped
+ * non-cacheable (see @ref alp_shmem_open), so no cache maintenance is
+ * needed or provided.
  *
  * @param[in]  s         Region handle.
  * @param[out] base_out  Receives the region base pointer.

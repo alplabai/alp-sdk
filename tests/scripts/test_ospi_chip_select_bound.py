@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """`ospi_memory.chip_select` / `hyperram.chip_select`
-(`metadata/schemas/som-preset-v1.schema.json`) bound the chip-select index
+(`metadata/schemas/som-preset-v2.schema.json`) bound the chip-select index
 to alp-sdk#1944's hardware fact: every AEN preset's OSPI0 octal bus wires
 exactly two chip-select lines (OSPI0_SS0/OSPI0_SS1 per the shared
 E1M-AEN-2626-R2 netlist -- see the `chip_select:` comments in
@@ -20,7 +20,7 @@ import pytest
 
 _SCHEMA = json.loads(
     (Path(__file__).resolve().parents[2]
-     / "metadata" / "schemas" / "som-preset-v1.schema.json").read_text(encoding="utf-8")
+     / "metadata" / "schemas" / "som-preset-v2.schema.json").read_text(encoding="utf-8")
 )
 
 _OSPI_MEMORY = _SCHEMA["$defs"]["ospi_memory"]

@@ -11,6 +11,7 @@ common:
   tags: ai inference wearable imu predictive-health marketing showcase
 tests:
   alp_sdk.example.wearable_activity_fall.e1m_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
@@ -29,6 +30,7 @@ tests:
         - "\\[wact\\] done"
 
   alp_sdk.example.wearable_activity_fall.e1m_x_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     platform_allow:
@@ -47,10 +49,11 @@ tests:
         - "\\[wact\\] done"
 
   alp_sdk.example.wearable_activity_fall.aen_build:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
-      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
     build_only: true
     tags:
       - alp-sdk

@@ -66,10 +66,13 @@ cores:
 ```
 
 `sleep_mode != disabled` emits `CONFIG_PM=y` + `CONFIG_PM_DEVICE=y`
-and lands the per-state hierarchy.  `wakeup_sources:` entries that
-name a subsystem (`uart`, `gpio`, ...) emit
-`CONFIG_PM_DEVICE_WAKE_<SUBSYS>=y`; `E1M_*` pad names emit a hint
-comment (per-silicon wake-pin Kconfig lands in v0.7).
+and lands the per-state hierarchy.  `wakeup_sources:` entries --
+subsystem names (`uart`, `gpio`, ...) and `E1M_*` pad names alike --
+emit a hint comment in the generated `alp.conf`: Zephyr marks wake
+capability via the DT `wakeup-source;` property + a runtime
+`pm_device_wakeup_enable()` call rather than a Kconfig symbol, so the
+customer wires them by hand (per-silicon DT-overlay plumbing
+pending).
 
 ### Per-module log levels (`diagnostics.modules:`)
 
@@ -103,6 +106,24 @@ choice symbol Zephyr has not declared still leaves the configure at exit 0.
 It only warns `The choice symbol … was selected (set =y), but no symbol ended
 up as the choice selection`, and the log level is quietly discarded.
 
+### Link target (`diagnostics.link:` -- AEN Flow C)
+
+```yaml
+diagnostics:
+  link: itcm                    # auto (default) | itcm
+```
+
+`itcm` makes `tan build` link the image into the Alif Ensemble M55-HE ITCM
+(base `0x0`, global window `0x58000000`) so `tan flash --ram` can RAM-run it
+with no MRAM write. The planner (tan-cli, ADR-0026) emits the ITCM retarget
+Kconfig fragment + devicetree overlay beside the slice's `alp.conf`; the
+content mirrors `scripts/bench/aen/aen-flowc-itcm.{conf,overlay}`. Proven on the
+E8 M55-HE (E1M-AEN801 / E1M-AEN803) and HE-only: a project with no M55-HE app
+(an M55-HP-only one included) or any other SKU is refused
+(`build.link-itcm-unsupported`), as is an explicit `linux`/`none`
+`diagnostics.console:` (`build.link-itcm-console-conflict`). Details and the
+Flow C procedure: `docs/aen-bench-bringup.md`.
+
 ### Bootloader (`boot:` -- MCUboot)
 
 ```yaml
@@ -110,9 +131,17 @@ boot:
   method: mcuboot                # mcuboot | none
   signing:
     algorithm: ecdsa_p256        # ecdsa_p256 | rsa2048 | rsa3072 | ed25519
-    key_file: keys/prod_ecdsa_p256.pub.pem
+    key_file: keys/prod_ecdsa_p256.pem
   swap_algorithm: scratch        # scratch | move | overwrite
 ```
+
+`key_file:` is relative to the directory holding `board.yaml`, must
+exist, and names a PRIVATE PEM (not a `.pub.pem`, which cannot sign). A
+missing file fails the plan with `OrchestratorError` naming the resolved
+path. On AEN (curated sysbuild base) with ECDSA-P256, omitting `signing:`
+uses the SDK-anchored default dev key `keys/mcuboot_shared_dev_ecdsa_p256.pem`;
+on other families or algorithms no key is passed unless `key_file:` is set,
+and sysbuild falls back to MCUboot's built-in key.
 
 Project-wide (one bootloader per device).  The loader emits a
 sysbuild.conf overlay with the corresponding `SB_CONFIG_*` lines
@@ -120,7 +149,7 @@ sysbuild.conf overlay with the corresponding `SB_CONFIG_*` lines
 for the underlying secure-boot contract.
 
 `method:` is optional and **the SoM family supplies its default** --
-AEN and N93 default to `mcuboot`, V2N and V2N-M1 to `none`, because on
+AEN defaults to `mcuboot`, V2N and V2N-M1 to `none`, because on
 the Renesas families U-Boot owns boot and the `boot:` block describes
 the U-Boot/FIT chain rather than sysbuild.  The sysbuild overlay is
 emitted only for a project that has at least one `os: zephyr` slice:
@@ -164,7 +193,7 @@ security than the schema claimed.  For an explicit `method: mcuboot`,
 `rsa3072` is rejected at emit time (sysbuild's RSA choice has no
 key-length knob); use `rsa2048` or `ecdsa_p256`/`ed25519`.  That
 refusal is scoped to the sysbuild path only -- `rsa2048`/`rsa3072`
-stay legal on V2N / i.MX 9, whose U-Boot/FIT signing never goes
+stay legal on V2N, whose U-Boot/FIT signing never goes
 through sysbuild.
 
 ### OTA (`ota:` -- Mender / MCUmgr)
@@ -203,9 +232,12 @@ take the board.yaml values as written:
   so `https://hosted.mender.io` emits
   `CONFIG_HAWKBIT_SERVER="hosted.mender.io"` plus `CONFIG_HAWKBIT_PORT=443`
   and `CONFIG_NET_SOCKETS_SOCKOPT_TLS=y` + `CONFIG_HAWKBIT_USE_TLS=y`. A value
-  with no `://` is taken as an already-bare host, so a whole-value `${VAR}`
-  placeholder passes through untouched. A base path, URL userinfo or a
-  non-HTTP scheme is refused — the DDI client has no knob for any of them.
+  with no `://` is taken as an already-bare host. A base path, URL userinfo or
+  a non-HTTP scheme is refused — the DDI client has no knob for any of them.
+  A `${VAR}` placeholder is refused too (#2696): Zephyr does not expand
+  environment variables in a Kconfig fragment, so the firmware would use the
+  text `${VAR}` itself as its server name. Write the real host, or set
+  `CONFIG_HAWKBIT_SERVER` in the app's own `prj.conf`.
 - **`poll_interval_s` is converted to MINUTES.** `CONFIG_HAWKBIT_POLL_INTERVAL`
   is declared in minutes with `range 1 43200`, so `poll_interval_s: 1800`
   emits `CONFIG_HAWKBIT_POLL_INTERVAL=30`. A value that is not a whole number
@@ -219,8 +251,11 @@ The validator (P2.3 rule 1) requires:
 
 When `provider: mender` and at least one Zephyr slice is present,
 the west-libraries emitter (`--emit west-libraries`) auto-adds a
-`mender-mcu-client` entry to the `name-allowlist:` so the customer's
-`west update` pulls the module without hand-edits.  Hawkbit and
+top-level `mender-mcu-client` west project (name / url / revision / path,
+the `mendersoftware/mender-mcu` client) so the customer's `west update`
+pulls the module without hand-edits.  It is a project entry, not a
+`name-allowlist:` entry: the allowlist only filters projects Zephyr's own
+west.yml defines, and Mender's client is not one of them.  Hawkbit and
 MCUmgr are upstream Zephyr modules so they don't need a west.yml
 entry.
 
@@ -255,6 +290,13 @@ legacy layout.  Every pin is placed **before** the bump allocator
 runs, so the auto-allocated siblings step around it whatever its
 name-sort position -- `pinned_low` above sorts after `app_data` and
 `mcuboot_scratch` and still gets offset 0.
+
+Auto-placed offsets are stable only while the set of auto-placed names
+is unchanged: adding, renaming or removing one re-sorts the list and
+moves every later-sorting auto-placed partition, so an OTA'd image would
+mount existing littlefs/NVS data at the wrong address.  For a product
+that ships, pin `offset_kib:` on every partition whose data must
+survive an update; a pinned offset never moves when siblings change.
 
 `flash_device:` resolves against the SoM preset in this order:
 
@@ -300,7 +342,7 @@ unconditionally -- no `write_authority:` value makes a contained region
 eligible. A region OUTSIDE the aperture that the SoM preset authored
 itself needs `write_authority: customer_runtime` to land an IPC
 carve-out there. A region the loader DERIVED (SoC-level
-`memory_regions`, or the silicon-variant fallback, e.g. every V2N/V2M/NX9101
+`memory_regions`, or the silicon-variant fallback, e.g. every V2N/V2M
 row) needs no authority at all: it is RAM by construction. The legacy
 `carveout:` flag is honoured VERBATIM only where the derivation can't
 resolve an answer -- no aperture declared for this SoC (every non-Alif
@@ -334,8 +376,7 @@ value, and the remedy. An ABSENT `write_authority` on an authored region
 is refused too, but only where an on-die MRAM aperture resolves for the
 SoM (every Alif SoC/variant that declares `soc_flash_base:`) -- mirrors
 `carveout.py`'s own `_region_ipc_eligibility()` gate, which enforces the
-identical rule the same way; a no-op on every non-Alif SoM (V2N/V2M/
-NX9101), none of which author `write_authority` on a derived region in
+identical rule the same way; a no-op on every non-Alif SoM (V2N/V2M), none of which author `write_authority` on a derived region in
 the first place. `composite` -- the tag a whole-device alias like
 `mram_main` carries, meaning "consult the contained rows instead" -- is
 not an unconditional pass either: every OTHER `memory_map:` row that
@@ -414,6 +455,9 @@ The planner emits two artefacts per project:
 An optional static C mount table (`--emit storage-mounts-c`)
 generates a `fs_mount_t` per entry with a `mount:` declared, plus an
 aggregate `alp_storage_mounts[]` array for boot-time iteration.
+The build plan carries the same bytes as `generated/storage_mount_table.c` in
+`sharedArtefacts` whenever a resolved partition has `mount:` set and `fs` other than `raw`; nothing in
+the CMake or Zephyr build reads it, so an app opts in by including it.
 
 Inspect the resolved layout with:
 
@@ -460,7 +504,9 @@ PSA Crypto runs entirely non-secure (mbedTLS-only) and the overlay is
 not written.
 
 `attestation_root: optiga_trust_m` only validates when the SoM preset
-physically ships OPTIGA Trust M (AEN family + V2N family today); the
+physically ships OPTIGA Trust M with the part fitted (V2N family today;
+every E1M-AEN SKU shares one SoM PCB on which OPTIGA IC1 is DNP, so the
+loader refuses it there with `assembled: false`); the
 emitter additionally surfaces `CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y`
 and a comment pointing at the `src/security/optiga_trust_m_bridge.c`
 PSA <-> OPTIGA bridge driver.

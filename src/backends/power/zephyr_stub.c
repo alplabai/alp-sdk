@@ -6,7 +6,7 @@
  * #include <alp/power.h> link cleanly on every supported SoC.
  *
  * @par Tracking: github.com/alplabai/alp-sdk/issues/613 (Yocto/Linux
- *      power backend; wildcard stub returns ALP_ERR_NOSUPPORT until it lands).
+ *      power backend; landed as src/backends/power/yocto_drv.c, see below).
  *
  * Behaviour differs from the Camera / Display / GPU2D stubs:
  * stub_open returns ALP_OK so the dispatcher hands the caller a
@@ -31,7 +31,9 @@
  * ALP_SDK_POWER_EXT_RENESAS), and src/backends/power/
  * alif_se_profile.c (Alif SE aiPM operating-point profile on the
  * separate "power_profile" class, gated by
- * ALP_SDK_POWER_PROFILE_ALIF_SE), and src/backends/power/yocto_drv.c
+ * ALP_SDK_POWER_PROFILE_ALIF_SE), src/backends/power/alif_se_power.c
+ * (Alif SE STOP/STANDBY, "alif:ensemble:e8" at priority 100, gated by
+ * ALP_SDK_POWER_ALIF_SE), and src/backends/power/yocto_drv.c
  * (real Linux `/sys/power/state` + `/sys/class/rtc/rtc0/wakealarm`
  * backend, "*" at priority 100, #613).  This stub only wins where none
  * of those are linked into the build, or none claims the build's
@@ -47,6 +49,7 @@
 #include <alp/power.h>
 
 #include "power_ops.h"
+#include "som_power.h"
 
 static alp_status_t
 stub_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out, uint32_t *wake_caps_out)
@@ -110,6 +113,17 @@ static const alp_power_ops_t _ops = {
 	.configure_retention   = NULL, /* dispatcher default: NONE ok, else NOSUPPORT */
 	.request_sleep         = stub_request_sleep,
 	.close                 = NULL,
+	.mode_wake_caps        = NULL, /* #2784: every reported bit works in every mode */
+#ifdef CONFIG_ALP_SDK_SOM_POWER
+	/* #2784 U5: the SoM power-domain runtime (som_power.c). */
+	.domain_policy_set = alp_som_power_ops_policy_set,
+	.domain_info       = alp_som_power_ops_domain_info,
+	.boot_wake_info    = alp_som_power_ops_boot_wake_info,
+#else
+	.domain_policy_set = NULL, /* #2784: dispatcher answers NOSUPPORT */
+	.domain_info       = NULL,
+	.boot_wake_info    = NULL,
+#endif
 };
 
 ALP_BACKEND_ANCHOR_DEFINE(power);

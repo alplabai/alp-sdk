@@ -581,8 +581,9 @@ def test_render_to_envelope_is_passthrough_for_the_examples_own_sku():
     assert "testcase.yaml" not in by_path
     for rel in ("board.yaml", "prj.conf", "src/main.c"):
         assert by_path[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8"), rel
-    assert "--core m55_hp" in by_path["CMakeLists.txt"]
-    assert "ALP_SDK_ROOT is not set" in by_path["CMakeLists.txt"]
+    # The configure-time `alp_project.py --emit zephyr-conf` bridge is gone
+    # (#866): no `--core` literal to carry, no ALP_SDK_ROOT to resolve.
+    assert "alp_project.py" not in by_path["CMakeLists.txt"]
 
 
 def test_render_to_envelope_substitutes_sku_and_preset():
@@ -600,8 +601,7 @@ def test_render_to_envelope_substitutes_sku_and_preset():
     # against a V2N101 board.yaml ("unknown core id").
     assert "m33_sm:" in board_yaml
     assert "m55_hp" not in board_yaml
-    assert "--core m33_sm" in by_path["CMakeLists.txt"]
-    assert "--core m55_hp" not in by_path["CMakeLists.txt"]
+    assert "--core" not in by_path["CMakeLists.txt"]
 
     # prj.conf / src/main.c carry no sku-specific content -- unmodified.
     for rel in ("prj.conf", "src/main.c"):
@@ -659,8 +659,11 @@ def test_render_to_envelope_preserves_trailing_comment_when_value_unchanged():
 # --------------------------------------------------------------------------
 
 def test_scaffold_cmakelists_requires_alp_sdk_root_explicitly():
-    envelope = dict(alp_template.render_to_envelope("minimal", "E1M-AEN801"))
-    cmakelists = envelope["CMakeLists.txt"]
+    # multicore-rpmsg's m55_hp/CMakeLists.txt still shells alp_project.py
+    # (`--emit ipc-contract-h`), so it keeps the ALP_SDK_ROOT guess block.
+    envelope = dict(alp_template.render_to_envelope(
+        "multicore-rpmsg", "E1M-AEN801"))
+    cmakelists = envelope["m55_hp/CMakeLists.txt"]
     assert "if(DEFINED ENV{ALP_SDK_ROOT})" not in cmakelists
     assert "if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED ENV{ALP_SDK_ROOT})" in cmakelists
     assert "FATAL_ERROR" in cmakelists
@@ -725,25 +728,35 @@ def test_scaffold_cmakelists_never_documents_the_dropped_fallback(template, sku)
 
 def test_scaffold_cmakelists_keeps_unrelated_comment_paragraphs():
     """Only the paragraph describing ALP_SDK_ROOT resolution is
-    rewritten. gpio-button-led (the `peripheral` template's source)
-    leads its comment run with a banner -- "board.yaml ->
-    build/generated/alp.conf at configure time." -- that stays true for
-    a scaffold and must survive verbatim."""
-    envelope = dict(alp_template.render_to_envelope("peripheral", "E1M-V2N101"))
-    cmakelists = envelope["CMakeLists.txt"]
-    assert "# board.yaml -> build/generated/alp.conf at configure time." in cmakelists
-    assert "# Resolve the alp-sdk root." in cmakelists
-    # ... and exactly once -- a second matching paragraph is dropped,
-    # never duplicated.
-    assert cmakelists.count("# Resolve the alp-sdk root.") == 1
+    rewritten; an unrelated banner above it must survive verbatim, and the
+    replaced paragraph appears exactly once."""
+    src = """# SPDX-License-Identifier: Apache-2.0
+cmake_minimum_required(VERSION 3.20)
+
+# Unrelated banner that stays true for a scaffold.
+#
+# Resolve the alp-sdk root.  In-tree the SDK is the example's
+# grandparent directory; out-of-tree customers point ALP_SDK_ROOT
+# at their checkout.
+if(DEFINED ENV{ALP_SDK_ROOT})
+    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
+else()
+    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
+endif()
+"""
+    out = alp_template._scaffold_cmakelists(src)
+    assert "# Unrelated banner that stays true for a scaffold." in out
+    assert "grandparent" not in out
+    assert "if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED ENV{ALP_SDK_ROOT})" in out
 
 
 def test_scaffold_cmakelists_invents_no_prose_where_there_was_none():
-    """i2c-master (the `sensor` template's source) has NO comment above
+    """multicore-rpmsg's m55_hp/CMakeLists.txt has NO comment directly above
     its guess block. The rewrite is a rewrite, not an insertion: it must
     not grow prose the example never had."""
-    envelope = dict(alp_template.render_to_envelope("sensor", "E1M-V2N101"))
-    cmakelists = envelope["CMakeLists.txt"]
+    envelope = dict(alp_template.render_to_envelope(
+        "multicore-rpmsg", "E1M-AEN801"))
+    cmakelists = envelope["m55_hp/CMakeLists.txt"]
     assert "# Resolve the alp-sdk root." not in cmakelists
     assert "if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED ENV{ALP_SDK_ROOT})" in cmakelists
 
@@ -1224,13 +1237,12 @@ def test_render_to_envelope_renames_each_zephyr_cores_own_cmakelists(tmp_path):
         "dual-core-app", "E1M-DSTTEST",
         catalog_path=catalog_path, base_dir=tmp_path, metadata_root=metadata_root))
 
-    # Each file's OWN core got its OWN rename -- not one rename smeared
-    # across both files (which would leave one wrong, or -- as it did
-    # before this fix -- raise TemplateError on the second file instead).
-    assert "--core mX" in envelope["CMakeLists.txt"]
-    assert "m55_hp" not in envelope["CMakeLists.txt"]
-    assert "--core mY" in envelope["peer/CMakeLists.txt"]
-    assert "m55_he" not in envelope["peer/CMakeLists.txt"]
+    # The core rename is board.yaml-only now: the CMakeLists.txt `--core`
+    # literal it used to chase is gone with the configure-time bridge (#866),
+    # so neither file is touched by it.
+    src = tmp_path / "examples" / "fixture" / "dual-core-app"
+    for rel in ("CMakeLists.txt", "peer/CMakeLists.txt"):
+        assert envelope[rel] == (src / rel).read_text(encoding="utf-8"), rel
 
 
 def test_render_to_envelope_passthrough_keeps_each_cores_own_literal(tmp_path):
@@ -1245,24 +1257,6 @@ def test_render_to_envelope_passthrough_keeps_each_cores_own_literal(tmp_path):
 
     assert "--core m55_hp" in envelope["CMakeLists.txt"]
     assert "--core m55_he" in envelope["peer/CMakeLists.txt"]
-
-
-def test_cmake_core_map_rejects_traversal_in_core_dir(tmp_path):
-    """A catalog `cores[].dir` of `../x` must be rejected via the same
-    resolve-then-contain guard (#1126) every other catalog-sourced path
-    in this file uses -- `_cmake_core_map` used to hand `core["dir"]`
-    straight to `_zephyr_app_dir` (no containment check of its own) and
-    then `.relative_to(example_dir)`, which raises a bare ValueError
-    instead of PathEscapeError/TemplateError when the dir escapes."""
-    example_dir = tmp_path / "examples" / "fixture" / "escape-app"
-    example_dir.mkdir(parents=True)
-    record = {
-        "cores": [
-            {"id": "m55_hp", "dir": "../escape", "os": "zephyr"},
-        ],
-    }
-    with pytest.raises(alp_template.PathEscapeError):
-        alp_template._cmake_core_map(record, example_dir)
 
 
 # --------------------------------------------------------------------------
@@ -1751,7 +1745,7 @@ def test_render_to_envelope_matches_render_for_the_default_sku(tmp_path):
     content adaptation (board.yaml/prj.conf/src/main.c) must be
     identical bytes; render() stays byte-for-byte faithful to the real
     example (that's what validate()'s twister run proves builds), while
-    CMakeLists.txt/README.md diverge -- render_to_envelope() scaffold-
+    CMakeLists.txt/README.md may diverge -- render_to_envelope() scaffold-
     adapts those regardless of sku (see the content-adaptation tests
     above), and testcase.yaml isn't part of the envelope at all."""
     dest = tmp_path / "out"
@@ -1760,7 +1754,6 @@ def test_render_to_envelope_matches_render_for_the_default_sku(tmp_path):
     assert "testcase.yaml" not in envelope
     for rel in ("board.yaml", "prj.conf", "src/main.c"):
         assert (dest / rel).read_text(encoding="utf-8") == envelope[rel], rel
-    assert (dest / "CMakeLists.txt").read_text(encoding="utf-8") != envelope["CMakeLists.txt"]
 
 
 # --------------------------------------------------------------------------

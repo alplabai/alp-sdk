@@ -10,10 +10,10 @@
 #   - HP owner:  M55_HP, loadAddress 0x50000000, flags ["load", "boot"]
 #   - HE client: M55_HE, loadAddress 0x58000000, flags ["load"]
 #
-# The default package is app-only so it preserves the board's existing DEVICE
-# policy (SETOOLS keeps DEVICE when a JSON omits it, docs/aen-provisioning.md
-# section 4). Set ALP_AEN_INCLUDE_DEVICE_CONFIG=yes only when intentionally
-# replacing that policy. Every OTHER resident app entry NOT named HP-OWNER/
+# Every package must carry the DEVICE (FC8 firewall) config: a package without a
+# DEVICE entry de-provisions the firewall on SES v1.110. Set
+# ALP_AEN_DEVICE_CONFIG_JSON to the config (a path, or a name under the SETOOLS
+# build/config dir); the example ships fc8-dual-device-config.json. Every OTHER resident app entry NOT named HP-OWNER/
 # HE-CLIENT is a different matter: the `loadbin` below writes the SAME signed
 # ATOC structure `app-write-mram -p` would (docs/debugging-aen.md), which
 # REPLACES rather than merges, so a foreign app entry (e.g. an A32 Linux boot
@@ -104,13 +104,17 @@ HE_IMG=firmware-update-log-he.bin
 cp -f "$HP_BIN" "$SET/build/images/$HP_IMG"
 cp -f "$HE_BIN" "$SET/build/images/$HE_IMG"
 
+DEVICE_BIN=$(bench_stage_device_config "$SET") || { echo "could not stage DEVICE config" >&2; exit 1; }
 {
 	echo "{"
-	if [ "${ALP_AEN_INCLUDE_DEVICE_CONFIG:-no}" = "yes" ]; then
-		echo '    "DEVICE":   { "disabled": false, "binary": "app-device-config.json", "version": "0.5.00", "signed": true },'
-		echo ">>> including DEVICE config in update-log dual ATOC (ALP_AEN_INCLUDE_DEVICE_CONFIG=yes)" >&2
+	if [ -n "$DEVICE_BIN" ]; then
+		printf '    "DEVICE":   { "disabled": false, "binary": "%s", "version": "0.5.00", "signed": true },\n' \
+			"$DEVICE_BIN"
+		echo ">>> including DEVICE config in update-log dual ATOC: $DEVICE_BIN" >&2
 	else
-		echo ">>> app-only update-log dual ATOC; preserving existing DEVICE/firewall policy" >&2
+		echo "!! WARNING: no DEVICE entry. The package REPLACES the ATOC, so on SES v1.110 this" >&2
+		echo "   de-provisions the FC8 firewall (the app-immutable guarantee is gone) while HE" >&2
+		echo "   may still report HW_ENFORCED. Set ALP_AEN_DEVICE_CONFIG_JSON to the FC8 config." >&2
 	fi
 	cat <<JSON
     "HP-OWNER": { "disabled": false, "binary": "$HP_IMG", "version": "1.0.0", "signed": true,

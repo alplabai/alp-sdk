@@ -16,7 +16,7 @@ success.  These tests pin the refusal.
 
 An ABSENT table stays benign and is pinned here too: an in-development
 family that ships no table has nothing to check against, and
-`tests/scripts/_orchestrate_support.py`'s NX9101 fixture depends on it.
+`tests/scripts/_orchestrate_support.py`'s synthetic-preset fixtures depend on it.
 
 TWO independent readers open this one file in alp-sdk today, and both fell
 open on at least two of the four unusable shapes.  Each has its own section
@@ -106,15 +106,14 @@ _AEN_UNKNOWN_REV = """
         app: ./src
 """
 
-_NX9101_NOT_BUILDABLE = """
+_AEN_NOT_BUILDABLE = """
     som:
-      sku: E1M-NX9101
-      hw_rev: r1
+      sku: E1M-AEN801
+      hw_rev: r3
     preset: e1m-evk
     cores:
-      a55_cluster:
-        os: yocto
-        image: alp-image-edge
+      m55_hp:
+        app: ./src
 """
 
 _AEN_IN_RANGE = """
@@ -137,7 +136,7 @@ def test_an_absent_family_table_is_still_benign(tmp_path):
 
     A family with no `hw-revisions.yaml` has nothing to check against, so
     the tri-state predicates answer None and the gates skip.  This is the
-    behaviour `_orchestrate_support._synthetic_nx9101_root` relies on;
+    behaviour `_orchestrate_support._synthetic_tbd_mailbox_root` relies on;
     the #563 fix must not take it away.
     """
     meta = _metadata_copy(tmp_path)
@@ -214,15 +213,15 @@ def test_gate_1_unknown_revision_does_not_fail_open(tmp_path):
 
 
 def test_gate_2_not_buildable_revision_does_not_fail_open(tmp_path):
-    """imx93 r1 is `status: tbd`.  A corrupt imx93 table must not turn
+    """aen r3 is `status: reserved`.  A corrupt aen table must not turn
     that into a buildable revision."""
     intact = _metadata_copy(tmp_path / "intact")
-    board = _board(tmp_path, _NX9101_NOT_BUILDABLE)
+    board = _board(tmp_path, _AEN_NOT_BUILDABLE)
     with pytest.raises(SdkRevisionNotBuildable):
         load_board_yaml(board, metadata_root=intact)
 
     broken = _metadata_copy(tmp_path / "broken")
-    _family_table(broken, "imx93").write_text(_TAB_INDENTED, encoding="utf-8")
+    _family_table(broken, "aen").write_text(_TAB_INDENTED, encoding="utf-8")
     with pytest.raises(OrchestratorError) as excinfo:
         load_board_yaml(board, metadata_root=broken)
     assert "hw-revisions.yaml" in str(excinfo.value)

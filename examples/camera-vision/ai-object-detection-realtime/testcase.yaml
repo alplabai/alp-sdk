@@ -13,6 +13,7 @@ common:
   tags: ai inference object-detection vision marketing showcase
 tests:
   alp_sdk.examples.ai_object_detection.native_sim:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim/native/64
     tags:
@@ -27,13 +28,13 @@ tests:
       regex:
         - "\\[obj-det\\] done"
   alp_sdk.examples.ai_object_detection.v2n_m1:
-    # V2N-M1 (E1M-V2M101) Zephyr board file is still in the
-    # private Renesas fork; once it lands upstream this entry
-    # flips to `rzv2n_evk` or the public successor.  Today we
-    # exercise the AEN fallback (Ethos-U dispatch) so the
-    # cross-NPU portability claim has a public build target.
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
+    # The in-tree E1M-V2M101 CM33 board this example's board.yaml
+    # describes (som.sku E1M-V2M101, cores.m33_sm).  No CI job passes
+    # this target as a -p flag yet, so the scenario is selected only
+    # by a local `twister -p` run (#2885).
     platform_allow:
-      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33
     tags:
       - alp-sdk
       - example

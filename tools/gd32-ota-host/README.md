@@ -14,23 +14,22 @@ $CC -I include tools/gd32-ota-host/gd32_ota_host.c chips/gd32g553/gd32g553.c \
 Run on the target (root):
 
 ```sh
-./gd32_ota_host --status --unbind
-./gd32_ota_host --image gd32-bridge-slot-b.bin --version 0.2.22 --unbind
+./gd32_ota_host --status
+./gd32_ota_host --image gd32-bridge-slot-b.bin --version 0.2.22
 ```
 
-- The kernel `gpio-gd32-bridge` driver binds the bridge address, and i2c-dev
-  refuses `I2C_SLAVE` on a bound address (EBUSY). `--unbind` detaches it via
-  sysfs for the run and re-binds it at exit, so its traffic cannot
-  interleave with OTA frames. Caveat: unbinding removes the bridge gpiochip
-  while WiFi REG_ON and other bridge GPIOs may still be held; consumers do
-  not re-acquire them after re-bind, so a reboot may be needed afterwards.
-  A SIGINT/SIGTERM/SIGHUP during the run re-binds before exiting, even
-  if it lands during the unbind itself.
+- The kernel `gpio-gd32-bridge` driver stays bound. Frames use `ioctl(I2C_RDWR)`,
+  which i2c-dev allows on a bound address (only `I2C_SLAVE` needs it free, and
+  this flow never uses it). Never unbind it by hand: its consumers
+  (`wlan-pwrseq`, `hci_bcm`, the panel) hold its lines, and an unbind leaves a
+  dangling `mmc_pwrseq` that panics the next reboot (#2734).
+- **Reboot after COMMIT.** The tool prints `reboot required`: the GD32 resets
+  twice, the Wi-Fi chip loses power, and brcmfmac cannot recover without a
+  board reboot.
 - A run interrupted mid-session (SIGINT) leaves the bridge's OTA session
   open (state READY/BUSY/VERIFIED) until OTA_ABORT. The next run (not
   `--status`) sends OTA_ABORT at startup, prints it, re-reads the state and
-  fails unless it is IDLE. ERROR is left for BEGIN to restart. The signal
-  handler only re-binds; it sends no I2C.
+  fails unless it is IDLE. ERROR is left for BEGIN to restart.
 - A chunk that times out twice is re-sent at half the length, 8-aligned
   (56, 32, 16, 8), then full-size chunks resume. If BEGIN's reply was lost,
   chunks default to 56 bytes.

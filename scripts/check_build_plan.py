@@ -40,8 +40,6 @@ REPO = Path(__file__).resolve().parent.parent
 SCHEMA = REPO / "metadata" / "schemas" / "build-plan-v1.schema.json"
 sys.path.insert(0, str(REPO / "scripts"))
 
-from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
-
 # Issue #1286: `command.tool` must be a bare executable identity (e.g.
 # 'west'), never a location -- the executor's job is resolving that
 # identity to a concrete path, not the plan's. This is asserted ONLY over
@@ -87,13 +85,6 @@ def _tool_identity_violations(doc) -> list[str]:
 
 # Representative projects exercising the multi-image (A+M) shape across all
 # three SoC families -- the same corpus check_system_manifest.py pins.
-#
-# rpmsg-imx93 excluded (#1025): E1M-NX9101's only hw_rev (imx93 r1) is
-# `status: tbd` -- refused outright by the hw_rev-buildable gate. Re-add
-# "examples/multicore/rpmsg-imx93/board.yaml" once
-# metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a buildable status.
-# `main()` re-asserts that reason still holds every run (RATCHET --
-# see assert_exclusion_still_not_buildable).
 _DEFAULT_PROJECTS = [
     "examples/multicore/rpmsg-v2n/board.yaml",
     "examples/multicore/rpmsg-aen/board.yaml",
@@ -172,11 +163,6 @@ def main() -> int:
     else:
         targets = [REPO / p for p in _DEFAULT_PROJECTS]
         failures = sum(_validate_generated(p, validator) for p in targets)
-        stale = assert_exclusion_still_not_buildable(
-            REPO / "metadata", "imx93", "r1", gate="check_build_plan.py")
-        if stale:
-            print(f"FAIL {stale}", file=sys.stderr)
-            failures += 1
     print(f"\n{len(targets)} plan(s) checked, {failures} failure(s)")
     return 0 if failures == 0 else 1
 

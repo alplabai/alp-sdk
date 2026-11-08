@@ -38,15 +38,30 @@ on-module EEPROM identity manifest lives on. Rebind it in
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```bash
 # Standalone, native_sim (emul I2C; identity/power checks SKIP):
+# writes examples/bringup/board-selftest/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/bringup/board-selftest
 west build -b native_sim/native/64 examples/bringup/board-selftest \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 
 # On real silicon, point -b at the SoM's Zephyr board target.
 # Example for E1M-AEN801:
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/bringup/board-selftest
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/bringup/board-selftest -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

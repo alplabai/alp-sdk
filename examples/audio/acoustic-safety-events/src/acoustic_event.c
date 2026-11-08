@@ -27,7 +27,7 @@
  *      hardware DSP block where the SoM has one, and a portable-C radix-2
  *      fallback under native_sim -- selected by the backend registry.
  *      Keeping this on <alp/dsp> lets the identical source run on the
- *      V2N (A55 + DRP-AI) and NXP paths, which have no CMSIS-M.
+ *      V2N (A55 + DRP-AI) path, which has no CMSIS-M.
  *
  *   2. Time-domain window statistics (mean, RMS, abs-peak) ->
  *      alp_dsp_stats_f32, which the SDK backs with CMSIS-DSP

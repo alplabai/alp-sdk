@@ -113,6 +113,14 @@ boot:
 """
 
 
+def _write_boot_board(tmp_path: Path, name: str = "board.yaml") -> Path:
+    """Write V2N_BOOT_MCUBOOT plus the key its `key_file:` names, since the
+    planner refuses a signing key that is not a file."""
+    (tmp_path / "keys").mkdir(exist_ok=True)
+    (tmp_path / "keys" / "dev_rsa.pem").write_text("pem", encoding="utf-8")
+    return _write_board(tmp_path, V2N_BOOT_MCUBOOT, name=name)
+
+
 V2N_OFF_AND_COMMANDLESS = """
 som:
   sku: E1M-V2N101
@@ -388,9 +396,14 @@ def test_emit_build_plan_matches_materialiser(tmp_path: Path) -> None:
     SDK-side materialiser itself, so this checks the shared source
     functions directly instead of a real on-disk write)."""
     import json as _json
-    from alp_orchestrate import emit_build_plan
+    from alp_orchestrate import (DtsOverlayUnavailable, HwInfoUnavailable,
+                                 emit_build_plan)
     from alp_orchestrate.buildplan import (_shared_artefacts,
-                                           _slice_config_artefact)
+                                           _slice_cmake_args_artefact,
+                                           _slice_config_artefact,
+                                           _slice_dts_overlay_artefact,
+                                           _slice_hw_info_artefact,
+                                           _slice_west_libs_artefact)
 
     path = _write_board(tmp_path, V2N_HAPPY)
     build_root = tmp_path / "build"
@@ -411,6 +424,26 @@ def test_emit_build_plan_matches_materialiser(tmp_path: Path) -> None:
         if artefact is not None:
             name, contents = artefact
             want_confs[f"{s['buildDir']}/{name}"] = contents
+        try:
+            extra = _slice_dts_overlay_artefact(project, slice_)
+        except DtsOverlayUnavailable:
+            extra = None  # the plan carries a `dts-overlay-unavailable` warning
+        blocked_baremetal = (s["command"] is None
+                             and slice_.os == "baremetal")
+        if extra is not None and not blocked_baremetal:
+            want_confs[f"{s['buildDir']}/{extra[0]}"] = extra[1]
+        extra = _slice_cmake_args_artefact(project, slice_)
+        if extra is not None and not blocked_baremetal:
+            want_confs[f"{s['buildDir']}/{extra[0]}"] = extra[1]
+        try:
+            extra = _slice_hw_info_artefact(project, slice_)
+        except HwInfoUnavailable:
+            extra = None  # the plan carries a `hw-info-unavailable` warning
+        if extra is not None and not blocked_baremetal:
+            want_confs[f"{s['buildDir']}/{extra[0]}"] = extra[1]
+        extra = _slice_west_libs_artefact(project, slice_)
+        if extra is not None and not blocked_baremetal:
+            want_confs[f"{s['buildDir']}/{extra[0]}"] = extra[1]
         got_confs = {a["path"]: a["contents"] for a in s["configArtefacts"]}
         assert got_confs == want_confs
 
@@ -605,7 +638,7 @@ def test_emit_build_plan_carries_boot_sysbuild_conf(
     import json as _json
     from alp_orchestrate import emit_build_plan
 
-    path = _write_board(tmp_path, V2N_BOOT_MCUBOOT)
+    path = _write_boot_board(tmp_path)
     build_root = tmp_path / "build"
     plan = _json.loads(emit_build_plan(
         load_board_yaml(path), board_yaml=path, build_root=build_root))
@@ -630,7 +663,7 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     from alp_orchestrate import emit_build_plan
 
     # With boot: -> sysbuild overlay emitted -> command carries the flags.
-    path = _write_board(tmp_path, V2N_BOOT_MCUBOOT)
+    path = _write_boot_board(tmp_path)
     plan = _json.loads(emit_build_plan(
         load_board_yaml(path), board_yaml=path, build_root=Path("build")))
     z = next(s for s in plan["slices"]
@@ -638,12 +671,19 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     args = z["command"]["args"]
     assert args[:2] == ["build", "-b"]
     assert "--sysbuild" in args
+    # The relative board.yaml `key_file` is passed as an anchored -D (#2950),
+    # not left bare-relative in the overlay; drop it to check the tail.
+    key_args = [a for a in args
+                if a.startswith("-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE=")]
+    assert len(key_args) == 1
+    assert "${PROJECT_ROOT}/keys/dev_rsa.pem" in key_args[0]
+    args = [a for a in args if a not in key_args]
 
     # Anchored on the board.yaml's own directory (`base_dir`, #596), never
     # the test-runner's CWD -- `_write_board` drops board.yaml straight
     # into `tmp_path`, so that IS base_dir here. ${PROJECT_ROOT}-tokened
     # (#865), not an absolute path.
-    assert args[-3:] == [
+    assert args[-4:-1] == [
         "--",
         "-DPython3_EXECUTABLE=${PYTHON}",
         "-DSB_CONF_FILE=${PROJECT_ROOT}/build/alp_sysbuild.conf",
@@ -653,12 +693,14 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     # Windows, since CMake's cmake_path() (which sysbuild_kconfig.cmake
     # uses to split the `;`-joined list) only recognises `/`.
     assert args.index("--sysbuild") < args.index("--")
-    assert "\\" not in args[-1]
-    # Option A (#871): a --sysbuild slice carries NO bare
-    # -DEXTRA_CONF_FILE -- it would land on the sysbuild image, not the
-    # app (silent OTA config-miss); the per-core alp.conf reaches the app
-    # via the --core-scoped CMakeLists.txt bridge (#870) instead.
+    assert "\\" not in args[-2]
+    # #866: a --sysbuild slice never carries a bare -DEXTRA_CONF_FILE (it
+    # would land on the sysbuild image); it carries the image-scoped
+    # -D<image>_EXTRA_CONF_FILE, <image> = the app dir's basename.
     assert not any(a.startswith("-DEXTRA_CONF_FILE=") for a in args)
+    # `app: ./m33` -> sysbuild's app image is named `m33`.
+    assert args[-1] == (
+        f"-Dm33_EXTRA_CONF_FILE=${{PROJECT_ROOT}}/{z['buildDir']}/alp.conf")
 
     # Without boot: -> no sysbuild overlay -> no flag, bare command.
     path2 = _write_board(tmp_path, V2N_HAPPY, name="board-noboot.yaml")
@@ -707,7 +749,10 @@ def test_zephyr_slice_command_invents_no_west_flags(tmp_path: Path) -> None:
 
     for src, name in ((V2N_BOOT_MCUBOOT, "board-boot.yaml"),
                       (V2N_HAPPY, "board-noboot.yaml")):
-        path = _write_board(tmp_path, src, name=name)
+        if src is V2N_BOOT_MCUBOOT:
+            path = _write_boot_board(tmp_path, name=name)
+        else:
+            path = _write_board(tmp_path, src, name=name)
         plan = _json.loads(emit_build_plan(
             load_board_yaml(path), board_yaml=path,
             build_root=Path("build")))
@@ -1422,3 +1467,16 @@ def test_zephyr_app_dir_windows_symlink_loop_clean_error(
     msg = str(excinfo.value)
     assert "winloop-app" in msg
     assert "could not be resolved" in msg
+
+
+def test_emit_build_plan_rejects_unrooted_absolute_build_root(tmp_path: Path) -> None:
+    """#2953: an absolute build root outside project and SDK used to null
+    every slice command and still exit 0; it must now be an error."""
+    from alp_orchestrate import OrchestratorError
+    from alp_orchestrate.buildplan import emit_build_plan
+
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+    with pytest.raises(OrchestratorError, match="outside both"):
+        emit_build_plan(project, board_yaml=path,
+                        build_root=Path("/nonexistent-root/build"))

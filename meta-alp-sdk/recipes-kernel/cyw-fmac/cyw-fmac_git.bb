@@ -63,8 +63,7 @@ inherit module
 # (no ALTERNATIVE-style compat symlink the way some distros' flex
 # packages provide one) -- the Makefile's default $(LEX) is the literal
 # string "lex", which isn't on PATH, so it must be overridden to
-# "flex" explicitly (same class of fix for $(YACC) -> "bison -y",
-# bison-native's own compat mode for a yacc-style invocation).
+# "flex" explicitly.
 DEPENDS += "flex-native bison-native"
 
 # The backports Makefile passes ARCH / CROSS_COMPILE through to the

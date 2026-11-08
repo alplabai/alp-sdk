@@ -93,4 +93,3 @@ def test_pinout_namespace_for_sku() -> None:
     assert portability.pinout_namespace_for_sku("E1M-V2N101") == "e1m-x"
     assert portability.pinout_namespace_for_sku("E1M-V2M101") == "e1m-x"
     assert portability.pinout_namespace_for_sku("E1M-AEN801") == "e1m"
-    assert portability.pinout_namespace_for_sku("E1M-NX9101") == "e1m"

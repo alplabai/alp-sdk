@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+common:
+  platform_allow:
+    - native_sim
+    - native_sim/native/64
+  integration_platforms:
+    - native_sim/native/64
+  tags:
+    - alp
+    - unit
+    - usb
+tests:
+  # Non-default descriptors are refused; the default config still opens (#2932).
+  alp.unit.usb_zephyr_descriptor: {}

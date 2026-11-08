@@ -14,7 +14,7 @@ Alif-Ensemble-based E1M modules).
 | `alif-ospi.tsv`            | `ospi_signal \t alif_pad`                                           |
 | `alif-ethernet-phy.tsv`    | `phy_signal \t alif_pad`                                            |
 | `hw-revisions.yaml`        | Per-rev SDK-version compatibility window                            |
-| `on-module-links.yaml`     | On-module (non-edge) SoC pads + the devices on them                 |
+| `on-module-links.yaml`     | On-module (non-edge) SoC pads + the devices on them, and the SoM power domains (`power_domains:`, v2) |
 
 ## Two silicon sources
 

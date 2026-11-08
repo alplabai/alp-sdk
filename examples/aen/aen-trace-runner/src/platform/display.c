@@ -286,6 +286,16 @@ uint16_t tr_display_height(void)
 	return g_caps.height;
 }
 
+/* The 2D renderer draws the panel as it scans: a panel mounted turned needs the
+ * A32 renderer (TR_RENDER=A32, which rotates), so refuse it here. */
+BUILD_ASSERT(DT_PROP_OR(DT_NODELABEL(cdc200), mount_rotation, 0) == 0,
+             "TR_RENDER=M55 cannot rotate: this display has a mount-rotation, use TR_RENDER=A32");
+
+uint16_t tr_display_rotation(void)
+{
+	return 0;
+}
+
 /*
  * Copy a rectangle between the two framebuffers, `from` -> `to`, and clean it
  * out of the D-cache.  CONFIG_DCACHE=y on this target and the CDC200 fetches

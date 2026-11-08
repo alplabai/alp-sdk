@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 provisioned EEPROM manifest (docs/tutorials/13-eeprom-provisioning.md
+# layout): bytes 0..3 are the wire magic 'HPLA', bytes 24..47 the
+# NUL-padded SKU.  The shipped DT has no at24 node on i2c0, so this reads the
+# first 128 bytes with the provisioning tool's own read
+# (`i2ctransfer -f -y 0 w2@0x50 0x00 0x00 r128`; -f because no driver owns
+# the address; the only write is the 2-byte address pointer, never data).
+# No serial/hw_rev/CRC assertion: those differ per unit.
+#
+# Same collision caveat as v2m103-eeprom-read: the carrier board-ID EEPROM
+# shares 0x50 on this wire, so a pass means "the part at 0x50 carries an
+# E1M-V2M103 manifest".
+
+schema_version: 1
+name: v2m103-eeprom-manifest
+description: |
+  EEPROM @0x50 on i2c-0 (raw i2ctransfer read) starts with magic 'HPLA' and
+  holds SKU E1M-V2M103.
+
+flash_method: ssh-run
+ssh_command: |-
+  d=$(i2ctransfer -f -y 0 w2@0x50 0x00 0x00 r128 2>/dev/null) || { echo HIL_MANIFEST_READ_FAILED; exit 0; }
+  set -- $d; i=0; magic=; sku=; ser=
+  for b; do
+    v=$((b)); c=; [ "$v" -ne 0 ] && c=$(printf "\\$(printf %03o "$v")")
+    [ "$i" -lt 4 ] && magic=$magic$c
+    [ "$i" -ge 24 ] && [ "$i" -lt 48 ] && sku=$sku$c
+    [ "$i" -ge 56 ] && [ "$i" -lt 68 ] && ser=$ser$c
+    i=$((i+1))
+  done
+  [ "$magic" = HPLA ] && echo HIL_MANIFEST_MAGIC_OK
+  [ "$sku" = E1M-V2M103 ] && echo HIL_MANIFEST_SKU_OK
+
+serial:
+  duration_s: 15
+  expect_contains:
+    - "HIL_MANIFEST_MAGIC_OK"
+    - "HIL_MANIFEST_SKU_OK"
+  expect_absent:
+    - "HIL_MANIFEST_READ_FAILED"

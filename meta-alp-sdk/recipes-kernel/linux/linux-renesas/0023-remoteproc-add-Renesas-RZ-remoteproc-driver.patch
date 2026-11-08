@@ -1,0 +1,527 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tu Duong <tu.duong.zy@renesas.com>
+Date: Sat, 3 Oct 2026 10:00:00 +0200
+Subject: [PATCH] remoteproc: Add RZ remoteproc driver
+
+Imported unmodified from the Renesas RZ Multi-OS Package v4.2.0
+(r01an8260ej0420), meta-rz-features/meta-rz-multi-os/meta-rzv/meta-rzv2n/recipes-kernel/linux/linux-renesas/0005-Add-RZ-remoteproc-driver.patch.
+rz_rproc.c carries SPDX GPL-2.0 and MODULE_AUTHOR "Tu Duong
+<tu.duong.zy@renesas.com>"; Renesas Electronics authorship is kept.  The
+driver supports attaching to a CM33 that TF-A already started (state
+DETACHED at probe, rz_rproc_attach is a no-op) and stop/start/reload of it.
+Alp changes to it are in 0021.
+---
+diff --git a/drivers/remoteproc/Kconfig b/drivers/remoteproc/Kconfig
+index d93113b6ffaa..8cb396a3a107 100644
+--- a/drivers/remoteproc/Kconfig
++++ b/drivers/remoteproc/Kconfig
+@@ -352,6 +352,13 @@ config TI_K3_R5_REMOTEPROC
+ 	  It's safe to say N here if you're not interested in utilizing
+ 	  a slave processor.
+ 
++config RZ_REMOTEPROC
++	tristate "Renesas RZ remoteproc support"
++	select MFD_SYSCON
++	help
++	  Say y here to support RZ's remote processor (CM33) via the remote
++	  processor framework.
++
+ endif # REMOTEPROC
+ 
+ endmenu
+diff --git a/drivers/remoteproc/Makefile b/drivers/remoteproc/Makefile
+index 5478c7cb9e07..535478314f7b 100644
+--- a/drivers/remoteproc/Makefile
++++ b/drivers/remoteproc/Makefile
+@@ -38,3 +38,4 @@ obj-$(CONFIG_ST_SLIM_REMOTEPROC)	+= st_slim_rproc.o
+ obj-$(CONFIG_STM32_RPROC)		+= stm32_rproc.o
+ obj-$(CONFIG_TI_K3_DSP_REMOTEPROC)	+= ti_k3_dsp_remoteproc.o
+ obj-$(CONFIG_TI_K3_R5_REMOTEPROC)	+= ti_k3_r5_remoteproc.o
++obj-$(CONFIG_RZ_REMOTEPROC)		+= rz_rproc.o
+diff --git a/drivers/remoteproc/rz_rproc.c b/drivers/remoteproc/rz_rproc.c
+new file mode 100644
+index 000000000000..d5182b1ebca0
+--- /dev/null
++++ b/drivers/remoteproc/rz_rproc.c
+@@ -0,0 +1,479 @@
++// SPDX-License-Identifier: GPL-2.0
++
++#include <linux/module.h>
++#include <linux/of_device.h>
++#include <linux/of_reserved_mem.h>
++#include <linux/remoteproc.h>
++#include <linux/reset.h>
++#include <linux/mfd/syscon.h>
++#include <linux/regmap.h>
++#include <linux/pm_runtime.h>
++
++#include "remoteproc_internal.h"
++
++#define CM33_SRAM_START	(0x00000000)
++#define CM33_SRAM_END		(0x3FFFFFFF)
++#define CM33_DDR_START		(0x80000000)
++#define CM33_DDR_END		(0x9FFFFFFF)
++#define CA55_SRAM_START	(0x00000000)
++#define CA55_DDR_START		(0x40000000)
++#define CA55_DDR_CM33_START	(0x40010000)
++#define CA55_DDR_CM33_END	(0x43EFFFFF)
++#define CM33_TO_CA55_MASK	(0x0FFFFFFF)
++#define CPG_CLKON_1_CLK2_ON_MASK	(0x00040000)
++
++#define CPG_CLKON_1		(0x604)
++#define CPG_LP_CM33_CTL1	(0xC1C)
++#define CPG_CM33_CTL		(0xC0C)
++#define CPG_RST_1		(0x904)
++#define CPG_RSTMON_0		(0xA00)
++#define CPG_CLKMON_0		(0x800)
++#define SYS_MCPU_CFG2		(0x80C)
++#define SYS_MCPU_CFG3		(0x810)
++
++#define RSC_TBL_SIZE		(0x1000)
++
++struct rz_rproc_pdata {
++	struct regmap *cpg_regmap;
++	struct regmap *sysc_regmap;
++	u32 bootaddr[2];
++};
++
++static int rz_rproc_mem_alloc(struct rproc *rproc,
++				 struct rproc_mem_entry *mem)
++{
++	struct device *dev = rproc->dev.parent;
++	void __iomem *va;
++	dev_dbg(dev, "map memory: %pa+%zx\n", &mem->dma, mem->len);
++	va = devm_ioremap_wc(dev, mem->dma, mem->len);
++
++	if (!va) {
++		dev_err(dev, "unable to map memory region: %pa+%zx\n",
++			&mem->dma, mem->len);
++		return -ENOMEM;
++	}
++
++	/* Update memory entry va */
++	mem->va = va;
++
++	return 0;
++}
++
++static int rz_rproc_mem_release(struct rproc *rproc,
++				   struct rproc_mem_entry *mem)
++{
++	struct device *dev = rproc->dev.parent;
++
++	dev_dbg(dev, "unmap memory: %pa\n", &mem->dma);
++	devm_iounmap(dev, mem->va);
++
++	return 0;
++}
++
++static int rz_rproc_prepare(struct rproc *rproc)
++{
++	struct device *dev = rproc->dev.parent;
++	struct platform_device *pdev = to_platform_device(dev);
++	struct device_node *np = dev->of_node;
++	struct of_phandle_iterator it;
++	struct rproc_mem_entry *mem;
++	struct reserved_mem *rmem;
++	struct resource *res;
++	int index = 0;
++	int i;
++	u32 da;
++
++	/* Register resources */
++	for (i = 0; i < pdev->num_resources; i++) {
++		res = pdev->resource + i;
++
++		/* No need to translate pa to da, RZ/G3S use same map */
++		da = res->start;
++
++		mem = rproc_mem_entry_init(dev, NULL,
++					   res->start,
++					   resource_size(res), da,
++					   rz_rproc_mem_alloc,
++					   rz_rproc_mem_release,
++					   res->name);
++		if (!mem)
++			return -ENOMEM;
++
++		rproc_add_carveout(rproc, mem);
++	}
++
++	/* Register associated reserved memory regions */
++	of_phandle_iterator_init(&it, np, "memory-region", NULL, 0);
++	while (of_phandle_iterator_next(&it) == 0) {
++		rmem = of_reserved_mem_lookup(it.node);
++		if (!rmem) {
++			dev_err(dev, "unable to acquire memory-region\n");
++			return -EINVAL;
++		}
++
++		if (rmem->base > U32_MAX)
++			return -EINVAL;
++
++		/* No need to translate pa to da, RZ/G3S use same map */
++		da = rmem->base;
++
++		/*  No need to map vdev buffer */
++		if (strcmp(it.node->name, "vdev0buffer")) {
++			mem = rproc_mem_entry_init(dev, NULL,
++						   rmem->base,
++						   rmem->size, da,
++						   rz_rproc_mem_alloc,
++						   rz_rproc_mem_release,
++						   it.node->name);
++		} else {
++			mem = rproc_of_resm_mem_entry_init(dev, index,
++							   rmem->size,
++							   rmem->base,
++							   it.node->name);
++		}
++
++		if (!mem)
++			return -ENOMEM;
++
++		rproc_add_carveout(rproc, mem);
++		index++;
++	}
++
++	return 0;
++}
++
++static int rz_rproc_start(struct rproc *rproc)
++{
++	struct device *dev = rproc->dev.parent;
++	struct rz_rproc_pdata *pdata = rproc->priv;
++	uint32_t val;
++
++	/* Check CM33 clock status*/
++	regmap_read(pdata->cpg_regmap, CPG_CLKMON_0, &val);
++	if ((val & CPG_CLKON_1_CLK2_ON_MASK) != 0) {
++		dev_warn(dev, "CM33 remoteproc is NOT supported because CM33 clock is already ON\n");
++		return 0;
++	}
++
++	/* Be sure that CM33 is now in the reset state */
++	regmap_write(pdata->cpg_regmap, CPG_RST_1, 0x00380000);
++
++	do
++	{
++		regmap_read(pdata->cpg_regmap, CPG_RSTMON_0, &val);
++	} while ((val & 0x000E0000) != 0x000E0000);
++
++	/* Set CM33 secure and non-secure vector address */	
++	regmap_write(pdata->sysc_regmap, SYS_MCPU_CFG2, pdata->bootaddr[0]);
++	regmap_write(pdata->sysc_regmap, SYS_MCPU_CFG3, pdata->bootaddr[1]);
++
++	/* Set CM33 Clock to ON */
++	regmap_write(pdata->cpg_regmap, CPG_CLKON_1, 0x00040004);
++
++	do
++	{
++		regmap_read(pdata->cpg_regmap, CPG_CLKMON_0, &val);
++	} while ((val & CPG_CLKON_1_CLK2_ON_MASK) == 0);
++
++	/* Set QREQn signal to the CM33 debug domain and set CM33_LP_QCH12 to 1 */
++	regmap_write(pdata->cpg_regmap, CPG_LP_CM33_CTL1, 0x00003100);
++
++	/* Fetch disable when releasing the CM33 cold reset */
++	regmap_write(pdata->cpg_regmap, CPG_CM33_CTL, 0x00000001);
++
++	/* Releasing from the reset state */
++	regmap_write(pdata->cpg_regmap, CPG_RST_1, 0x00380008);
++
++	do
++	{
++		regmap_read(pdata->cpg_regmap, CPG_RSTMON_0, &val);
++	} while ((val & 0x000E0000) != 0x000C0000);
++
++	regmap_write(pdata->cpg_regmap, CPG_RST_1, 0x00380038);
++
++	do
++	{
++		regmap_read(pdata->cpg_regmap, CPG_RSTMON_0, &val);
++	} while ((val & 0x000E0000) != 0);
++
++	/* Fetch enable when releasing the CM33 cold reset */
++	regmap_write(pdata->cpg_regmap, CPG_CM33_CTL, 0x00000000);
++
++	return 0;
++}
++
++static int rz_rproc_stop(struct rproc *rproc)
++{
++	struct rz_rproc_pdata *pdata = rproc->priv;
++	struct rproc_mem_entry *carveout;
++	uint32_t val;
++
++	/* Set CM33 Clock to OFF */
++	regmap_write(pdata->cpg_regmap, CPG_CLKON_1, 0x00040000);
++
++	do
++	{
++		regmap_read(pdata->cpg_regmap, CPG_CLKMON_0, &val);
++	} while ((val & CPG_CLKON_1_CLK2_ON_MASK) != 0);
++
++	/* Clear registered carveouts */
++	list_for_each_entry(carveout, &rproc->carveouts, node) {
++		if (!carveout->va)
++			continue;
++
++		memset(carveout->va, 0, carveout->len);
++	}
++
++	/* CM33 is now accessing the reset state */
++	regmap_write(pdata->cpg_regmap, CPG_RST_1, 0x00380000);
++
++	do
++	{
++		regmap_read(pdata->cpg_regmap, CPG_RSTMON_0, &val);
++	} while ((val & 0x000E0000) != 0x000E0000);
++
++	return 0;
++}
++
++static int rz_rproc_attach(struct rproc *rproc)
++{
++	/* Do nothing */
++	return 0;
++}
++
++static void rz_rproc_kick(struct rproc *rproc, int vqid)
++{
++	/* Not supported Linux RPMsg yet */
++}
++
++static int cm33_to_ca55(u64 *da)
++{
++	if ((CM33_SRAM_END >= *da) && (*da >= CM33_SRAM_START)) {
++		*da = CA55_SRAM_START + (*da & CM33_TO_CA55_MASK);
++		return 0;
++	}
++	else if ((CM33_DDR_END >= *da) && (*da >= CM33_DDR_START)) {
++		*da = CA55_DDR_START + (*da & CM33_TO_CA55_MASK);
++		return 0;
++	}
++	else
++		return -EINVAL;
++}
++
++static void *rz_rproc_da_to_va(struct rproc *rproc, u64 da, size_t len, bool *is_iomem)
++{
++	struct device *dev = rproc->dev.parent;
++	struct rproc_mem_entry *carveout;
++	void *ptr = NULL;
++	int ret;
++
++	/* rproc_da_to_va() is called in many places. @da value can either be
++	 * the address of segments in .elf file which is in CM33 address space
++	 * or the address of .resource_table's trace buffer which is in CA55
++	 * address space. Trace buffer is expected to be in the dedicated memory
++	 * region for CM33 in DDR. Here, we first check if @da is address of
++	 * trace buffer or segments then have corresponding action.
++	 */
++	if ((CA55_DDR_CM33_END >= da) && (da >= CA55_DDR_CM33_START)) {
++		/* @da is address of trace buffer. Do nothing. */
++	} else {
++		/* @da is address of segment. Translate @da to CA55 space. */
++		ret = cm33_to_ca55(&da);
++		if (ret) {
++			dev_err(dev, "invalid address\n");
++			return ptr;
++		}
++	}
++
++	list_for_each_entry(carveout, &rproc->carveouts, node) {
++		int offset = da - carveout->da;
++
++		/* Verify that carveout is allocated */
++		if (!carveout->va)
++			continue;
++
++		/* try next carveout if da is too small */
++		if (offset < 0)
++			continue;
++
++		/* try next carveout if da is too large */
++		if (offset + len > carveout->len)
++			continue;
++
++		ptr = carveout->va + offset;
++
++		break;
++	}
++
++	return ptr;
++}
++
++static int rz_rproc_parse_fw(struct rproc *rproc, const struct firmware *fw)
++{
++	int ret;
++
++	ret = rproc_elf_load_rsc_table(rproc, fw);
++	if (ret)
++		dev_warn(&rproc->dev, "no resource table found for this firmware\n");
++
++	return 0;
++}
++
++static const struct rproc_ops rz_rproc_ops = {
++	.prepare		= rz_rproc_prepare,
++	.start			= rz_rproc_start,
++	.stop			= rz_rproc_stop,
++	.attach			= rz_rproc_attach,
++	.kick			= rz_rproc_kick,
++	.da_to_va		= rz_rproc_da_to_va,
++	.parse_fw		= rz_rproc_parse_fw,
++	.find_loaded_rsc_table	= rproc_elf_find_loaded_rsc_table,
++	.load			= rproc_elf_load_segments,
++	.sanity_check		= rproc_elf_sanity_check,
++	.get_boot_addr		= rproc_elf_get_boot_addr,
++};
++
++static int rz_rproc_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct device_node *np = dev->of_node;
++	struct rz_rproc_pdata *pdata;
++	struct rproc *rproc;
++	uint32_t val;
++	int ret;
++	int i;
++
++	pdata = devm_kzalloc(dev, sizeof(*pdata), GFP_KERNEL);
++	if (!pdata)
++		return -ENOMEM;
++
++	rproc = devm_rproc_alloc(dev, np->name, &rz_rproc_ops, NULL,
++				 sizeof(*pdata));
++	if (!rproc)
++		return -ENOMEM;
++
++	/* Get remgap of cpg and sysc */
++	pdata->cpg_regmap = syscon_regmap_lookup_by_phandle(np, "renesas,rz-cpg");
++	if (IS_ERR(pdata->cpg_regmap)) {
++		ret = PTR_ERR(pdata->cpg_regmap);
++		dev_err(dev, "failed to lookup cpg regmap\n");
++		return ret;
++	}
++
++	pdata->sysc_regmap = syscon_regmap_lookup_by_phandle(np, "renesas,rz-sysc");
++	if (IS_ERR(pdata->sysc_regmap)) {
++		ret = PTR_ERR(pdata->sysc_regmap);
++		dev_err(dev, "failed to lookup sysc regmap\n");
++		return ret;
++	}
++
++	/* Get secure and non-secure vector address */
++	for (i = 0; i < 2; i++) {
++		if (of_property_read_u32_index(np, "renesas,rz-bootaddrs", i,
++						       &pdata->bootaddr[i])) {
++			dev_err(dev, "invalid boot address\n");
++			return -EINVAL;
++		}
++	}
++
++	rproc->priv = pdata;
++	rproc->auto_boot = of_get_property(np, "renesas,rz-autoboot", NULL) ?
++			   true : false;
++
++	pm_runtime_enable(dev);
++
++	/* Check remote processor state */
++	regmap_read(pdata->cpg_regmap, CPG_RSTMON_0, &val);
++
++	if (!(val & 0x000E0000)) {
++		/* Remote processor is already powered on */
++		struct resource_table *rsc_table = NULL;
++		uint32_t rsc_pa ;
++		void __iomem *rsc_va;
++
++		rproc->state = RPROC_DETACHED;
++
++		pm_runtime_get_sync(dev);
++
++		/* Get loaded rsc table */
++		if (of_property_read_u32_index(np, "renesas,rz-rsctbl", 0, &rsc_pa)) {
++			dev_warn(dev, "detached processor's firmware has no resource table\n");
++			goto rproc_prepare;
++		}
++
++		rsc_va = devm_ioremap_wc(dev, rsc_pa, RSC_TBL_SIZE);
++		if (!rsc_va) {
++			dev_err(dev, "unable to map memory region: %pa+%d\n",
++				&rsc_pa, RSC_TBL_SIZE);
++			goto rproc_prepare;
++		}
++
++		rsc_table = (struct resource_table *)rsc_va;
++		if (rsc_table->ver !=1) {
++			devm_iounmap(dev, rsc_va);
++			dev_warn(dev, "detached processor's firmware has no resource table\n");
++		} else {
++			rproc->table_ptr = rsc_table;
++			/* Assuming the resource table fits in 1kB is fair */
++			rproc->table_sz = RSC_TBL_SIZE;
++		}
++
++rproc_prepare:
++		/* Parse memory regions */
++		rz_rproc_prepare(rproc);
++	}
++	
++	platform_set_drvdata(pdev, rproc);
++
++	/* Register remote processor */
++	ret = rproc_add(rproc);
++	if (ret) {
++		dev_err(dev, "failed to register rproc\n");
++		goto error;
++	}
++
++	dev_info(dev, "probed\n");
++
++	return 0;
++
++error:
++	rproc_free(rproc);
++
++	pm_runtime_disable(dev);
++
++	return ret;
++}
++
++static int rz_rproc_remove(struct platform_device *pdev)
++{
++	struct rproc *rproc = platform_get_drvdata(pdev);
++
++	rproc_del(rproc);
++
++	rproc_free(rproc);
++
++	pm_runtime_disable(&pdev->dev);
++
++	return 0;
++}
++
++static const struct of_device_id rz_rproc_of_match[] = {
++	{ .compatible = "renesas,rz-cm33", },
++	{ /* end of list */ },
++};
++MODULE_DEVICE_TABLE(of, rz_rproc_of_match);
++
++static struct platform_driver rz_rproc_driver = {
++	.probe	= rz_rproc_probe,
++	.remove = rz_rproc_remove,
++	.driver = {
++		.name = "rz-rproc",
++		.of_match_table = rz_rproc_of_match,
++	},
++};
++module_platform_driver(rz_rproc_driver);
++
++MODULE_AUTHOR("Tu Duong <tu.duong.zy@renesas.com>");
++MODULE_DESCRIPTION("Renesas RZ remote processor control driver");
++MODULE_LICENSE("GPL v2");
++
+-- 
+2.43.0

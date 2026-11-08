@@ -19,11 +19,13 @@
  * zephyr/dts/alif/ensemble_e8_peripherals.dtsi.  This shield turns them on and
  * adds what the carrier and the panel decide.  Build any app with
  * `-DSHIELD=e1m_evk_rk055hdmipi4ma0`; the shield's Kconfig.defconfig enables
- * the drivers.  The app must set CONFIG_ALP_SDK=y, as every alp-sdk AEN app
- * does: the CDC200 / DesignWare DSI / D-PHY driver symbols are alp-sdk's and
- * live under `if ALP_SDK`, and the shield deliberately does not turn the SDK
- * on for an app.  The SoC-level clock / power / pad setup the chain needs
- * lives in zephyr/soc-bridge/alif/mipi_display_e8.c.
+ * the drivers and defaults CONFIG_ALP_SDK=y itself -- the CDC200 / DesignWare
+ * DSI / D-PHY driver symbols are alp-sdk's and live under `if ALP_SDK`, and
+ * without it those symbols do not exist and the chain fails at link time, not
+ * configure time.  CONFIG_ALP_SDK=n is not a supported way to run this
+ * shield -- it reproduces the same link failure.  The SoC-level clock /
+ * power / pad setup the chain needs lives in
+ * zephyr/soc-bridge/alif/mipi_display_e8.c.
  *
  * Panel timings are the upstream NXP rk055hdmipi4ma0 shield's.  The pixel clock
  * is not: it is the fastest the link can carry.

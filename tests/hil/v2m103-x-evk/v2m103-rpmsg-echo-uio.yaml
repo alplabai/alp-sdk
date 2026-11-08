@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 (V2N-family die, same MHU-B): one <alp/rpc.h> round trip
+# from the A55 to the CM33 over the Yocto UIO backend
+# (src/backends/rpc/yocto_uio_drv.c), alp-sdk #2374.
+#
+# PRECONDITIONS (this spec cannot arrange them, the bench must):
+#   - The CM33 runs examples/multicore/rpmsg-v2n/m33_sm built for
+#     alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33 and flashed to mtd1 @
+#     0x1a0000 (12288-byte zero pad + zephyr.bin), then a FULL SoC
+#     reboot: the CM33 cannot be restarted from Linux.
+#   - The image carries the OpenAMP UIO nodes (#2513): uio0 rsctbl ..
+#     uio5 vring-shm1, uio6 mhu-uio.
+#   - The board boots DSW1 mode 2 (xSPI BL2). Under the mode 1 eMMC-boot
+#     BL2 the CM33 never starts (shared page all 0xFF); bench 2026-10-01.
+#   - One attach per CM33 boot: cold-cycle between runs. #2586 adds an
+#     attach reset (CM33 beacon version 2 + yocto_uio_drv.c), so a second
+#     attach in the same CM33 boot should work, but it is NOT yet
+#     bench-verified; keep the cold cycle until it is.  Planned check:
+#     after one cold cycle, run this spec twice in the same CM33 boot;
+#     both runs must pass 4/4, and rsctbl+0xFFC (devmem 0x4f700ffc 32)
+#     must read 0x00000001 after the second run.  With version-1 CM33
+#     firmware the second run now fails at alp_rpc_open (ALP_ERR_BUSY,
+#     "still attached from an earlier session") instead of the old
+#     first-call timeout and one-call-late replies.
+# Runbook: examples/multicore/rpmsg-v2n/README.md, "Bench".
+#
+# The example directory is `linux`, so the prebuilt A55 binary must be
+# <--artifact-dir>/linux (rpmsg_v2n_consumer, built for aarch64 against
+# the image sysroot).  Run only after the CM33 has been up for a few
+# seconds: it blocks in rproc_virtio_wait_remote_ready() until the A55
+# attaches, so attaching first is fine, attaching to a dead CM33 is not.
+#
+# What this proves end-to-end:
+#   - alp_rpc_open() finds the UIO nodes and attaches the virtio device.
+#   - four echo_test calls cross the real MHU doorbell + vrings and
+#     come back byte-identical.
+
+schema_version: 1
+name: v2m103-rpmsg-echo-uio
+description: |
+  A55 <alp/rpc.h> echo_test round trip to the CM33 over UIO, 4/4 verified.
+
+example: examples/multicore/rpmsg-v2n/linux
+flash_method: ssh-run
+
+serial:
+  duration_s: 30
+  expect_contains:
+    - "[a55] rpmsg-v2n consumer coming up"
+    - "(verified)"
+    - "[rpmsg-v2n] done (4/4 round trips verified)"
+  expect_absent:
+    - "alp_rpc_open failed"
+    - "failed: status="
+    - "MISMATCH"

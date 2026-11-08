@@ -46,7 +46,6 @@ class TestHwBackendsLoader(unittest.TestCase):
         "AEN": "m55_hp",
         "V2N": "m33_sm",
         "V2M": "m33_sm",
-        "NX9": "m33",
     }
 
     @classmethod
@@ -160,61 +159,22 @@ class TestHwBackendsLoader(unittest.TestCase):
         companion does not make DRP-AI available to its M33 Zephyr slice."""
         self.assertNotEmitted("E1M-V2M101", "CONFIG_ALP_TFLM_DRP_AI=y")
 
-    def test_nx9101_u65_wiring_refused_not_buildable(self) -> None:
-        """NX9101: i.MX 93's Ethos-U65 must resolve via the
-        ml_npu_primary class; the legacy preferred_backend handler
-        + the new loader hook must both contribute their gates.
-
-        #1025: E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd`,
-        refused outright by the hw_rev-buildable gate before emission
-        ever reaches this wiring -- pin that honest refusal instead of
-        the (still-correct, currently-unreachable) wiring below.
-        Restore the four calls once
-        metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
-        buildable status:
-            self.assertEmitted    ("E1M-NX9101", "CONFIG_ALP_TFLM_ETHOS_U65=y")
-            self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_TFLM_ETHOS_U55=y")
-            self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_TFLM_ETHOS_U85=y")
-            self.assertEmitted    ("E1M-NX9101", "CONFIG_ALP_TFLM_NEON=y")
-        """
-        out = self._emit("E1M-NX9101")
-        self.assertIn("hw_rev 'r1' exists but is not buildable", out)
-
     def test_universal_fallback_dma_always_emitted(self) -> None:
         """The unconditional DMA fallback (tensor_dma_copy /
         i2s_dma / spi_dma) must fire on every SKU because none of
-        them carries a `requires_cap:` matcher.
-
-        E1M-NX9101 is skipped (#1025: its only hw_rev, imx93 r1, is
-        `status: tbd`, refused by the hw_rev-buildable gate before
-        this SKU's fallback wiring is even reachable) -- add it back
-        to the tuple once that status is buildable."""
+        them carries a `requires_cap:` matcher."""
         for sku in ("E1M-AEN301", "E1M-AEN801", "E1M-V2N101"):
             with self.subTest(sku=sku):
                 self.assertEmitted (sku, "CONFIG_ALP_TFLM_DMA_COPY=y")
                 self.assertEmitted (sku, "CONFIG_ALP_MINIMP3_I2S_DMA=y")
 
     def test_optiga_truth_cross_family(self) -> None:
-        """OPTIGA Trust M is populated on AEN + V2N + NX9101, but the
+        """OPTIGA Trust M is populated on AEN + V2N, but the
         mbedTLS/BearSSL handshake integration is still planned.  The
-        loader must not emit active TLS offload claims for it.
-
-        #1025: E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd`,
-        refused outright by the hw_rev-buildable gate before emission
-        ever reaches this wiring -- pin that honest refusal instead of
-        the (still-correct, currently-unreachable) assertions below
-        (they were vacuous: a total build failure has zero CONFIG_
-        lines, so assertNotEmitted always passed regardless of what
-        the wiring actually does). Restore once
-        metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
-        buildable status:
-            self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_MBEDTLS_OPTIGA=y")
-            self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
-        """
+        loader must not emit active TLS offload claims for it."""
         self.assertNotEmitted ("E1M-AEN401", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
         self.assertNotEmitted ("E1M-AEN401", "CONFIG_ALP_MBEDTLS_OPTIGA=y")
-        out = self._emit("E1M-NX9101")
-        self.assertIn("hw_rev 'r1' exists but is not buildable", out)
+        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_MBEDTLS_OPTIGA=y")
 
     def test_sw_fallback_always_emitted(self) -> None:
         """Each library's SW-fallback CONFIG_*=y is emitted
@@ -360,7 +320,6 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         self.assertEqual(rc, 0, msg=err)
         self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
         self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y", out)
 
     def test_aen801_emits_both_u55_and_u85(self) -> None:
         """E8 carries 2x U55 + 1x U85; BOTH variant switches must fire so
@@ -369,7 +328,6 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         self.assertEqual(rc, 0, msg=err)
         self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
         self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y", out)
 
     def test_aen401_emits_both_u55_and_u85(self) -> None:
         """E4 same family pattern as E8: 2x U55 + 1x U85."""
@@ -378,34 +336,12 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
         self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y", out)
 
-    def test_nx9101_u65_plus_n93_wiring_refused_not_buildable(self) -> None:
-        """i.MX 93 carries a single Ethos-U65; the new U65 switch and
-        the legacy N93 PHY-side switch coexist (orthogonal selectors).
-
-        #1025: E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd`,
-        refused outright by the hw_rev-buildable gate before emission
-        ever reaches this wiring -- pin that honest refusal instead of
-        the (still-correct, currently-unreachable) assertions below.
-        Restore once
-        metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
-        buildable status:
-            self.assertEqual(rc, 0, msg=err)
-            self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y", out)
-            self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y", out)
-            self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
-            self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y", out)
-        """
-        rc, out, err = self._v2_zephyr_slice("E1M-NX9101", "m33")
-        self.assertNotEqual(rc, 0)
-        self.assertIn("hw_rev 'r1' exists but is not buildable", err)
-
     def test_v2n101_emits_no_ethos_variants(self) -> None:
         """V2N has no Ethos-U at all; none of the per-variant switches
         fire (and no DRP-AI Kconfig exists -- A55-side engine)."""
         rc, out, err = self._v2_zephyr_slice("E1M-V2N101", "m33_sm")
         self.assertEqual(rc, 0, msg=err)
         self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y", out)
         self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y", out)
 
     def test_aen701_m55_emits_tflm_helium(self) -> None:
@@ -425,25 +361,6 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y", out)
         self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_NEON=y", out)
         self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y", out)
-
-    def test_nx9101_m33_tflm_ref_wiring_refused_not_buildable(self) -> None:
-        """M33 on i.MX 93 -- baseline ARMv8-M, single-precision FPU,
-        no MVE -> REF.
-
-        #1025: E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd`,
-        refused outright by the hw_rev-buildable gate before emission
-        ever reaches this wiring -- pin that honest refusal instead of
-        the (still-correct, currently-unreachable) assertions below.
-        Restore once
-        metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
-        buildable status:
-            self.assertEqual(rc, 0, msg=err)
-            self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y", out)
-            self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y", out)
-        """
-        rc, out, err = self._v2_zephyr_slice("E1M-NX9101", "m33")
-        self.assertNotEqual(rc, 0)
-        self.assertIn("hw_rev 'r1' exists but is not buildable", err)
 
     # --- cmake-args / Yocto emit: concurrent multi-NPU on V2M101 ------
 

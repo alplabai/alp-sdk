@@ -728,3 +728,24 @@ ZTEST(alp_testing_storage_behavior, test_configure_inline_aes_is_nosupport_on_th
 
 	alp_storage_close(h);
 }
+
+/* A handle left open across alp_testing_reset_all() must not alias the
+ * slot's next occupant: ops fail instead of touching another instance. */
+ZTEST(alp_testing_storage_behavior, test_stale_handle_after_reset_fails)
+{
+	alp_storage_t *stale = open_storage(3);
+	zassert_not_null(stale, "storage test double must open ANY instance");
+
+	alp_testing_reset_all();
+	/* Takes over the slot the stale handle used to occupy. */
+	alp_storage_t *h = open_storage(4);
+	zassert_not_null(h, "re-open after reset_all() failed");
+
+	uint8_t buf[4] = { 0 };
+	zassert_equal(alp_storage_read(stale, 0, buf, sizeof(buf)),
+	              ALP_ERR_NOT_READY,
+	              "stale handle op must fail");
+
+	alp_storage_close(stale);
+	alp_storage_close(h);
+}

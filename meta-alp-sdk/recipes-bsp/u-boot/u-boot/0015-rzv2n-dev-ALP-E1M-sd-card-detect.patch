@@ -1,0 +1,128 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Mon, 5 Oct 2026 20:38:06 +0000
+Subject: [PATCH] rzv2n-dev: ALP E1M: skip the microSD probe when the slot is
+ empty
+
+sh_sdhi has no get_cd op, so the MMC core always treats SDHI1 (mmc1,
+the carrier microSD, patch 0008) as populated, and an empty slot only
+fails after a full CMD0/CMD8/ACMD41 sequence.  Every boot with no card
+printed "Card did not respond to voltage select! : -110".
+
+On a carrier that wires the slot's card-detect switch to the SoM's
+SD1_SD1CD pad (PA1 on the E1M-V2N/V2M, active-low: 0 = card present,
+pulled up to the switched card rail that board_init() powers; same net the
+Linux cd-gpios in e1m-x-evk.dtsi reads), read it.  Add an "alp_sd_present" command that reads it, and make
+CONFIG_BOOTCOMMAND run the vendor bootcmd_check only when it succeeds;
+otherwise it runs emmcload directly, which is what bootcmd_check would
+have ended up running.  mmc1 is never probed on an empty slot.  The read is
+CONFIG_ALP_E1M_SD1_CD, off unless the carrier metadata
+(sd_slots.SD1.card_detect) says a switch is wired, with the pad as
+CONFIG_ALP_E1M_SD1_CD_BANK/_PIN from the SoM peripheral map; with it off the
+command always succeeds and boot probes the slot as before.
+
+The pin is read as a plain GPIO input (PMC/PM); its PFC input-enable bit is
+not set, and whether PA1 needs it on RZ/V2N is unconfirmed.  If the pin
+always reads 0 the slot always looks full and the -110 message stays, so
+the empty-slot bench step must pass before that message is called gone.
+
+Not verified on silicon.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ board/renesas/rzv2n-dev/Kconfig     | 18 +++++++++++++++++
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 31 +++++++++++++++++++++++++++++
+ include/configs/rzv2n-dev.h         | 11 ++++++++--
+ 3 files changed, 58 insertions(+), 2 deletions(-)
+
+diff --git a/board/renesas/rzv2n-dev/Kconfig b/board/renesas/rzv2n-dev/Kconfig
+index a9c3e620..3ccfad27 100644
+--- a/board/renesas/rzv2n-dev/Kconfig
++++ b/board/renesas/rzv2n-dev/Kconfig
+@@ -118,3 +118,21 @@ config ALP_E1M_SD1_MICROSD
+ 
+ 	  Do NOT enable on a carrier where PA2/PA3 are not the SD1
+ 	  IO-voltage select and card power enable.
++
++config ALP_E1M_SD1_CD
++	bool "ALP E1M: read the microSD card-detect pad before probing SDHI1"
++	depends on ALP_E1M_SD1_MICROSD
++	help
++	  Add the "alp_sd_present" boot check: read the SoM's SD1_SD1CD pad
++	  (CONFIG_ALP_E1M_SD1_CD_BANK/_PIN, active-low) and probe mmc1 only
++	  when a card is in the slot.  Enable only for a carrier that wires a
++	  card-detect switch to that pad (metadata sd_slots.SD1.card_detect);
++	  with it off, boot probes the slot without a presence check.
++
++config ALP_E1M_SD1_CD_BANK
++	int "SD1 card-detect GPIO bank (0-9 = P0-P9, 10 = PA)"
++	default 0
++
++config ALP_E1M_SD1_CD_PIN
++	int "SD1 card-detect GPIO pin within the bank"
++	default 0
+diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index 6856ade0..b51c3139 100644
+--- a/board/renesas/rzv2n-dev/rzv2n-dev.c
++++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
+@@ -1557,6 +1557,37 @@ static void alp_sd1_microsd_init(void)
+ }
+ #endif
+ 
++/*
++ * "alp_sd_present": succeed when a card sits in the carrier microSD slot.
++ *
++ * sh_sdhi has no get_cd op, so the MMC core always treats SDHI1 as
++ * populated and an empty slot only fails after a full CMD0/CMD8/ACMD41
++ * sequence: "Card did not respond to voltage select! : -110" on every
++ * boot.  Where the carrier wires the slot's card-detect switch to the SoM's
++ * SD1_SD1CD pad (active-low: 0 = card present, pulled up to the switched
++ * card rail that board_init() powers above), the boot command asks this
++ * first and never touches mmc1 when it is empty.  Without
++ * CONFIG_ALP_E1M_SD1_CD there is no known card-detect wiring and the old
++ * behaviour stays (always "present").
++ */
++static int do_alp_sd_present(struct cmd_tbl *cmdtp, int flag, int argc,
++			     char *const argv[])
++{
++	if (!IS_ENABLED(CONFIG_ALP_E1M_SD1_CD))
++		return CMD_RET_SUCCESS;
++
++	alp_gpio_input_configure(CONFIG_ALP_E1M_SD1_CD_BANK,
++				 CONFIG_ALP_E1M_SD1_CD_PIN);
++	return alp_gpio_input_get(CONFIG_ALP_E1M_SD1_CD_BANK,
++				  CONFIG_ALP_E1M_SD1_CD_PIN) ?
++		CMD_RET_FAILURE : CMD_RET_SUCCESS;
++}
++
++U_BOOT_CMD(alp_sd_present, 1, 0, do_alp_sd_present,
++	   "succeed if a card is in the carrier microSD slot (active-low card-detect)",
++	   ""
++);
++
+ int board_init(void)
+ {
+ 	/* address of boot parameters */
+diff --git a/include/configs/rzv2n-dev.h b/include/configs/rzv2n-dev.h
+index 1599ad1a..04eecbec 100644
+--- a/include/configs/rzv2n-dev.h
++++ b/include/configs/rzv2n-dev.h
+@@ -180,9 +180,16 @@
+  * fdt_fixup_ethernet() (boot/image-fdt.c's image_setup_libfdt(), which
+  * runs it BEFORE ft_system_setup() -- confirmed by reading this BSP's
+  * actual 2024.07 source, not assumed). */
++/* ALP: "alp_sd_present" (patch 0015) reads the microSD card-detect pin.
++ * An empty slot goes straight to the vendor eMMC loader, i.e. what
++ * bootcmd_check ("if mmc dev 1; then run sd2load; else run emmcload; fi")
++ * would end up running, without mmc1 ever being probed: sh_sdhi cannot
++ * report card presence, so "mmc dev 1" on an empty slot spends its time
++ * failing "Card did not respond to voltage select! : -110". */
+ #define CONFIG_BOOTCOMMAND	"env default -a;alp_eth_mac;" \
+-	"alp_fdtfile " CONFIG_ALP_E1M_FDTFILE ";run bootcmd_check;" \
+-	"if mmc dev 1 && ext4size mmc 1:2 boot/Image; then " \
++	"alp_fdtfile " CONFIG_ALP_E1M_FDTFILE ";" \
++	"if alp_sd_present; then run bootcmd_check; else run emmcload; fi;" \
++	"if alp_sd_present && mmc dev 1 && ext4size mmc 1:2 boot/Image; then " \
+ 	"setenv alp_mmc 1:2;setenv alp_root /dev/mmcblk1p2; else " \
+ 	"setenv alp_mmc 0:2;setenv alp_root /dev/mmcblk0p2; fi;" \
+ 	"setenv alp_dtb_ok 0;" \

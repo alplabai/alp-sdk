@@ -585,11 +585,14 @@ config SDHC_BUFFER_ALIGNMENT
 
 config SDHC_DESCRIPTOR_USE_SECTION
 	bool "Place the SDHC ADMA descriptor table in a named linker section"
+	# ALP-SDK DELTA (#2858): on Ensemble the ADMA engine cannot read the
+	# M55's DTCM (measured on HE via the 0x58800000 alias and on E4 HP),
+	# so the table must sit in SRAM0, never in .bss.
+	default y if SOC_FAMILY_ENSEMBLE
 	help
-	  Off by default: the descriptor table lives in normal .bss.  Turn
-	  this on only if a board names a real region in
-	  CONFIG_SDHC_DESCRIPTOR_SECTION (e.g. for DMA-coherency or
-	  performance reasons) -- applying the attribute with an empty section
+	  On by default on Ensemble, where the section is SRAM0 (the ADMA
+	  engine cannot reach DTCM .bss); off elsewhere, where the table
+	  lives in normal .bss.  Applying the attribute with an empty section
 	  name is a hard link error (an orphan section literally named "")
 	  under -Wl,--fatal-warnings, not a silent no-op.  Turning this on
 	  without also setting a non-empty section name is a BUILD_ASSERT
@@ -604,6 +607,7 @@ config SDHC_DESCRIPTOR_USE_SECTION
 config SDHC_DESCRIPTOR_SECTION
 	string "Linker section for SDHC DMA descriptors"
 	depends on SDHC_DESCRIPTOR_USE_SECTION
+	default "SRAM0" if SOC_FAMILY_ENSEMBLE
 	default ""
 
 config SDHC_DWC_SDMA
@@ -625,6 +629,46 @@ config SDHC_DWC_DMA_ADDR_TRANSLATE
 	  Pulls in the hal_alif soc_memory_map.h (needs itcm/dtcm `global_base`
 	  props absent from the alp-sdk E8 dtsi).  Leave disabled until a card is
 	  reachable and DMA is validated.
+
+config SDHC_DWC_BOUNCE_BUFFER
+	bool "Bounce data the DMA engine cannot reach through a driver buffer"
+	default y if SOC_FAMILY_ENSEMBLE
+	depends on SDHC_DWC_ADMA || SDHC_DWC_SDMA
+	help
+	  ALP-SDK DELTA (#2858), not upstream.  The SDHC's own ADMA2/SDMA
+	  master cannot reach the M55's ITCM or DTCM on Alif Ensemble -- not
+	  at the CPU-local address and not through the TCM global_base alias.
+	  Zephyr apps link .bss, stacks and the SD stack's card_buffer into
+	  DTCM, so without this every transfer moves garbage or times out.
+
+	  With this on, a request whose buffer lies in a TCM (either address)
+	  is copied through a per-instance buffer placed in
+	  CONFIG_SDHC_DWC_BOUNCE_BUFFER_SECTION.  Block reads and writes
+	  larger than the buffer are split into several commands.  Buffers
+	  already in system SRAM go straight to the DMA engine.  An SDIO
+	  CMD53 bigger than the buffer from a TCM buffer fails with -ENOMEM.
+
+config SDHC_DWC_BOUNCE_BUFFER_SIZE
+	int "Bounce buffer size in bytes"
+	depends on SDHC_DWC_BOUNCE_BUFFER
+	default 8192
+	help
+	  A multiple of 512.  Larger means fewer commands per big transfer.
+
+config SDHC_DWC_BOUNCE_BUFFER_SECTION
+	string "Linker section for the bounce buffer"
+	depends on SDHC_DWC_BOUNCE_BUFFER
+	default "SRAM0"
+	help
+	  Must name a zephyr,memory-region the SDHC master can reach.  The
+	  Ensemble SoC dtsi declares SRAM0 (0x02000000) as one.
+
+	  Each core's image links its own SRAM0 sections from the start of
+	  the region, so an SD app on one M55 and another SRAM0 user (NPU
+	  arena, video buffer pool) on the other core collide unless one of
+	  them moves its window (e.g. a smaller sram0 reg in that core's
+	  overlay).  Do not also set `chosen { zephyr,sram = &sram0; }`;
+	  the build refuses that combination.
 
 config SDHC_RSP_136_HAS_CRC
 	bool "Realign 136-bit R2 responses stored without their CRC byte"
@@ -958,6 +1002,72 @@ config MIPI_DSI_DW
 	  ADR 0017 Tier-2 (fork-driver copy): INTERIM.  Retires onto the opt-in
 	  sdk-alif fork once the dsi node is repointed AND bench-verified.  Task #21.
 	  Driver: zephyr/drivers/mipi_dsi/dsi_dw.c.
+
+config SN65DSI83
+	bool "TI SN65DSI83 DSI-to-LVDS bridge (ADR-0017-ADJACENT, BENCH-UNVERIFIED)"
+	default y
+	depends on MIPI_DSI_DW
+	depends on DT_HAS_TI_SN65DSI83_ENABLED
+	select I2C
+	help
+	  TI SN65DSI83 single-channel MIPI DSI receiver to single-link FlatLink
+	  LVDS bridge (datasheet SLLSEC1) -- a maintainer-built adapter-PCB bridge
+	  chip that lets an E1M-EVK DSI connector drive a native-LVDS panel (the
+	  Riverdi RVT121HVDFWCA0-B).  Authored clean-room from the public TI
+	  datasheet: no upstream Zephyr driver, no hal_alif library, and no
+	  sdk-alif fork driver exists for this part class.
+
+	  ADR-0017-ADJACENT (authored from spec, not consumed from a vendor SDK).
+	  BENCH-UNVERIFIED: no adapter-PCB hardware was on hand for this change.
+	  Driver: zephyr/drivers/display/display_sn65dsi83.c.
+
+config SN65DSI83_TEST_PATTERN
+	bool "SN65DSI83: force the built-in LVDS test-pattern generator"
+	depends on SN65DSI83
+	default n
+	help
+	  Sets CHA_TEST_PATTERN (CSR 0x3C.4): the bridge drives its own internal
+	  colour-bar test pattern onto LVDS instead of forwarding DSI video, using
+	  the same timing registers the driver already programs from the panel's
+	  DT timings.  For bench isolation of the PLL + LVDS link + panel from the
+	  DSI video path -- if the panel shows the pattern with this on but stays
+	  dark with it off, the fault is upstream of the bridge (CDC200/DSI/D-PHY),
+	  not the bridge-to-panel link.  No DSI data is received while the pattern
+	  generator runs (datasheet Section 7.4.5).
+
+config SN65DSI83_RECOVERY
+	bool "SN65DSI83: re-initialise the bridge if it resets itself"
+	depends on SN65DSI83
+	default y
+	help
+	  The bridge can reset itself to its power-on defaults (ESD, supply
+	  glitch) with EN high and the DSI clock still running: the panel goes
+	  black and nothing sets the bridge up again.  Health-check it every
+	  SN65DSI83_RECOVERY_INTERVAL_MS (CSR 0x0D PLL_EN, 0x0A PLL_EN_STAT
+	  and HS_CLK_SRC, 0xE5) and replay the init sequence when the PLL is off,
+	  not locked or the configuration is gone.  Latched error flags with the PLL
+	  fine are cleared and counted (the same errors on 3 polls in a row, or on
+	  the first poll after a re-init, are not transient and re-init too).
+	  Re-inits are rate-limited, counted (sn65dsi83_recovery_count()) and
+	  reported with printk and the register values -- not through the log
+	  subsystem, which the apps that use this bridge keep off.
+
+config SN65DSI83_RECOVERY_INTERVAL_MS
+	int "SN65DSI83 health-check interval (ms)"
+	depends on SN65DSI83_RECOVERY || SN65DSI83_RECOVERY_AGENT
+	default 1000
+	range 100 60000
+
+config SN65DSI83_RECOVERY_AGENT
+	bool "SN65DSI83 recovery on the core that owns the I2C bus"
+	default y
+	depends on DT_HAS_ALP_SN65DSI83_RECOVERY_ENABLED
+	select I2C
+	help
+	  Health-checks and re-initialises a bridge that ANOTHER core configured
+	  (the Trace Runner: the HE initialises it, I2C1 then belongs to the HP's
+	  camera), by replaying the CSR table the display core published in shared
+	  SRAM.  See the alp,sn65dsi83-recovery binding.
 
 config VIDEO_MIPI_CSI2_DW
 	bool "DesignWare MIPI CSI-2 host bridge for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
@@ -1551,8 +1661,9 @@ config CAN_RBUF_AFWL
 # (JEDEC ID / SFDP / addressed read) matches issue #915's own bench capture
 # against it (CS1 @ 20 MHz) -- not yet re-run from this tree, see
 # zephyr/drivers/flash/flash_ospi_alif.c and examples/aen/aen-ospi-regcheck.
-# write/erase remain fail-closed stubs (#915): the bench evidence is that
-# they need the fitted part's Octal-DDR mode switch, not 1-1-1 SPI.
+# write/erase (#915) are real: the driver switches the part to Octal DDR
+# first (1-1-1 SPI never sets WEL on it), then programs/erases; see the
+# header of flash_ospi_alif.c.
 # ---------------------------------------------------------------------------
 config USE_ALIF_HAL_OSPI
 	bool
@@ -1588,3 +1699,17 @@ config OSPI_ALIF
 	  ADR 0017 Tier-1.5 (in-tree thin driver over an Apache-2.0 hal_alif HW
 	  library, not a fork-driver copy -- the fork ships no OSPI Zephyr class
 	  driver either, only the DT binding).  See docs/adr/0017.
+
+# hal_alif picks its gen2 layouts with CONFIG_ENSEMBLE_GEN2: the aiPM
+# memory_block_t / *_MASK / EWIC lists (se_services/include/aipm.h) and the
+# OSPI XIP-write control and AES signal-delay helpers (drivers/ospi).
+# Upstream Zephyr's soc/alif does not declare the symbol, so without this
+# every E8/E4 build compiled the gen1 code (alp-sdk#2785).  Alif's own Zephyr
+# fork (soc/alif/ensemble/Kconfig, e8/Kconfig, e4/Kconfig) declares it and
+# selects it from SOC_SERIES_E8 and SOC_SERIES_E4; this mirrors that.
+config ENSEMBLE_GEN2
+	bool
+	default y if SOC_SERIES_E8 || SOC_SERIES_E4
+	help
+	  Alif Ensemble gen2 silicon (E8, E4).  Selects hal_alif's gen2 aiPM
+	  memory-block layout and gen2 OSPI XIP/AES helpers.

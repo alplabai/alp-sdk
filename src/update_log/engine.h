@@ -52,6 +52,18 @@ alp_status_t ulog_engine_verify(const alp_secure_store_if      *store,
 alp_status_t ulog_engine_count(const alp_secure_store_if      *store,
                                const alp_monotonic_counter_if *ctr,
                                uint64_t                       *count_out);
+/* Same as append/verify, plus an OPTIONAL external anchor (NULL = none,
+ * identical to the plain call). See store.h and the "Anchor ordering"
+ * block in engine.c. */
+alp_status_t ulog_engine_append_anchored(const alp_secure_store_if      *store,
+                                         const alp_monotonic_counter_if *ctr,
+                                         const alp_counter_anchor_if    *anchor,
+                                         const alp_update_log_entry_t   *entry);
+alp_status_t ulog_engine_verify_anchored(const alp_secure_store_if      *store,
+                                         const alp_monotonic_counter_if *ctr,
+                                         const alp_counter_anchor_if    *anchor,
+                                         alp_update_log_verdict_t       *verdict_out,
+                                         uint64_t                       *bad_seq_out);
 alp_status_t
 ulog_engine_get(const alp_secure_store_if *store, uint64_t seq, alp_update_log_entry_t *e_out);
 

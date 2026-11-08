@@ -45,7 +45,7 @@
 # Upstream's own default for that string Kconfig is
 # `.alif_sram0.evt_pool` -- a linker section name that exists ONLY on Alif
 # Ensemble parts (the E1M-AEN family). That default is correct as-is for
-# AEN, but the Renesas RZ/V2N and NXP i.MX 93 M33 cores have no such
+# AEN, but the Renesas RZ/V2N M33 cores have no such
 # section: an application targeting those cores MUST override
 # CONFIG_CMSISSTREAM_POOL_SECTION with a real linker section from its own
 # board's memory map, or the link fails. There is no portable replacement

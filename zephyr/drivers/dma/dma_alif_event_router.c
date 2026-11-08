@@ -458,7 +458,7 @@ unlock:
 }
 
 /* DMA API driver structure */
-static const struct dma_driver_api dma_alif_evtrtr_api = {
+static DEVICE_API(dma, dma_alif_evtrtr_api) = {
 	.config = dma_alif_evtrtr_configure,
 	.start = dma_alif_evtrtr_start,
 	.stop = dma_alif_evtrtr_stop,

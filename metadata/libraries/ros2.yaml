@@ -19,17 +19,17 @@
 #     * meta-alp-sdk/conf/distro/include/ros2-humble-build.inc pins the Humble
 #       subset (Fast-DDS RMW; Connext + Qt5 GUI recipes masked).
 #     * There is even a real ROS 2 node example:
-#       meta-alp-sdk/recipes-ros/alp-perception/ (inherit ros_distro_humble,
+#       meta-alp-sdk/dynamic-layers/ros2-humble-layer/recipes-ros/alp-perception/ (inherit ros_distro_humble,
 #       ament_cmake) building examples/v2n/v2n-m1-ros-perception/.
 #
-# PREREQUISITE for a build: the meta-ros2-humble layer must be in bblayers.conf.
-#   It is a LAYERRECOMMENDS (soft) dependency of meta-alp-sdk, not a hard one --
-#   a build that selects `ros2` must add meta-ros2-humble (and un-mask the ROS
-#   recipes) itself.  That layer add is the named follow-up; this manifest emits
-#   the grounded IMAGE_INSTALL entry, no more.
+# PREREQUISITE for a build: the meta-ros2-humble layer must be in bblayers.conf
+#   (meta-alp-sdk/README.md step 4b; it is a LAYERRECOMMENDS, not a hard dep,
+#   so non-ROS images build without it).  The ROS recipe masks ship in
+#   ros2-humble-build.inc, required by conf/distro/alp.conf.  Tier stays B:
+#   Tier A needs a CI build lane, which alp-sdk does not have for Yocto/ROS.
 #
 # Version:  `humble` -- the ROS 2 Humble distro meta-alp-sdk targets
-#   (conf/distro/include/ros2-humble-build.inc; recipes-ros inherit
+#   (conf/distro/include/ros2-humble-build.inc; dynamic-layers/ros2-humble-layer recipes inherit
 #   ros_distro_humble).  Pairs with the micro-ros.yaml Humble M-side.
 # License:  Apache-2.0 -- the ROS 2 core (rclcpp, rcl, the message packages) is
 #   Apache-2.0.

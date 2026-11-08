@@ -18,9 +18,21 @@ project(aen_npu_inference_alp_u55 LANGUAGES C CXX)
 
 set(AEN_NPU_VELA   "vela"
     CACHE FILEPATH "Vela compiler (on PATH, or -DAEN_NPU_VELA=<venv>/bin/vela)")
-# THE DIFFERENCE vs the U85 sibling: the E8 M55-HE-paired NPU is a 128-MAC U55.
-set(AEN_NPU_ACCEL  "ethos-u55-128"
-    CACHE STRING   "Vela --accelerator-config (E8 M55-HE U55 is 128-MAC)")
+# THE DIFFERENCE vs the U85 sibling: the E8 per-core-local NPU is a U55, and
+# its MAC count is core-specific -- the M55-HE-paired U55 is 128-MAC, the
+# M55-HP-paired U55 (same shared DT node, different silicon) is 256-MAC (see
+# ensemble_e8_peripherals.dtsi).  Pick the Vela accelerator config + Alif
+# system-config off BOARD so a single app source builds correctly for
+# whichever core's board target is passed to `west build -b`.
+if(BOARD MATCHES "_m55_hp$")
+	set(_aen_npu_accel_default      "ethos-u55-256")
+	set(_aen_npu_sysconfig_default  "RTSS_HP_SRAM_Only")
+else()
+	set(_aen_npu_accel_default      "ethos-u55-128")
+	set(_aen_npu_sysconfig_default  "RTSS_HE_SRAM_Only")
+endif()
+set(AEN_NPU_ACCEL  "${_aen_npu_accel_default}"
+    CACHE STRING   "Vela --accelerator-config (128-MAC on M55-HE, 256-MAC on M55-HP)")
 set(AEN_NPU_MODEL  "${ZEPHYR_TFLITE_MICRO_MODULE_DIR}/tensorflow/lite/micro/models/person_detect.tflite"
     CACHE FILEPATH "Input int8 .tflite to Vela-compile")
 set(AEN_NPU_MODEL_NAME "person_detect_u55"
@@ -33,10 +45,10 @@ if(NOT AEN_NPU_VELA_CONFIG)
 		"built-in system-config and the command stream will NOT match the bench "
 		"runtime.  Pass -DAEN_NPU_VELA_CONFIG=<alif>/ensemble_vela.ini.")
 endif()
-# The M55-HE-paired U55 uses the HE core's SRAM-only memory view (the Alif
-# ensemble_vela.ini has no Ethos_U55-specific section; the per-core RTSS_HE
-# config describes the U55's memory: axi0_port=Sram).
-set(AEN_NPU_SYSTEM_CONFIG "RTSS_HE_SRAM_Only" CACHE STRING "Vela --system-config")
+# Each core's U55 uses that core's SRAM-only memory view (the Alif
+# ensemble_vela.ini has no Ethos_U55-specific section; the per-core
+# RTSS_HE/RTSS_HP config describes the U55's memory: axi0_port=Sram).
+set(AEN_NPU_SYSTEM_CONFIG "${_aen_npu_sysconfig_default}" CACHE STRING "Vela --system-config")
 set(AEN_NPU_MEMORY_MODE   "Sram_Only"         CACHE STRING "Vela --memory-mode")
 
 set(AEN_NPU_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/model-gen")

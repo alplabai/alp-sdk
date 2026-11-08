@@ -1,5 +1,7 @@
 # Linux Build — Phase 2: Unified `alp build` front-end
 
+> **Note (2026-10-10):** E1M-NX9101 / NXP i.MX 93 was removed in #2781 / #2782 (67ed22d86; the module was never produced): the `nxp_imx93` / `e1m-nx9101` provider and machine references below are history; no NXP target ships.
+
 > **STATUS — SUPERSEDED, DO NOT IMPLEMENT.** [ADR 0020](../../adr/0020-sdk-owns-build-execution.md)
 > (accepted 2026-07-18/20) retired every SDK-side build-execution verb
 > in favour of the standalone `tan` CLI; `scripts/alp_cli/` carries no

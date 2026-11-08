@@ -1,0 +1,42 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# alp,gd32-pads -- the GD32G553 control pads the V2N CM33 drives or watches
+# outside the SPI link: SWD (SWDIO / SWCLK / NRST) and the bridge ATTN input.
+
+description: |
+  Generated from metadata/e1m_modules/v2n/supervisor-links.yaml (`gd32_pads`).
+
+  DELIBERATELY its own binding rather than entries of "alp,pin-array": that
+  array is a single positional table whose index 0 is the GD32 SPI
+  chip-select (Renesas P97 = GD32 PA8), so any id that drifted by one would
+  drive the chip-select.  These pads are resolved only through the INTERNAL
+  pad opener (GD32G553_PAD_ID_SWDIO / _SWCLK / _NRST / _ATTN) used by the SWD
+  driver and the V2N supervisor; the portable alp_gpio_open() refuses those ids.
+
+  swclk-gpios and attn-gpios name the SAME pad (P71 = GD32 PA14) in two roles:
+  GD32 SWCLK, which the host may drive only inside an SWD session with
+  GD32_NRST asserted first, and the bridge ATTN output, which the host watches
+  as an input with a rising-edge interrupt.  The pads are plain GPIO (no
+  pinctrl function), hence inputs out of reset.
+
+  nrst-gpios is open-drain on the board (shared with the primary PMIC's
+  reset-out).  The flag is not set here because the Renesas RZ GPIO driver has
+  no open-drain mode; the SWD driver emulates it (output low = assert, input =
+  release) and never drives the pad high.
+
+compatible: "alp,gd32-pads"
+
+properties:
+  swdio-gpios:
+    type: phandle-array
+    required: true
+  swclk-gpios:
+    type: phandle-array
+    required: true
+  nrst-gpios:
+    type: phandle-array
+    required: true
+  attn-gpios:
+    type: phandle-array
+    required: true

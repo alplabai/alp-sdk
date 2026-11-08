@@ -1,0 +1,115 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * alp-sdk MIPI CSI-2 camera-capture overlay for the Alif Ensemble E4
+ * (AE402FA0E5597) M55-HP board (E1M-AEN401): the nodes the e1m_evk_rpi_csi
+ * shield needs -- i2c1 (sensor CCI bus), gpio12 (CSI mux SEL, P12_5) and the
+ * CPI (cam) / CSI-2 host (csi) / D-PHY (dphy) camera chain.  Upstream Zephyr's
+ * Alif SoC layer declares none of them for the E4.
+ *
+ * The node bodies are copied VERBATIM from ensemble_e8_peripherals.dtsi (see
+ * the long CAMERA CAPTURE comment there for the clock and driver rationale).
+ * They are valid on the E4 because the Alif DFP for THIS part,
+ * Device/soc/AE402FA0E5597/include/rtss_hp/soc.h, gives the same addresses
+ * and IRQs as the E8: I2C1_IRQ_IRQn 133 (:213), GPIO12_IRQ0..7_IRQn 275..282
+ * (:356-363), CSI_IRQ_IRQn 344 (:452), CAM_IRQ_IRQn 345 (:453), GPIO12_BASE
+ * 0x4900C000 (:3591), I2C1_BASE 0x49011000 (:3595), DSI_BASE 0x49032000
+ * (:3642), CSI_BASE 0x49033000 (:3643), CPI_BASE 0x49030000 (:3640),
+ * CLKCTL_PER_MST_BASE 0x4903F000 (:3648).
+ * The clock ids are the generic ALIF_*_CLK encodings of
+ * alif-ensemble-clocks-ext.h resolved by the E4's own clockctrl node
+ * (ensemble_common.dtsi), the same one the E8 uses.
+ *
+ * Nodes stay status = "disabled"; the shield enables them.  Tier-2 camera
+ * drivers (as on E8), BENCH-UNVERIFIED on the E4 by Alp Lab.  A customer's
+ * equivalent local build on an E1M-AEN401 powers the D-PHY and sees the
+ * sensor's lanes leave LP-11; no frame has been captured on E4 yet.
+ */
+
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+&soc {
+	gpio12: gpio@4900c000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900c000 0x1000>;
+		ngpios = <8>;
+		interrupts = <275 3>, <276 3>, <277 3>, <278 3>,
+			     <279 3>, <280 3>, <281 3>, <282 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	i2c1: i2c@49011000 {
+		compatible = "snps,designware-i2c";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x49011000 0x1000>;
+		interrupts = <133 3>;
+		clock-frequency = <I2C_BITRATE_STANDARD>;
+		fs-spike-len = <5>;
+		hs-spike-len = <1>;
+		status = "disabled";
+	};
+
+	dphy: d-phy@49033000 {
+		compatible = "snps,designware-dphy";
+		reg = <0x49033000 0x1000>,
+		      <0x49032000 0x1000>,
+		      <0x4903F000 0x40>;
+		reg-names = "csi_reg", "dsi_reg", "expmst_reg";
+		#dphy-cells = <1>;
+		clocks = <&clockctrl ALIF_MIPI_PLLREF_CLK>,
+			 <&clockctrl ALIF_MIPI_BYPASS_CLK>,
+			 <&clockctrl ALIF_MIPI_TXDPHY_CLK>,
+			 <&clockctrl ALIF_MIPI_RXDPHY_CLK>;
+		clock-names = "pllref-clk", "pllbypass-clk", "tx-dphy-clk", "rx-dphy-clk";
+		ref-frequency = <38400000>;
+		cfg-clk-frequency = <25000000>;
+		status = "disabled";
+	};
+
+	cam: cam@49030000 {
+		compatible = "alif,cam";
+		reg = <0x49030000 0x1000>;
+		interrupts = <345 0>;
+		clocks = <&clockctrl ALIF_CPI_CLK>, <&clockctrl ALIF_CAM_PIX_SYST_ACLK>;
+		clock-names = "cam_clk", "pix_clk";
+		fifo-wr-wmark = <0x18>;
+		fifo-rd-wmark = <0x08>;
+		wait-vsync;
+		status = "disabled";
+	};
+
+	csi: csi@49033000 {
+		compatible = "snps,designware-csi";
+		reg = <0x49033000 0x1000>;
+		interrupts = <344 0>;
+		clocks = <&clockctrl ALIF_CSI_CLK>, <&clockctrl ALIF_CSI_PIX_SYST_ACLK>;
+		clock-names = "csi_clk", "pix_clk";
+		ipi-mode = "Camera";
+		phy-if = <&dphy 1>, <&dphy 0>;
+		csi-hsa = <5>;
+		csi-hbp = <10>;
+		csi-hsd = <280>;
+		csi-hact = <560>;
+		csi-vsa = <4>;
+		csi-vbp = <4>;
+		csi-vfp = <4>;
+		csi-vact = <560>;
+		status = "disabled";
+	};
+
+	/*
+	 * Label-only placeholder, NOT hardware: the E4 DFP has no ISP (no ISP_BASE in
+	 * AE402FA0E5597/include/rtss_hp/soc.h; only JPEG_BASE :3651).  The
+	 * innomaker_cam_imx335 shield sets the ISP crop on `&isp`, which must
+	 * resolve for the shield to build.  No compatible, always disabled, so no
+	 * driver binds and the ISP-dependent examples stay E8-only.
+	 */
+	isp: isp-absent {
+		status = "disabled";
+	};
+};

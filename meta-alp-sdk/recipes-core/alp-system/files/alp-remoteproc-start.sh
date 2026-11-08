@@ -3,7 +3,7 @@
 #
 # alp-remoteproc-start.sh -- Phase 3 remoteproc lifecycle launcher.
 #
-# On a heterogeneous SoM (V2N / AEN / NX9101) the Linux A-class side
+# On a heterogeneous SoM (V2N / AEN) the Linux A-class side
 # is responsible for loading + starting the M-class firmware whose
 # ELF the orchestrator installed at /lib/firmware/alp/<SKU>/*.elf.
 # The kernel's remoteproc framework exposes each programmable peer

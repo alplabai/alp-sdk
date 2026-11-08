@@ -22,7 +22,7 @@ SUMMARY = "Alp SDK headless base image (core runtime + OTA, no feature groups)"
 
 require alp-image-common.inc
 
-# DRP-AI (meta-rz-drpai's lib-tvm + kernel-module-mmngr, + the SDK sysroot
+# DRP-AI (meta-rz-drpai's kernel-module-mmngr, + the SDK sysroot
 # headers for all three meta-rz-* layers) IS installed here via
 # alp-image-common.inc -- core SoC capability, not camera/display-tied;
 # this file's own header above already documented that promise, and base

@@ -32,7 +32,6 @@ families:
   - aen
   - v2n
   - v2n-m1
-  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
@@ -52,3 +51,5 @@ physical:
   operating_temp_deg_c: "-35..75 (operating); -40..85 (extended)"
   visibility:           public
   provenance:           web_provisional
+tracking:
+  blocker: "no child issue filed; not scheduled, deferred until a product selects the part"

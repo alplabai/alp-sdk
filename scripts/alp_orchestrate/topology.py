@@ -34,7 +34,7 @@ def _default_os_from_core_type(core_type: str) -> str:
         anything else ->  off
 
     Used as the fallback when a SoM preset's `topology.<core>.os` is
-    omitted (the field is now optional in som-preset-v1.schema.json --
+    omitted (the field is now optional in som-preset-v2.schema.json --
     M-class cores default to Zephyr, A-class to Yocto).
 
     *core_type* is typed `str`, but the value is read straight off a SoC

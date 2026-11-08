@@ -4,6 +4,10 @@ Status: Accepted
 Date: 2026-05-18
 Deciders: alpCaner
 
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The E1M family today is Alif Ensemble only (AEN301..AEN803, `metadata/socs/alif/ensemble/`); `metadata/socs/nxp/imx9/imx93.json` is deleted. The "NXP i.MX 93 (NX9101)" and "Cortex-A55 + Cortex-M33 on NX9101" claims below are history. E1M-X (V2N/V2M) is unaffected.
+
 ## Context
 
 The SDK targets two distinct product lines:

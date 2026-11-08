@@ -676,23 +676,34 @@ static void ota_progress(size_t off, size_t total, int64_t t_begin)
 
 #ifdef CC3501E_OTA_PROMOTE
 /*
- * Promote (unjam) an already-committed pending image.  The over-bridge install
- * leaves the image STAGED and relies on the CC35's OWN `psa_fwu_request_reboot()`
- * (armed at FINISH) to swap it.  An image left pending by a bare reset (which
- * carries no swap request) jams the slot: a fresh `cc3501e_ota_update`
- * short-circuits on the occupied slot and can never re-arm the reboot.
- * `cc3501e_ota_promote()` requests the swap-reboot for that committed image.
- * Build with -DCC3501E_OTA_PROMOTE=ON to swap-boot an image a prior
- * -DCC3501E_OTA_REAL run left STAGED-but-unpromoted.
+ * Show what a standalone PROMOTE does to an image a PRIOR boot staged.  It does
+ * not swap it.  FINISH only stages; PROMOTE commits, and only in the SAME
+ * CC3501E boot as that FINISH: the TI PSA-FWU swap request lives in CC3501E
+ * RAM and is gone after any reboot or reset.  This mode always runs in a later
+ * boot than the -DCC3501E_OTA_REAL run that staged the image, so the device
+ * refuses the swap (`psa_fwu_request_reboot()` -> PSA_ERROR_BAD_STATE, stored
+ * as OTA_STATUS reserved[0] = 119) and the image stays STAGED (#2741).  The way
+ * to get that image in is OTA_ABORT (or a new BEGIN) and a full re-send;
+ * `cc3501e_ota_update()` already sends FINISH and PROMOTE back to back.
+ * Build with -DCC3501E_OTA_PROMOTE=ON to watch the refusal on a unit.
  */
 static void cc3501e_demo_ota_promote(cc3501e_t *fw)
 {
-	printf("[cc3501e-bringup] OTA: promoting the pending image (cc3501e_ota_promote)...\n");
+	printf("[cc3501e-bringup] OTA: promote an image staged in an earlier boot "
+	       "(expected: refused, reserved[0] = 119)...\n");
 	alp_status_t s = cc3501e_ota_promote(fw, CC3501E_OTA_DEMO_TIMEOUT_MS);
 	if (s == ALP_OK) {
-		printf("[cc3501e-bringup] OTA promote acked -- the CC35 swaps+boots the pending "
-		       "slot; the bridge drops during its reboot, then GET_VERSION should report "
-		       "the new image\n");
+		/* An ack is not a swap.  If the link stays up, the status says why. */
+		alp_cc3501e_ota_status_t st = { 0 };
+		if (cc3501e_ota_status(fw, &st, CC3501E_OTA_DEMO_TIMEOUT_MS) == ALP_OK) {
+			printf("[cc3501e-bringup] OTA promote acked; OTA_STATUS reserved[0]=%u "
+			       "pending=%u (119 + STAGED = cannot promote; abort and re-send)\n",
+			       (unsigned)st.reserved[0],
+			       (unsigned)st.pending);
+		} else {
+			printf("[cc3501e-bringup] OTA promote acked and the link dropped -- a swap "
+			       "reboot is in progress\n");
+		}
 	} else if (s == ALP_ERR_NOT_READY) {
 		printf("[cc3501e-bringup] OTA promote -> NOT_READY (no PSA-FWU in this build)\n");
 	} else {
@@ -704,8 +715,8 @@ static void cc3501e_demo_ota_promote(cc3501e_t *fw)
 static void cc3501e_demo_ota(cc3501e_t *fw)
 {
 #ifdef CC3501E_OTA_PROMOTE
-	/* Unjam/promote mode: do NOT stream -- request the swap for an image a prior
-	 * run left STAGED-but-unpromoted (a fresh stream would short-circuit). */
+	/* Promote-only mode: do NOT stream -- show that an image a prior boot staged
+	 * cannot be promoted now (see cc3501e_demo_ota_promote). */
 	cc3501e_demo_ota_promote(fw);
 	return;
 #endif
@@ -1161,18 +1172,23 @@ int main(void)
 	/*
 	 * Step 5 -- read + check the protocol version.
 	 *
-	 * GET_VERSION returns the *protocol* version; it must match
-	 * ALP_CC3501E_PROTOCOL_VERSION for the wire contract to hold.
+	 * GET_VERSION returns the *protocol* version.  Only the MAJOR has to match
+	 * ALP_CC3501E_PROTOCOL_VERSION for the wire contract to hold; a MINOR skew is
+	 * additive and compatible (ADR 0033), so it is not reported as a mismatch.
 	 */
 	uint16_t version          = 0u;
 	s                         = cc3501e_get_version(&fw, &version);
 	g_cc3501e_witness.version = (uint32_t)version | ((uint32_t)(uint8_t)s << 16);
 	g_cc3501e_witness.phase   = CC3501E_PHASE_VERSION;
 	if (s == ALP_OK) {
+		const bool major_ok = ALP_CC3501E_PROTOCOL_VERSION_MAJOR(version) ==
+		                      ALP_CC3501E_PROTOCOL_VERSION_MAJOR(ALP_CC3501E_PROTOCOL_VERSION);
 		printf("[cc3501e-bringup] GET_VERSION -> protocol v%u (host expects v%u)%s\n",
 		       version,
 		       ALP_CC3501E_PROTOCOL_VERSION,
-		       (version == ALP_CC3501E_PROTOCOL_VERSION) ? " -- match" : " -- MISMATCH!");
+		       major_ok ? ((version == ALP_CC3501E_PROTOCOL_VERSION) ? " -- match"
+		                                                             : " -- match (MINOR skew ok)")
+		                : " -- MISMATCH!");
 	} else {
 		printf("[cc3501e-bringup] GET_VERSION -> %d\n", (int)s);
 	}

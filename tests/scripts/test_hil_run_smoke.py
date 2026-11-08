@@ -449,7 +449,6 @@ _SHIPPED_BOARDS = (
     "aen701-evk", "aen801-evk",
     "v2n101-x-evk", "v2n102-x-evk", "v2n103-x-evk",
     "v2m101-x-evk", "v2m102-x-evk", "v2m103-x-evk",
-    "nx9101-evk",
 )
 
 
@@ -514,7 +513,7 @@ def test_v2n101_board_carries_v2n_specific_specs() -> None:
     """The V2N101 board dir adds GD32-bridge + temp-sensor specs on
     top of _common/.  Catches a regression where the per-board
     extensions get accidentally moved into _common/ (where they'd
-    fail on AEN / NX9 silicon)."""
+    fail on AEN silicon)."""
     pairs = run_smoke.discover_specs_for_board(
         _SHIPPED_HIL_DIR / "v2n101-x-evk",
     )
@@ -688,7 +687,7 @@ def test_ssh_command_spec_runs_plain_ssh_and_asserts_output(tmp_path: Path) -> N
     spec = run_smoke.parse_spec(d / "cmd.yaml")
     assert spec.example is None
     spec = dataclasses.replace(spec, ssh_host="root@board")
-    assert run_smoke.capture_command(spec) == ["ssh", "root@board", "echo HIL_OK"]
+    assert run_smoke.capture_command(spec) == ["ssh", "root@board", "sh", "-s"]
     assert run_smoke.assert_serial(spec, "HIL_OK\n") == []
     assert run_smoke.assert_serial(spec, "HIL_OK HIL_BAD") != []
     # ssh_command excludes an example binary.
@@ -698,3 +697,148 @@ def test_ssh_command_spec_runs_plain_ssh_and_asserts_output(tmp_path: Path) -> N
         encoding="utf-8")
     with pytest.raises(run_smoke.SpecError):
         run_smoke.parse_spec(d / "bad.yaml")
+
+
+# ---------------------------------------------------------------------
+# V2M103 bench-observed identity values (#1160)
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "spec_name, needles",
+    [
+        ("v2m103-pmic-i2c", ("HIL_ACT88760_ACK_0x25", "HIL_DA9292_ACK_0x1E")),
+        ("v2m103-ethernet-phy-id", ("HIL_PHY_ID_OK",)),
+        ("v2m103-kernel-version", ("HIL_KERNEL_OK",)),
+        ("v2m103-rtc-ticks", ("HIL_RTC_I2C_8_0052", "HIL_RTC_TICKS_OK")),
+    ],
+)
+def test_v2m103_observed_value_specs(spec_name: str, needles: tuple) -> None:
+    spec = run_smoke.parse_spec(
+        _SHIPPED_HIL_DIR / "v2m103-x-evk" / f"{spec_name}.yaml")
+    assert spec.flash_method == run_smoke.SSH_RUN
+    assert set(needles) <= set(spec.serial.expect_contains)
+    # The observed literal is encoded in the command, not just the marker.
+    literal = {
+        "v2m103-pmic-i2c": "0x25",
+        "v2m103-ethernet-phy-id": "001cc916",
+        "v2m103-kernel-version": "6.1.141-cip43-yocto-standard",
+        "v2m103-rtc-ticks": "8-0052",
+    }[spec_name]
+    assert literal in spec.ssh_command
+
+
+def test_ssh_command_is_sent_on_stdin_not_argv(tmp_path: Path, monkeypatch) -> None:
+    import dataclasses
+    import subprocess
+
+    d = _make_spec_dir(tmp_path)
+    cmd = r'printf "\$(printf %03o 50)"; echo HIL_OK'
+    (d / "cmd.yaml").write_text(
+        "schema_version: 1\nname: cmd\nflash_method: ssh-run\n"
+        f"ssh_command: |-\n  {cmd}\nserial:\n  expect_contains: [HIL_OK]\n",
+        encoding="utf-8")
+    spec = dataclasses.replace(
+        run_smoke.parse_spec(d / "cmd.yaml"), ssh_host="root@board")
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen.update(argv=argv, input=kw.get("input"))
+        return subprocess.CompletedProcess(argv, 0, b"HIL_OK\n", b"")
+
+    monkeypatch.setattr(run_smoke.subprocess, "run", fake_run)
+    result = run_smoke.run_spec(spec)
+    assert result.ok
+    assert seen["argv"][-2:] == ["sh", "-s"]
+    assert cmd not in " ".join(seen["argv"])
+    # Bytes, so Windows text mode cannot turn newlines into CRLF.
+    assert isinstance(seen["input"], bytes)
+    assert cmd.encode() in seen["input"]
+    assert b"\r" not in seen["input"]
+
+
+def test_failed_spec_prints_board_output(capsys) -> None:
+    spec = run_smoke.parse_spec(
+        _SHIPPED_HIL_DIR / "v2m103-x-evk" / "v2m103-kernel-version.yaml")
+    res = run_smoke.SmokeResult(spec, False, ("missing expected: 'X'",), "boom: no bytes\n")
+    assert run_smoke._print_summary([res]) == 1
+    out = capsys.readouterr().out
+    assert "board output:" in out and "boom: no bytes" in out
+    ok = run_smoke.SmokeResult(spec, True, (), "quiet")
+    run_smoke._print_summary([ok])
+    assert "quiet" not in capsys.readouterr().out
+
+
+def test_ssh_command_nonzero_exit_fails_despite_matching_output(tmp_path: Path, monkeypatch) -> None:
+    import dataclasses
+    import subprocess
+
+    d = _make_spec_dir(tmp_path)
+    (d / "cmd.yaml").write_text(
+        "schema_version: 1\nname: cmd\nflash_method: ssh-run\n"
+        "ssh_command: \"echo HIL_OK\"\nserial:\n  expect_contains: [HIL_OK]\n",
+        encoding="utf-8")
+    spec = dataclasses.replace(run_smoke.parse_spec(d / "cmd.yaml"), ssh_host="root@board")
+    monkeypatch.setattr(
+        run_smoke.subprocess, "run",
+        lambda argv, **kw: subprocess.CompletedProcess(argv, 1, b"HIL_OK\n", b""))
+    result = run_smoke.run_spec(spec)
+    assert not result.ok
+    assert "rc=1" in result.failures[0]
+
+
+def test_ssh_run_binary_exit_code_feeds_verdict(tmp_path: Path, monkeypatch) -> None:
+    import dataclasses
+    import subprocess
+
+    artifact_dir = tmp_path / "art"
+    artifact_dir.mkdir()
+    spec = _args_files_spec(tmp_path)
+    (artifact_dir / run_smoke._artifact_name(spec)).write_bytes(b"binary")
+    for local, _remote in spec.ssh_files:
+        (artifact_dir / local).write_bytes(b"x")
+    spec = dataclasses.replace(
+        spec, ssh_host="root@board", artifact_dir=str(artifact_dir),
+        serial=dataclasses.replace(spec.serial, expect_contains=("HIL_OK",), expect_absent=()))
+    forever = dataclasses.replace(
+        spec, serial=dataclasses.replace(spec.serial, runs_until_killed=True))
+
+    def run_with(final_rc: int, which=spec):
+        def fake(argv, **kw):
+            is_capture = argv[0] == "ssh" and "wait $p" in argv[-1]
+            return subprocess.CompletedProcess(
+                argv, final_rc if is_capture else 0, b"HIL_OK\n", b"")
+        monkeypatch.setattr(run_smoke.subprocess, "run", fake)
+        return run_smoke.run_spec(which)
+
+    assert run_with(0).ok
+    assert run_with(143, forever).ok  # bounded stop of a forever-loop example
+    hung = run_with(143)  # a hang killed by the sleeper is not a pass
+    assert not hung.ok
+    assert "rc=143" in hung.failures[0]
+    bad = run_with(139)  # segfault after the banner
+    assert not bad.ok
+    assert "rc=139" in bad.failures[0]
+
+
+def test_ssh_run_wrapper_propagates_example_status(tmp_path: Path) -> None:
+    """The remote wrapper must exit with the example's status, not kill's."""
+    import dataclasses
+    import shutil
+    import subprocess
+
+    sh = shutil.which("sh")
+    if sh is None:
+        pytest.skip("no POSIX sh")
+    spec = dataclasses.replace(_args_files_spec(tmp_path), ssh_host="root@board")
+    argv = run_smoke.capture_command(spec)
+    wrapper = argv[-1]
+    assert "wait $p; rc=$?" in wrapper
+    assert wrapper.endswith("exit $rc; }")
+    # Run the wrapper body locally with a stub example that exits 139.
+    stub = tmp_path / "stub.sh"
+    stub.write_text("#!/bin/sh\nexit 139\n", encoding="utf-8")
+    stub.chmod(0o755)
+    body = wrapper.split("&& ", 1)[1].replace(f"/tmp/{run_smoke._artifact_name(spec)}", stub.as_posix())
+    res = subprocess.run([sh, "-c", body], capture_output=True, timeout=30)
+    assert res.returncode == 139

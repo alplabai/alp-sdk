@@ -2,7 +2,8 @@
 #
 # E1M-V2M103 RV3028 RTC (0x52) registered as a Linux rtc device and
 # ticking: since_epoch advances across a 2 s sleep.  Read-only; the RTC is not
-# set.  The DT alias pins rv3028 to rtc0.
+# set.  The DT alias pins rv3028 to rtc0.  The RV3028 sits on BRD_I2C
+# (bus 8) at 0x52, so the i2c device node 8-0052 must exist too.
 
 schema_version: 1
 name: v2m103-rtc-ticks
@@ -11,6 +12,7 @@ description: |
 
 flash_method: ssh-run
 ssh_command: |-
+  [ -e /sys/bus/i2c/devices/8-0052 ] && echo HIL_RTC_I2C_8_0052
   r=/sys/class/rtc/rtc0
   a=$(cat $r/since_epoch 2>/dev/null) || { echo "HIL_RTC_UNSET rtc0 unreadable (clock unset?)"; exit 0; }
   sleep 2; b=$(cat $r/since_epoch)
@@ -20,4 +22,5 @@ ssh_command: |-
 serial:
   duration_s: 10
   expect_contains:
+    - "HIL_RTC_I2C_8_0052"
     - "HIL_RTC_TICKS_OK"

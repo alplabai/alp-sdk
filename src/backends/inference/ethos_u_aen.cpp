@@ -13,18 +13,16 @@
  * alp_inference_tflm_ops verbatim and only differs in the
  * ALP_BACKEND_REGISTER row.
  *
- * What does change between AEN and i.MX 93 lives outside the
+ * What differs per Ensemble part lives outside the
  * SDK source: the Vela compiler's --accelerator-config flag
- * (ethos-u55-256 / ethos-u85-256 on AEN; ethos-u65-256 on
- * i.MX 93), the Arm Ethos-U driver library build (U55-HP vs
- * U65-Dual vs U85-Tensor configurations), and the SoC-side DT
+ * (ethos-u55-256 / ethos-u85-256), the Arm Ethos-U driver
+ * library build (U55-HP vs U85-Tensor configurations), and the SoC-side DT
  * binding for the NPU IRQ / SRAM region.  The orchestrator
  * (scripts/alp_orchestrate.py) emits the matching CONFIG_ trio
  * (ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN +
  *  ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55/U85 +
  *  ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM) for AEN slices from
- * the SoM preset's inference.npu_population[] + the SoC JSON's
- * cores[<id>].vector_extension.
+ * the SoC JSON's npus[] + cores[<id>].vector_extension.
  *
  * The NPU attach is NOT Alif-proprietary.  The "arm,ethos-u"
  * nodes (ethosu85@49042000 / ethosu55@400e1000 in the AEN dtsi,

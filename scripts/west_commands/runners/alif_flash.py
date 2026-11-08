@@ -1055,6 +1055,7 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
                 self.se_uart, self.se_uart_baud, maintenance_available,
                 banner_text, banner_rc, gettoc_text, gettoc_rc))
 
+        # Stalled reads exit 0 with no closing line (#2538); see _is_table_structurally_complete.
         query_status = _aen_atoc.compute_query_status(
             maintenance_available, banner_text, banner_rc, gettoc_text,
             gettoc_rc)

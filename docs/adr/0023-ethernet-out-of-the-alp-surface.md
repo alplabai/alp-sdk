@@ -3,6 +3,10 @@
 Status: Proposed
 Date: 2026-08-05
 
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The NX91 bullet in Context and the "one case remains false" note on `include/alp/soc_caps.h:333` below no longer apply: `E1M-NX9101.yaml` and `imx93.json` are deleted, so there is no unknown-port-count SoM left. The decision is unchanged.
+
 ## Context
 
 There is no `include/alp/net.h`. Issue #1144 raises Ethernet as the

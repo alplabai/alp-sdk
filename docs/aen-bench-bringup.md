@@ -24,7 +24,7 @@ the flows here apply to both SKUs unchanged.
 | **I2C2 + 24C128 EEPROM** (`i2c_dw`, Tier-1) | ✅ PASS | EEPROM ACKs at 0x50 and returns a **populated Alp manifest** (not blank) — magic `ALPH`, SKU, serial, mfg date, CRC-32 all decode; one of 12 devices on the bus (the same N24S128 part also answers its `1011` second device-select header at 0x58 — see §3) — once the pinctrl carries the **pad config** Alif's reference uses — `input-enable` (REN) + `bias-pull-down` (DSC=2). See §3. |
 | **PWM** (Tier-1.5) | ✅ PASS | pwm_set_cycles reg readback matches (CNTR_PTR/COMPARE/CTRL), shares the hal_alif UTIMER start-path the counter fix validated. |
 | **SPI** (`alif,dwc-ssi-spi`, Tier-2) | ✅ PASS *after a fix* | DWC-SSI stayed in slave mode → `spi_transceive` -116 (TX FIFO full, no SCLK). The Alif SoC gates master mode behind `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`), which upstream never sets. **PR #162** sets it in the driver. Re-validated: `rc=0`, internal-loopback `rx==tx`, CTRLR0=`0x80002007`. See §3. |
-| **Ethernet** (`alif,ethernet` / `eth_dwmac`, Tier-1.5) | ✅ PASS *after a fix* | Real cause of the long no-link: the GMAC DMA descriptor rings + net_buf pool sat in the M55 **DTCM** (`zephyr,sram = &dtcm`), which is **not** on the GMAC DMA bus. Fix: `zephyr,sram = &sram0` (global on-chip SRAM `0x02000000`, CPU addr == DMA addr) + `CONFIG_DCACHE=n` -- moved ALL of main RAM to SRAM0. The PHY power (`E_PHY_PWRDWN` = P15_4), reset (`E_PHY_RESET` = P11_6), and RCSR bit7 `REF_CLK_SEL=1` were already correct. Re-validated end-to-end: DHCP lease `192.168.10.137` (server-side dnsmasq lease + ARP `REACHABLE`). **Silicon-verified on E1M-AEN803 (bench run 202)**: only the Ethernet-owned buffers move now -- the ethernet node's `memory-region = <&sram0>;` (descriptor rings) + `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` (net_buf pool, `subsys/net/ip/net_pkt.c`) -- while main RAM stays on DTCM; DHCP lease `192.168.10.123`, ping 5/5 (avg 0.271 ms), rings resolving into `net_buf_data_rx/tx_bufs` in SRAM0, main RAM on DTCM. E1M-AEN801 is build-verified only. An earlier, different prototype of the same idea ran on silicon in scratch bench run 200 (a different app-level relocation, `CONFIG_NOCACHE_MEMORY=y`, and different ring addresses), not this exact mechanism. See §3. |
+| **Ethernet** (`alif,ethernet` / `eth_dwmac`, Tier-1.5) | ✅ PASS *after a fix* | Real cause of the long no-link: the GMAC DMA descriptor rings + net_buf pool sat in the M55 **DTCM** (`zephyr,sram = &dtcm`), which is **not** on the GMAC DMA bus. Fix: `zephyr,sram = &sram0` (global on-chip SRAM `0x02000000`, CPU addr == DMA addr) + `CONFIG_DCACHE=n` -- moved ALL of main RAM to SRAM0. The PHY power (`E_PHY_PWRDWN` = P15_4), reset (`E_PHY_RESET` = P11_6), and RCSR bit7 `REF_CLK_SEL=1` were already correct. Re-validated end-to-end: a DHCP lease (server-side dnsmasq lease + ARP `REACHABLE`). **Silicon-verified on E1M-AEN803 (bench run 202)**: only the Ethernet-owned buffers move now -- the ethernet node's `memory-region = <&sram0>;` (descriptor rings) + `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` (net_buf pool, `subsys/net/ip/net_pkt.c`) -- while main RAM stays on DTCM; a DHCP lease, ping 5/5 (avg 0.271 ms), rings resolving into `net_buf_data_rx/tx_bufs` in SRAM0, main RAM on DTCM. E1M-AEN801 is build-verified only. An earlier, different prototype of the same idea ran on silicon in scratch bench run 200 (a different app-level relocation, `CONFIG_NOCACHE_MEMORY=y`, and different ring addresses), not this exact mechanism. See §3. |
 | **UART3** (`ns16550`, Tier-1) | ✅ PASS | Internal loopback. |
 | **Counter** (`utimer0`, Tier-1.5) | ✅ PASS | UTIMER0 counter advances. |
 | **Counter alarm** (`utimer0` COMPARE-A, Tier-1.5) | ✅ PASS *after a fix* (RAM-run, 2026-06-17) | The COMPARE-A one-shot **alarm** fires + re-arms (`fired=2`). Two bring-up bugs fixed in `counter_alif_utimer.c`: (1) the match interrupt compares the `COMPARE_A_BUF1` **shadow** register (`0xD4`), not the `COMPARE_A` reg (`0xD0`) the driver wrote — so the shadow stayed 0 and bit2 only matched at the start `CNTR==0` tick; (2) the alarm's NVIC line is `comp_a_buf1` (the bit2 event), not `comp_capt_a` (bit0/CAPTURE_A) — so even once bit2 latched its line was never enabled. Regression: `examples/aen/aen-counter-alarm-regcheck`. |
@@ -39,13 +39,14 @@ the flows here apply to both SKUs unchanged.
 | **I2S TX** (`i2s3`) | ✅ PASS | Clocks the tone out with the 76.8 MHz audio clock. **Update (2026-09-15, E1M-AEN803 serial 2026W36-0002): audible amp output** verified 🟡 PARTIAL with U46 replaced by a 3257-type bus switch powered from `+3V3` (the as-built 74LVC157 is a one-way mux, never passes SoC→amp I2S at any VCC) + TAS2563 config; an open TDM clock-error latch and open issue #2146 (amp auto-shutdown after I2S stop) remain. |
 | **Quadrature encoder** (`qenc`) | 🟡 PARTIAL *(HW-gated)* | Driver reads clean; count is static until the encoder is physically spun. Not a code/Flow-D bug. |
 | **SD card** (DWC SDHC) | 🟡 PARTIAL | **Update (2026-09-15, E1M-AEN803 serial 2026W36-0002, at 25 MHz, after a U38 solder fix):** 4-bit SD read proven with U38/U39/U46 hand-reworked to 3257-type, but only with the unmerged enable path (#2122, clock gate) plus the unmerged `test/2051-sdhc-enable-on-reworked-mux` branch (ADMA address translation, system RAM in SRAM0) -- dev's SD path is unverified until that lands. EN=IO20, CC3501E-side on both hw revisions; SEL=IO21, CC3501E-side on r1 only -- unrouted/hardware-strapped on r2. |
-| **GPU2D** (`<alp/gpu2d.h>` sw_fallback) | ✅ PASS (RAM-run, 2026-06-17) | Portable 2D surface on the M55-HE via the priority-0 pure-C software fallback (the D/AVE 2D HW backend is opt-in + bench-unverified). `fill_rect` + clip, `blit`, and all four `blend` modes (REPLACE/SRC_OVER/ADDITIVE/MULTIPLY) produce **exact** expected pixels on silicon. Example: `examples/aen/aen-gpu2d-bench`. The D/AVE 2D hardware backend (`alif_dave2d.c`) is the separate bucket-C item. |
+| **GPU2D** (`<alp/gpu2d.h>` sw_fallback) | ✅ PASS (RAM-run, 2026-06-17) | Portable 2D surface on the M55-HE via the priority-0 pure-C software fallback (the D/AVE 2D HW backend is opt-in; see below). `fill_rect` + clip, `blit`, and all four `blend` modes (REPLACE/SRC_OVER/ADDITIVE/MULTIPLY) produce **exact** expected pixels on silicon. Example: `examples/aen/aen-gpu2d-bench`. The D/AVE 2D hardware backend (`alif_dave2d.c`) was bench-verified separately on E1M-AEN803 2026W36-0001 (M55-HE, 9 of 9 runs, #916; ADDITIVE/MULTIPLY still on the sw fallback). |
 | **Low-power (WFI/SysTick)** | ✅ PASS (RAM-run, 2026-06-17) | Stage-A baseline: the M55-HE enters architectural `__WFI()` via the kernel idle path (a k_timer beats the wake cadence; SysTick wakes it) for N rounds — proven by an advancing SRAM0 beacon + uptime (8 sleeps, 0→420 ms). No `CONFIG_PM` (pinned Zephyr 4.4 ships no Alif PM); the deep IWIC `pm_state_set` path (WICCONTROL HE `0x1A604010`) is the documented Stage-B follow-on. Example: `examples/aen/aen-power-smoke`. |
 | **SE CryptoCell compute** (`<alp/security.h>` SHA / AES-GCM) | ✅ PASS (RAM-run, 2026-06-19) | The portable hash/AEAD surface runs **inside the Secure Enclave's CryptoCell** on the E8: the `se_cryptocell` backend binds at priority 110 and pushes SHA-256 / AES-128-GCM into the SE over the RTSS-HE↔SE MHUv2 pair (the new public `se_service_send_request()` transport, hal_alif patch `0002`). Bench: SHA-256(`"abc"`) matched the NIST known-answer (`s=0`, MATCH) and the AES-128-GCM encrypt→decrypt round-trip matched (`enc=0 dec=0`, MATCH) — both computed in the SE, plus SE TRNG. `CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM` now defaults ON; algs the SE declines fall through to MbedTLS-PSA. Example: `examples/aen/aen-se-crypto`. |
 | **CRC engine** (`crc_alif` / `alif,crc`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | HW CRC32-IEEE on `crc0@48107000` via the Zephyr CRC class API — `crc_begin/update/finish` rc=0, computed `0x684fc31c` = the reference value over a 16-byte input. Example: `examples/aen/aen-crc-regcheck`. |
 | **HWSEM** (`hwsem_alif` / `alif,hwsem`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | `hwsem@4902e000` take/give/count over the in-tree driver: count `0→1→0` across `take_busy`/`give` (master_id `0x410fd222`). Example: `examples/aen/aen-hwsem-regcheck`. |
 | **LPTIMER** (`counter_alif_lptimer` / `alif,lptimer`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | Always-on `lptimer@42001000` ch0 — 32768 Hz down-counter advances (3456 ticks / ~100 ms) via the portable `counter_*` API. Example: `examples/aen/aen-lptimer-regcheck`. |
 | **Comparator (HSCMP)** (`comparator_alif` / `alif,cmp`, Tier-2) | ✅ PASS (RAM-run, 2026-06-19) | `cmp0@49023000` driven via the portable `comparator_*` API (output 1/1, internal DAC6 reference; the connect-but-don't-enable init held — no ISR storm). External pin/threshold edge-trigger = bench TBD (no analog stimulus). Example: `examples/aen/aen-cmp-regcheck`. |
+| **LPRTC** (`snps,dw-apb-rtc`, Tier-2) | ✅ PASS (RAM-run, 2026-06-17) | The always-on `lprtc@42000000` free-running 32-bit counter advances (delta 3467 ticks / ~100 ms at 32768 Hz) via the portable Zephyr counter API over the vendored `counter_dw_rtc` driver. `counter_start` returns `-EALREADY` → the **VBAT clock-gate is already on** (no `VBAT_LPRTC0_CLK_EN` write needed on the upstream-Zephyr build path). Fixed two driver bugs the link-only check missed: the missing `.get_top_value` (faulted PC=0x0) + `max_top_value`. It is a **counter**, not a calendar RTC — the `alp_rtc_*` calendar shim is still TBD. Example: `examples/aen/aen-rtc-regcheck`. |
 | **Secure boot** (MCUboot ECDSA-P256 chain) | ✅ PASS (bench-proven at `0da1f1b4`) | SES → MCUboot (ITCM) → slot0 (MRAM XIP) → application boots with `CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y` + `CONFIG_BOOT_VALIDATE_SLOT0=y` (read back from the built `mcuboot/zephyr/.config`): `PC=80012FBC`, `VTOR=80010800`, `CFSR=00000000`, `IPSR=000`. Verification proven live, not inferred from a boot: flipping one byte of the TLV `0x22` signature (offset `0x4a30`, `0xda`→`0xdb`, TLV `0x10`/SHA-256 and TLV `0x01`/key intact) produces `D: bootutil_verify_sig: ECDSA builtin key 0` then `E: Unable to find bootable image` — the check runs to completion. `SIGNATURE_TYPE_NONE` + `VALIDATE_SLOT0=y` boots in twelve seconds (watched ten minutes, CycleCnt advancing). This verification run was `CONFIG_SINGLE_APPLICATION_SLOT=y`. Verified backend is TinyCrypt (`CONFIG_BOOT_ECDSA_TINYCRYPT=y`), not PSA; `.config` confirms `CONFIG_SINGLE_APPLICATION_SLOT=y` + `CONFIG_FLASH_BASE_ADDRESS=0x0`. **Separately, a swap-using-scratch build boots and logs** `I: Bootloader chainload address offset: 0x10000` — **boot only; the swap/rollback path itself was not exercised `[UNTESTED]`.** Still requires `CONFIG_DCACHE=n`, `ROM_START_OFFSET=0x800`, and the `zephyr/patches/mcuboot` `do_boot` patch. **Customer path proven too (second session):** a plain-J-Link `loadbin` of an imgtool-signed image to slot0 `0x80010000` — no SETOOLS/ATOC/SE-UART — is verified + chainloaded and survives repeated cold power-cycles; **proven at `0x80010000` only** (ATOC region / erasing MCUboot untested); both refusal shapes (tampered sig, non-MCUboot image) leave the debug port alive (`Secure debug: enabled`, halts + single-steps cleanly). Single-slot result (`CONFIG_SINGLE_APPLICATION_SLOT=y`) — A/B swap / OTA untested. See `docs/aen-provisioning.md` §0.5 and `docs/secure-boot.md`. |
 
 The flow-D batch (17 aen-* apps) booted on real E8 at **15 PASS, 2 PARTIAL** (both
@@ -63,6 +64,12 @@ tally still has not been formally recomputed against the corrected GPIO
 criterion, but nothing in the correction moves GPIO out of the PASS column.
 
 ## 2. The four flashing / observation flows
+
+> On the E1M EVK 2641-R3 the on-board RP2040 (`U55`, CMSIS-DAP) is the
+> primary debug probe and J-Link is the optional alternative
+> ([`aen-rp2040-debug-probe.md`](aen-rp2040-debug-probe.md)). The RP2040 path
+> is not bench-verified and its flash/debug steps are TBD; the flows below
+> are the proven ones.
 
 | Flow | Use it for | Touches MRAM? | Tooling |
 |---|---|---|---|
@@ -408,6 +415,42 @@ scripts/bench/aen/build.sh <app-dir> \
     -DEXTRA_DTC_OVERLAY_FILE="scripts/bench/aen/aen-flowc-itcm.overlay"
 ```
 
+**Building through `tan` (board.yaml knob).** A project built with `tan build`
+does not need those two files copied in: set
+
+```yaml
+diagnostics:
+  link: itcm        # auto (default) | itcm
+  console: ram      # optional here -- `auto` is promoted to `ram`; linux/none are refused; ram/uart/alp are accepted
+```
+
+and the planner writes the retarget itself next to the slice's `alp.conf`
+(`alp-link-itcm.conf` + `alp-link-itcm.overlay`: the same `zephyr,flash = &itcm;`
+/ `/delete-property/ zephyr,code-partition;` overlay and the same
+`CONFIG_USE_DT_CODE_PARTITION=n` + `CONFIG_FLASH_LOAD_OFFSET=0x0` conf as above,
+plus, for `console: auto`/`ram`, `CONFIG_DCACHE=n` and the 16 KiB RAM console of `aen-bench-shared.conf`; a `console: uart`/`alp` image gets neither) and
+passes them via `-DEXTRA_CONF_FILE` / `-DEXTRA_DTC_OVERLAY_FILE`. Then
+`tan flash --ram --ram-console --core m55_he` loads the ELF at its link base
+`0x0` (the HE-local ITCM, reached through the HE access port; `0x58000000` is
+only the global alias of that same memory, which tan accepts as the same
+image) and reads `ram_console_buf`. The knob is proven on the E8 M55-HE
+(E1M-AEN801 / E1M-AEN803) and is HE-only: `tan build` refuses it
+(`build.link-itcm-unsupported`) for a project with no M55-HE app of its own (an
+M55-HP-only project included), any other SKU, or a `boot:`/sysbuild project, and
+refuses an explicit `linux`/`none` console (`build.link-itcm-console-conflict`). The
+slice's manifest entry carries `flash_method: ram_run_only`, so plain
+`tan flash` refuses it and points at `tan flash --ram`. It links at `0x0` --
+never flash that image to MRAM. The planner lives in tan-cli
+(ADR-0026); alp-sdk's `alp_orchestrate` does not implement the knob.
+
+With `diagnostics.console: ram`, the generated `alp.conf` sets
+`CONFIG_RAM_CONSOLE_BUFFER_SIZE` to 2048 as a floor: a larger value in the app's
+own `prj.conf` wins. Only `prj.conf` is read, so a size set in
+`boards/<board>.conf`, `prj_<board>.conf` or an app `EXTRA_CONF_FILE` still loses
+to the 2048 floor. This floor is `alp.conf`'s alone. A `link: itcm` build also
+merges the planner's `alp-link-itcm.conf` after `alp.conf`, and its 16 KiB value
+wins.
+
 Both `aen-flowc-itcm.conf` lines are needed because they undo two different
 things. `USE_DT_CODE_PARTITION=n` alone undoes the board `_defconfig`'s
 *derived* offset, but it does **not** touch a hard-coded literal
@@ -418,8 +461,9 @@ the five `aen-cc3501e-*` apps (`aen-cc3501e-ble-gatt`, `aen-cc3501e-bringup`,
 `aen-cc3501e-companion-tour`, `aen-cc3501e-gatt-register`, `aen-cc3501e-gpio`)
 and `aen-eeprom-manifest`, all via their own `prj.conf`, plus
 `examples/peripheral-io/alp-console`, which sets it via a **BOARD-scoped**
-conf instead —
-`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf`
+conf instead — both its AEN801 and AEN803 twins do:
+`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf` and
+`boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.conf`
 (see `examples/peripheral-io/alp-console/README.md`). For any of these, a
 Flow C RAM-run must ALSO carry the explicit `CONFIG_FLASH_LOAD_OFFSET=0x0`
 override, since a later `EXTRA_CONF_FILE` fragment wins over both an app's
@@ -526,7 +570,7 @@ ISP-window race entirely.
 (those writes are firewalled). Writing only the app (without the matching ATOC) fails
 secure-boot verification — always write both consistent blobs.
 
-> **Verified state on *this* Linux bench (alplab-gw, 2026-06-17): flow D WORKS.** The
+> **Verified state on *this* Linux bench (2026-06-17): flow D WORKS.** The
 > original probe (J-Link PLUS, old firmware) could not connect with
 > `-device AE822FA0E5597LS0_M55_HE` — it only worked with the generic `-device
 > Cortex-M55` (reads/RAM-run). Swapping to a probe on **J-Link V13 firmware (May 2026,
@@ -535,7 +579,7 @@ secure-boot verification — always write both consistent blobs.
 > programs + verifies the ATOC over SWD (`Verify successful.`, ~0.16 s @ ~200 KB/s), and
 > `RSetType 2` (nRESET pin) re-runs the SE boot ROM so the app boots from MRAM. Bench
 > proof: flashed `aen-ethernet-link` over flow D → `RESULT PASS` + DHCP lease
-> `192.168.10.137` (server-side dnsmasq lease + ARP `REACHABLE` confirm).
+> a DHCP lease (server-side dnsmasq lease + ARP `REACHABLE` confirm).
 >
 > **Two gotchas that block the probe (both bit us):** (1) a version-mismatched probe
 > triggers a mandatory **J-Link firmware update on first connect**, and that update
@@ -634,7 +678,7 @@ secure-boot verification — always write both consistent blobs.
   gpio11), and the RCSR bit7 `REF_CLK_SEL=1` ref-clock select were all already
   correct — the earlier "PHY RX path / `ANLPAR=0` / scope the REF_CLK"
   diagnosis was a red herring (a bad cable plus the DTCM starvation).
-  Re-validated end-to-end: DHCP lease `192.168.10.137` (server-side dnsmasq lease
+  Re-validated end-to-end: a DHCP lease (server-side dnsmasq lease
   + ARP `REACHABLE`).
 
   **Silicon-verified on E1M-AEN803 (bench run 202)** narrower follow-up: pin
@@ -645,7 +689,7 @@ secure-boot verification — always write both consistent blobs.
   `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` relocating
   `subsys/net/ip/net_pkt.c` — while main RAM stays on DTCM. Bench run 202
   re-ran `aen-ethernet-link` (`b240f01cb`) on E1M-AEN803 with this exact
-  mechanism: DHCP lease `192.168.10.123`, `PHY link UP after 2000 ms`, host
+  mechanism: a DHCP lease, `PHY link UP after 2000 ms`, host
   ping 5/5 (avg 0.271 ms), neighbour `REACHABLE`, and the live descriptor
   rings resolved into `net_buf_data_rx/tx_bufs` (both in SRAM0) while
   `_kernel` and main RAM stayed on DTCM. E1M-AEN801 is build-verified only
@@ -697,4 +741,3 @@ secure-boot verification — always write both consistent blobs.
 | Ethernet links but never gets a lease / no traffic | GMAC DMA descriptor rings + net_buf pool are in the M55 **DTCM** (`zephyr,sram = &dtcm`), off the DMA bus. Narrower fix, **silicon-verified on E1M-AEN803** (bench run 202: DHCP lease + ping, rings/pools in SRAM0, main RAM on DTCM) — build-verified only on AEN801: give the ethernet node a `memory-region` (default: `&sram0`, set by the SoC dtsi) + enable `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` + `CONFIG_DCACHE=n` (§3), main RAM stays on DTCM. Older whole-RAM fix: `zephyr,sram = &sram0` + `CONFIG_DCACHE=n` — but do NOT combine it with a `memory-region` still pointing at the same `&sram0` node: `zephyr/CMakeLists.txt` now FATAL_ERRORs on that combination (aliases main RAM on top of the relocated buffers with no linker warning); delete the `memory-region` property first if you go this route. Applies to any DMA-master block (GMAC/NPU/SDHC). |
 | I2S TX never clocks out / PDM `dmic_read` → `-EAGAIN` (FIFO=0) | The CGU master **76.8 MHz** source and (for the HP PDM) the `EXPMST0_CTRL` IPCLK/PCLK force bits are not set. These are now enabled by the Tier-1.5 clockctrl west-patch (`west patch apply`; §3) on `clock_control_on()` — confirm the patch is applied. The 76.8 MHz oscillator itself is SE-managed, so the PDM may also need the `se_services`/MHU clock request even with the CGU bit set. |
 | I2S sample rate looks wrong (pitch off) | The `I2Sx_CTRL` `CKDIV` divider the clockctrl `.set_rate` programs is **BENCH-UNVERIFIED** (field layout from the Alif `i2s_sync` reference, not the DFP/TRM). Confirm the divider width/position + N-vs-(N-1) convention against the Alif DFP/TRM; the hunk is separable in the patch so it can be held. |
-| **LPRTC** (`snps,dw-apb-rtc`, Tier-2) | ✅ PASS (RAM-run, 2026-06-17) | The always-on `lprtc@42000000` free-running 32-bit counter advances (delta 3467 ticks / ~100 ms at 32768 Hz) via the portable Zephyr counter API over the vendored `counter_dw_rtc` driver. `counter_start` returns `-EALREADY` → the **VBAT clock-gate is already on** (no `VBAT_LPRTC0_CLK_EN` write needed on the upstream-Zephyr build path). Fixed two driver bugs the link-only check missed: the missing `.get_top_value` (faulted PC=0x0) + `max_top_value`. It is a **counter**, not a calendar RTC — the `alp_rtc_*` calendar shim is still TBD. Example: `examples/aen/aen-rtc-regcheck`. |

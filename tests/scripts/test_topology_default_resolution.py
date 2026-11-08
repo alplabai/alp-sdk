@@ -82,21 +82,13 @@ SOM_TOPOLOGIES: dict[str, dict[str, str]] = {
     "E1M-V2M101": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
     "E1M-V2M102": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
     "E1M-V2M103": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
-    # NXP i.MX 93 -- A55 cluster + M33 (no _sm suffix) -- EXCLUDED
-    # (#1025): E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd`,
-    # refused outright by the hw_rev-buildable gate before
-    # `load_board_yaml` ever reaches this topology-merge logic, so no
-    # row here can currently be exercised. Restore
-    # `"E1M-NX9101": {"a55_cluster": "yocto", "m33": "zephyr"}` once
-    # metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
-    # buildable status.
 }
 
 
 # Per-SoM: pick one M-class core to act as the "anchor" so the
 # board.yaml has at least one declared entry (schema requires
 # cores: with minProperties: 1).  We use the M-class core because
-# every supported SoM has one (NX9101 doesn't have an M55).
+# every supported SoM has one.
 _M_CORE_PER_SOM: dict[str, str] = {
     "E1M-AEN301": "m55_hp",
     "E1M-AEN401": "m55_hp",
@@ -110,8 +102,6 @@ _M_CORE_PER_SOM: dict[str, str] = {
     "E1M-V2M101": "m33_sm",
     "E1M-V2M102": "m33_sm",
     "E1M-V2M103": "m33_sm",
-    # E1M-NX9101 excluded from SOM_TOPOLOGIES above (#1025) -- no row
-    # here for it to anchor.
 }
 
 
@@ -422,14 +412,6 @@ def test_per_key_merge_yocto_a_cluster(tmp_path: Path) -> None:
         # should resolve from topology.
         ("examples/multicore/heterogeneous-offload/board.yaml",
          {"a55_cluster": "yocto", "m33_sm": "zephyr"}),
-        # rpmsg-imx93 excluded (#1025): E1M-NX9101's only hw_rev
-        # (imx93 r1) is `status: tbd`, refused outright by the
-        # hw_rev-buildable gate before `load_board_yaml` reaches this
-        # topology-merge logic. Restore once
-        # metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
-        # buildable status:
-        #     ("examples/multicore/rpmsg-imx93/board.yaml",
-        #      {"a55_cluster": "yocto", "m33": "zephyr"}),
         # rpmsg-aen: A32 + M55-HP both stripped.
         ("examples/multicore/rpmsg-aen/board.yaml",
          {"a32_cluster": "yocto", "m55_hp": "zephyr"}),

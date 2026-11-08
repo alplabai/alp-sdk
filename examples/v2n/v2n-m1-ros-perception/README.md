@@ -1,9 +1,9 @@
 # v2n-m1-ros-perception
 
-> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds against a
+> ⚠️ **`[UNTESTED]`** Builds against a
 > Yocto SDK that includes ROS 2 + the alp-sdk runtime.  Real
 > bring-up (V2N-M1 + DEEPX runtime + camera capture pipeline)
-> gates on v0.8 V2M HiL.
+> gates on V2M HiL.
 
 ROS 2 perception node for **V2N + V2N-M1**.
 
@@ -37,6 +37,15 @@ into a wider `/robot/*` namespace.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+### Building the ROS 2 package in the Yocto SDK
+
 This is a ROS 2 colcon package that lives inside the alp-sdk's
 Yocto SDK environment.
 
@@ -57,9 +66,8 @@ colcon build --packages-select alp_perception
 - E1M-X-EVK board.  What the sensor topics read is what is fitted
   to it (`metadata/boards/e1m-x-evk.yaml`):
   - IMU: **ICM-42670** (U12, I2C `0x69`) on the sensor bus
-    (`XEVK_I2C_BUS_SENSORS`).  The EVK has no LSM6DSO.  An unreworked
-    EVK V2 also answers `0x69` with its BMI323 (U13), so the two IMUs
-    collide there; if `/alp/imu` stays silent check for that.
+    (`XEVK_I2C_BUS_SENSORS`).  The EVK has no LSM6DSO.  The
+    alternate IMU, BMI323 (U13), is at `0x68`.
   - Power: **INA236 U21** on the +3V3 rail (`0x40`, 20 mOhm shunt,
     calibrated from `XEVK_INA236_SHUNT_3V3_OHMS`).  This is a supply
     rail, not a battery.  On EVK V2 its bus-voltage register reads
@@ -85,15 +93,17 @@ ros2 topic echo /alp/rail_3v3  # 1 Hz +3V3 rail voltage/current
 
 ## Yocto packaging
 
-A skeleton recipe lives under `recipes-ros/alp-perception_0.5.bb`
-in `meta-alp-sdk`.  The recipe DEPENDS on `alp-sdk`,
+The recipe is `alp-perception_0.6.bb` under
+`meta-alp-sdk/dynamic-layers/ros2-humble-layer/recipes-ros/` (parsed only
+when `meta-ros2-humble` is in `bblayers.conf`; see
+[`docs/bring-up-ros2.md`](../../../docs/bring-up-ros2.md)).  The recipe DEPENDS on `alp-sdk`,
 `ros-rclcpp`, `ros-vision-msgs`, `ros-sensor-msgs`, and (on
 V2N-M1) `dx-rt`.
 
 ## Verification status
 
 `[UNTESTED]` -- builds clean against the Yocto SDK; HiL
-bring-up gates on v0.8 V2M.  The `sensor_msgs` publishers
+bring-up gates on V2M HiL.  The `sensor_msgs` publishers
 exercise the alp-sdk chip drivers (ICM-42670, INA236)
 through their portable surfaces -- once V2N silicon is in the
 lab, switching the topics' tick rate up is a one-line change

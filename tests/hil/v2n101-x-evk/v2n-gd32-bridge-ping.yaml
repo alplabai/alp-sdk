@@ -3,7 +3,7 @@
 # V2N-specific HiL smoke for examples/v2n/v2n-gd32-bridge-ping.
 # Exercises the hybrid SPI + I2C bridge between the V2N's M33-SM and
 # the GD32G553 supervisor MCU.  V2N + V2M only -- no equivalent on
-# AEN / NX9.
+# AEN.
 #
 # Hardware fixtures expected:
 #   - GD32G553 supervisor MCU populated on the V2N SoM (true for

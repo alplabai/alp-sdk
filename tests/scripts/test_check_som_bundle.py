@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "check_som_bundle.py"
 EXAMPLE = REPO / "metadata" / "templates" / "som-release-bundle.example.json"
@@ -99,6 +101,20 @@ def test_bad_sha256_fails(tmp_path):
     p.write_text(json.dumps(b), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode != 0
+
+
+def test_release_version_accepts_rc_rejects_other_suffixes(tmp_path):
+    p = tmp_path / "bundle.json"
+    for good in ("som-0.2.2", "som-0.2.2-rc1", "som-1.0.0-rc12"):
+        b = _valid_bundle()
+        b["release_version"] = good
+        p.write_text(json.dumps(b), encoding="utf-8")
+        assert _run("--bundle", str(p)).returncode == 0, good
+    for bad in ("som-0.2.2-beta", "som-0.2.2-rc", "0.2.2-rc1"):
+        b = _valid_bundle()
+        b["release_version"] = bad
+        p.write_text(json.dumps(b), encoding="utf-8")
+        assert _run("--bundle", str(p)).returncode != 0, bad
 
 
 def test_bad_created_date_fails(tmp_path):
@@ -241,3 +257,88 @@ def test_duplicate_role_fails(tmp_path):
     proc = _check(tmp_path, b)
     assert proc.returncode != 0
     assert "duplicate role" in proc.stdout
+
+
+def _bmap_bundle(tmp_path, image_size, bmap_text):
+    import gzip
+    d = tmp_path / "artifacts"
+    d.mkdir()
+    (d / "img.wic.gz").write_bytes(gzip.compress(b"\x01" * 8192))
+    (d / "img.wic.bmap").write_text(bmap_text, encoding="utf-8")
+    b = _valid_bundle()
+    b["components"].append({"role": "system_image_bmap", "file": "artifacts/img.wic.bmap",
+                            "sha256": "0" * 64, "size_bytes": 1, "flash_target": "emmc"})
+    p = tmp_path / "bundle.json"
+    p.write_text(json.dumps(b), encoding="utf-8")
+    return p
+
+
+class _Bmap:
+    """A signed bmap: BmapFileChecksum is the sha256 of the file with that checksum zeroed."""
+
+    @staticmethod
+    def format(n, h):
+        import hashlib
+        xml = (f'<bmap version="2.0"><ImageSize> {n} </ImageSize><BlockSize> 4096 </BlockSize>'
+               f'<MappedBlocksCount> 2 </MappedBlocksCount><ChecksumType> sha256 </ChecksumType>'
+               f'<BmapFileChecksum> {"0" * 64} </BmapFileChecksum>'
+               f'<BlockMap><Range chksum="{h}"> 0-1 </Range></BlockMap></bmap>')
+        return xml.replace("0" * 64, hashlib.sha256(xml.encode()).hexdigest(), 1)
+
+
+_BMAP = _Bmap
+
+
+def test_system_image_bmap_valid_and_size_checked(tmp_path):
+    ok = _run("--bundle", str(_bmap_bundle(tmp_path, 8192, _BMAP.format(n=8192, h="0" * 64))))
+    assert ok.returncode == 0, ok.stdout
+    (tmp_path / "x").mkdir()
+    bad = _run("--bundle", str(_bmap_bundle(tmp_path / "x", 4096, _BMAP.format(n=4096, h="0" * 64))))
+    assert bad.returncode == 1 and "ImageSize" in bad.stdout
+
+
+def test_system_image_bmap_garbage_rejected(tmp_path):
+    r = _run("--bundle", str(_bmap_bundle(tmp_path, 8192, "<bmap/>")))
+    assert r.returncode == 1 and "not a valid bmap" in r.stdout
+
+
+def _cm33_image(**kw):
+    img = bytearray(0x3000) + (kw.get("sp", 0x08100000)).to_bytes(4, "little") + \
+        (kw.get("reset", 0x08003101)).to_bytes(4, "little") + b"\0" * 64
+    img[kw.get("dirty", 0)] |= kw.get("mark", 0)
+    return bytes(img) + b"\0" * kw.get("extra", 0)
+
+
+def _cm33_bundle(tmp_path, image, target="xspi:mtd1"):
+    d = tmp_path / "artifacts"
+    d.mkdir()
+    (d / "cm33.bin").write_bytes(image)
+    b = _valid_bundle()
+    b["components"].append({"role": "cm33", "file": "artifacts/cm33.bin", "sha256": "0" * 64,
+                            "size_bytes": len(image), "flash_target": target})
+    p = tmp_path / "bundle.json"
+    p.write_text(json.dumps(b), encoding="utf-8")
+    return p
+
+
+def test_cm33_valid_image_accepted(tmp_path):
+    r = _run("--bundle", str(_cm33_bundle(tmp_path, _cm33_image(sp=0x08FFFFFF))))
+    assert r.returncode == 0, r.stdout
+
+
+def test_cm33_must_target_mtd1(tmp_path):
+    r = _run("--bundle", str(_cm33_bundle(tmp_path, _cm33_image(), "xspi:mtd0")))
+    assert r.returncode == 1 and "flash_target" in r.stdout
+
+
+@pytest.mark.parametrize("kw, msg", [
+    ({"dirty": 5, "mark": 1}, "first 0x3000 bytes must be zero"),
+    ({"sp": 0x20000000}, "initial SP 0x20000000 is not in SRAM0 (0x08xxxxxx)"),
+    ({"reset": 0x08003100}, "reset vector 0x08003100 must have the Thumb bit"),
+    ({"reset": 0x08002FFF}, "reset vector 0x08002fff must have the Thumb bit"),
+    ({"reset": 0x08033001}, "reset vector 0x08033001 must have the Thumb bit"),
+    ({"extra": 0x30000}, "exceeds the 0x30000"),
+])
+def test_cm33_sanity_rejections(tmp_path, kw, msg):
+    r = _run("--bundle", str(_cm33_bundle(tmp_path, _cm33_image(**kw))))
+    assert r.returncode == 1 and msg in r.stdout, r.stdout

@@ -32,14 +32,15 @@ manifest-driven **top-level** `libraries:` selection.
 | `ros2`      | B    | humble     | Apache-2.0 | yocto     | Cortex-A; meta-ros2-humble layer ‡ |
 | `lwm2m`     | B    | 4.4.1      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
 | `coap`      | B    | 4.4.1      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
-| `aws-iot`   | B    | v3.1.5     | Apache-2.0 | zephyr    | Zephyr; west project pin § |
+| `aws-iot`   | B    | 202412.00     | MIT | zephyr    | Zephyr; west project pin § |
 | `azure-iot` | B    | 1.5.0      | MIT        | zephyr    | Zephyr; west project pin § |
-| `canopennode` | B  | dec12fa3f0d790cafa8414a4c2930ea71ab72ffd | Apache-2.0 | zephyr | Cortex-M; optional west pin; CAN controller |
+| `canopennode` | B  | dec12fa3f0d790cafa8414a4c2930ea71ab72ffd | Apache-2.0 | zephyr | Cortex-M; own west pin; CAN controller |
 | `micropython` | B  | v1.24.1    | MIT        | zephyr    | Cortex-M; source pin; dedicated owner needed |
 | `cmsis-stream` | B | v3.2.0     | Apache-2.0 | zephyr    | west module `cmsisstream`; app must override `CONFIG_CMSISSTREAM_POOL_SECTION` off-AEN; app must also set `CONFIG_CPP=y` + a C++ stdlib choice |
 | `cmsis-cv`  | B    | (SHA pin, no upstream tags) | Apache-2.0 | zephyr | no upstream Zephyr module glue yet; recipe-only |
 | `arm-2d`    | B    | v1.2.6     | Apache-2.0 | zephyr    | no upstream Zephyr module glue yet; recipe-only |
 | `onnxruntime` | B  | 1.28.0     | MIT & Apache-2.0 | yocto | Cortex-A; own `meta-alp-sdk` recipe, upstream (not a vendor fork) |
+| `fatfs`     | B    | 0.16       | BSD-1-Clause | zephyr | Zephyr fs subsystem; exFAT cards need `CONFIG_FS_FATFS_EXFAT=y` + `CONFIG_FS_FATFS_LFN=y` in the app |
 
 `tan doctor` reports the selection for the project in scope (tier + licence +
 compatibility), reading these same manifests — so the CLI and alp-studio's
@@ -52,13 +53,13 @@ headers rather than papered over:
 
 - `micro-ros` is pinned in `west.yml` from the upstream
   `micro_ros_zephyr_module` Humble branch at
-  `cfbddc5e4334317a1036e883ce8f6af12b1da66a`. Its Zephyr integration names the
+  `8477de124763e4701f8029d01216d6f6b524dde9`. Its Zephyr integration names the
   west module and transcribes the real master symbol from
   `modules/libmicroros/Kconfig`: `CONFIG_MICROROS=y`.
 - `ros2` is **Tier B (recipe-only)**: its wiring is grounded in-tree
   (`rclcpp` in `meta-alp-sdk/recipes-images/alp-image-common.inc`,
   `meta-ros2-humble` as a `LAYERRECOMMENDS`), but alp-sdk CI does not build it.
-  A build must add `meta-ros2-humble` to `bblayers.conf` (named follow-up).
+  A build adds `meta-ros2-humble` to `bblayers.conf` (`meta-alp-sdk/README.md` step 4b).
 - The **cross-core RMW bridge** (micro-ROS↔ROS 2 over UDP-on-virtio or a custom
   RMW over the existing RPMsg transport, ADR 0016) is **bench-gated** and out of
   scope here — likely its own ADR.
@@ -75,18 +76,20 @@ device-to-cloud story; all Tier B (recipe-only), split by grounding:
   transport in. LwM2M could merit Tier A on strength, but the ADR groups
   connectivity/cloud as B and there is no CI build lane + example yet
   (promotion is a named follow-up).
-- **§ `aws-iot` / `azure-iot` are pinned source manifests** — verified **not
-  imported by Zephyr's own west manifest** (`west list` has no aws/azure/iot
-  entry). Unlike the micro-ROS flagship, neither generic CMake C SDK has an
-  official upstream **Zephyr module.yml** or master Kconfig symbol, so
-  Zephyr-side packaging/build glue remains a follow-up. The source pins are now
-  exact and reproducible: AWS `aws-iot-device-sdk-embedded-C` at `v3.1.5`
-  (Apache-2.0) and Azure `azure-sdk-for-c` at `1.5.0` (MIT). Each declares an
-  **enable-by-presence** Zephyr section (`module:` naming the real upstream repo,
-  `west:` carrying the exact project pin, **no** `kconfig:`) — no enable symbol
-  is invented; emit renders the selection tag and `--emit west-libraries` emits
-  concrete west project entries, with no `CONFIG_` line until packaging confirms
-  a real symbol.
+- **§ `aws-iot` / `azure-iot` are pinned source manifests with in-tree glue** —
+  verified **not imported by Zephyr's own west manifest** (`west list` has no
+  aws/azure/iot entry), and neither generic CMake C SDK has an upstream **Zephyr
+  module.yml** or Kconfig symbol. The source pins are exact and reproducible: AWS
+  `aws-iot-device-sdk-embedded-C` at `202412.00` (MIT) and Azure
+  `azure-sdk-for-c` at `1.5.0` (MIT). Each declares `module:` naming the real
+  upstream repo, `west:` carrying the exact project pin, and an alp-sdk-owned
+  `kconfig:` gate (`CONFIG_ALP_AWS_IOT` / `CONFIG_ALP_AZURE_IOT`) over the
+  in-tree build glue under `vendors/aws-iot/` and `vendors/azure-iot/`
+  (coreMQTT + coreJSON; az_core + the IoT Hub client). The TLS transport shim is
+  not provided.
+  The same pins also sit in the repo's `west.yml` under the opt-in `extras-cloud`
+  group (off by default; `west update --group-filter +extras-cloud`), tier stays
+  B (no CI build lane).
 
 **The ADR 0018 industrial / scripting additions.** Three manifests close the
 remaining curation set without inventing capabilities or symbols:
@@ -95,10 +98,16 @@ remaining curation set without inventing capabilities or symbols:
   `subsys/modbus/Kconfig`, version `4.4.1`, Apache-2.0).  The native_sim CI
   lane uses `CONFIG_MODBUS_RAW_ADU`; serial RTU/ASCII deployments need a UART
   plus a devicetree `zephyr,modbus-serial` node.
-- `canopennode` is **Tier B CAN**: Zephyr pins it as an optional west project
-  in `submanifests/optional.yaml` and its integration glue exposes
-  `CONFIG_CANOPENNODE`.  It needs a real Zephyr CAN controller, but alp-sdk has
-  no CAN capability key, so the manifest records only OS/core constraints.
+- `canopennode` is **Tier B CAN**.  On Zephyr v4.4.x the integration glue
+  (`CONFIG_CANOPENNODE`) is in-tree and the stack source is an external west
+  project (pinned in `submanifests/optional.yaml`).  Zephyr v4.5 moves the glue
+  out to the external `zephyrproject-rtos/CANopenNodeZephyr` module, so the
+  v4.4.x pin recorded here does not provide `CONFIG_CANOPENNODE` on v4.5
+  (dual-version support is not yet done; no build was run on either
+  version).  The manifest carries its own exact `integration.zephyr.west` pin,
+  emitted by `--emit west-libraries`, so it does not depend on Zephyr's
+  optional group.  It needs a real Zephyr CAN controller, but alp-sdk has no
+  CAN capability key, so the manifest records only OS/core constraints.
 - `micropython` is **Tier B scripting**: the pinned workspace has no
   `modules/lib/micropython` checkout, so the manifest is an enable-by-presence
   source pin to upstream `micropython/micropython` at `v1.24.1` with no
@@ -113,7 +122,7 @@ ARM-software` repos, all Tier B (recipe-only):
   names a real module and a real `CONFIG_CMSISSTREAM=y` symbol. Its
   `CMSISSTREAM_POOL_SECTION` Kconfig defaults to `.alif_sram0.evt_pool`, a
   linker section that exists only on Alif Ensemble (E1M-AEN); apps on the
-  Renesas RZ/V2N or NXP i.MX 93 M33 cores MUST override it with a real
+  Renesas RZ/V2N M33 cores MUST override it with a real
   section from their own memory map or the link fails — the manifest does
   not re-emit that default and invents no replacement. Separately,
   `CONFIG_CMSISSTREAM=y` unconditionally compiles two C++ translation
@@ -144,11 +153,11 @@ symbol) — the existing u8g2/catch2 vendoring exception is not widened here.
 **Memfault — deliberately NOT shipped.** Memfault's `memfault-firmware-sdk` is
 not pinned in `west.yml`, and its licence is the proprietary **Memfault SDK
 License** (source-available, use-with-Memfault-services), which is **not** in the
-permissive allowlist below (Apache-2.0/MIT/BSD-2/BSD-3/Zlib/MIT-0). Per the
+permissive allowlist (see "Licence allowlist" below). Per the
 ADR 0018 non-goal, a copyleft/proprietary licence must not ride in through a
 `libraries:` selection, and forcing a wrong SPDX id to pass validation is
 forbidden. It can only be added if a human legal review extends the allowlist
-(schema `license.enum` + this list, same change) with the Memfault licence — a
+(schema `license.enum` + that list, same change) with the Memfault licence — a
 deliberate decision, not a metadata edit.
 
 ## Manifest shape
@@ -178,7 +187,7 @@ integration:                   # at least one OS section required
     west:                      # optional exact west project pin when Zephyr does not import it
       name: aws-iot-device-sdk-embedded-C
       url: https://github.com/aws/aws-iot-device-sdk-embedded-C.git
-      revision: v3.1.5         # exact tag/SHA, never main/master
+      revision: "202412.00"         # exact tag/SHA, never main/master
       path: modules/lib/aws-iot-device-sdk-embedded-C
   yocto:                       # emitted into the slice's local.conf
     image_install: [lvgl]      # appended to IMAGE_INSTALL
@@ -221,7 +230,7 @@ copyleft or proprietary surprise cannot ride in through a `libraries:`
 selection:
 
 ```
-Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, Zlib, MIT-0, BSL-1.0, CC0-1.0,
+Apache-2.0, MIT, BSD-1-Clause, BSD-2-Clause, BSD-3-Clause, Zlib, MIT-0, BSL-1.0, CC0-1.0,
 MIT & Apache-2.0
 ```
 

@@ -15,9 +15,19 @@ on 2026-06-03, because the hog's `PMC9`/`PM9` byte-RMW lands at ~1.9 s,
 inside the CM33's pin-setup window.  A bench session found that; nothing
 in CI could.
 
-This gate closes that loop in the only direction the metadata currently
-supports: a Linux DT pad claim on a pad the metadata attributes to the
-CM33 is an error.
+This gate checks both directions:
+
+  * a Linux DT pad claim on a pad resolved to the CM33 is an error;
+  * a CM33 board claim (an ENABLED node, in zephyr/boards/alp/e1m_v2*_m33_sm,
+    referencing a pinctrl group) on a pad resolved to the A55 is an error.
+
+"Resolved" = the fixed `core:` rows of metadata/pinmux/v2n.yaml plus every
+`assignable:` instance of core-ownership.yaml at its SoM DEFAULT core
+(a board.yaml `ownership:` override is per project: `--project board.yaml`
+re-runs both passes with the project's resolved ownership and its generated
+Linux fragment in place of the committed default).
+A `status = "disabled"` CM33 node (an assignable peripheral a project may
+enable) is not a claim; Linux claims stay textual, see below.
 
 WHAT COUNTS AS A LINUX PAD CLAIM.  Both port-pad macros the RZ/V2N
 bindings expose, wherever they appear in a `.dts`/`.dtsi` under
@@ -83,8 +93,16 @@ _GPIO_RE = re.compile(r"RZV2N_GPIO\(\s*([0-9A-Z])\s*,\s*(\d+)\s*\)")
 _PINMUX_RE = re.compile(r"RZV2N_PORT_PINMUX\(\s*([0-9A-Z])\s*,\s*(\d+)\s*,\s*\d+\s*\)")
 
 
-def _m33_pads(root: Path) -> dict[str, list[str]]:
-    """pad -> peripherals, for every `core: "m33"` row in the pinmux table.
+CM33_BOARDS = Path("zephyr") / "boards" / "alp"
+_PINCTRL_GROUP_RE = re.compile(r"^\t(\w+):\s*[\w-]+\s*\{", re.M)
+_RZV_PINMUX_RE = re.compile(r"RZV_PINMUX\(\s*PORT_0([0-9A-Z])\s*,\s*(\d+)\s*,")
+
+
+def _pads_by_core(root: Path, core: str,
+                  ownership: "dict[str, str] | None" = None) -> dict[str, list[str]]:
+    """pad -> peripherals, for every pad resolved to `core`: the pinmux
+    table's fixed `core:` rows plus the assignable owners (SoM defaults, or a
+    project's resolved `ownership` when given).
 
     Keyed pad -> LIST, because `(peripheral, pad)` is the table's real key:
     one pad can carry more than one row, and the two ends of an inter-chip
@@ -93,18 +111,82 @@ def _m33_pads(root: Path) -> dict[str, list[str]]:
     doc = yaml.safe_load((root / PINMUX).read_text(encoding="utf-8"))
     out: dict[str, list[str]] = {}
     for pad in doc["pads"]:
-        if pad.get("core") == "m33":
+        if pad.get("core") == core:
             out.setdefault(pad["silicon_pad"], []).append(
                 pad["silicon_peripheral"])
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from alp_orchestrate.ownership import load_ownership_doc, resolve_ownership
+    own = load_ownership_doc(root / "metadata", "v2n")
+    if own:
+        for inst, owner in (ownership or resolve_ownership(own)).items():
+            if owner == core:
+                for r in own["assignable"][inst]["rows"]:
+                    out.setdefault(r["pad"], []).append(r["peripheral"])
     return out
 
 
-def find_problems(root: Path) -> list[str]:
+def _cm33_claims(root: Path) -> list[tuple[str, int, str]]:
+    """(file, line, pad) for every pad an ENABLED node of a CM33 V2N/V2M
+    board dts claims through `pinctrl-0` (the groups come from the board's
+    own -pinctrl.dtsi).  Disabled nodes claim nothing."""
+    out: list[tuple[str, int, str]] = []
+    for pin in sorted((root / CM33_BOARDS).glob("e1m_v2*_m33_sm/*-pinctrl.dtsi")):
+        text = pin.read_text(encoding="utf-8")
+        marks = list(_PINCTRL_GROUP_RE.finditer(text))
+        groups = {
+            m.group(1): [f"P{a}{b}" for a, b in _RZV_PINMUX_RE.findall(
+                text[m.end():marks[i + 1].start() if i + 1 < len(marks) else len(text)])]
+            for i, m in enumerate(marks)}
+        for dts in sorted(pin.parent.glob("*.dts")):
+            node = None
+            for n, line in enumerate(dts.read_text(encoding="utf-8").splitlines(), 1):
+                m = re.match(r"^&(\w+) \{$", line)
+                if m:
+                    node = {"refs": [], "line": n, "status": None}
+                elif node is not None and line == "};":
+                    if node["status"] == "okay":
+                        for label in node["refs"]:
+                            out += [(dts.relative_to(root).as_posix(), node["line"], pad)
+                                    for pad in groups.get(label, ())]
+                    node = None
+                elif node is not None:
+                    m = re.match(r'^\tpinctrl-0 = <(.*)>;$', line)
+                    if m:
+                        node["refs"] = re.findall(r"&(\w+)", m.group(1))
+                    m = re.match(r'^\tstatus = "(\w+)";$', line)
+                    if m:
+                        node["status"] = m.group(1)
+    return out
+
+
+# The committed SoM-default fragment; a project replaces it with its own.
+DEFAULT_FRAGMENT = "e1m-v2n-ownership.dtsi"
+
+
+def find_project_problems(project) -> list[str]:
+    """The Linux-DT-vs-CM33 pass (and the reverse) over the SoM dtsi + carrier
+    dtsi + the project's generated fragment (`--emit linux-ownership-dts`), with
+    the project's RESOLVED ownership (a board.yaml override included)."""
+    from alp_orchestrate.linux_ownership import emit_linux_ownership_dts
+    return find_problems(project.effective_metadata_root().parent, project.ownership,
+                         emit_linux_ownership_dts(project))
+
+
+def find_problems(root: Path, ownership: "dict[str, str] | None" = None,
+                  project_fragment: "str | None" = None) -> list[str]:
+    """`ownership` / `project_fragment` (None = SoM default): the project's
+    resolved ownership, and its generated Linux fragment, which stands in for
+    the committed default fragment.
+
+    Limit: the reverse pass (CM33 board enables a pad the A55 owns) reads the
+    committed CM33 board dts, not the project's CM33 overlay.  No default-m33
+    assignable instance exists, so a project cannot enable an a55-owned node
+    on the CM33 through `ownership:` today (resolve_ownership refuses it)."""
     problems: list[str] = []
     pinmux = root / PINMUX
     if not pinmux.is_file():
         return [f"{PINMUX.as_posix()}: missing -- this gate cannot run without it"]
-    m33 = _m33_pads(root)
+    m33 = _pads_by_core(root, "m33", ownership)
 
     stale = [key for key in EXEMPT if key[0] not in m33.get(key[1], ())]
     for peripheral, pad in stale:
@@ -116,18 +198,19 @@ def find_problems(root: Path) -> list[str]:
         )
 
     dt_dir = root / LINUX_DT_DIR
-    for path in sorted(dt_dir.rglob("*.dts*")):
-        if path.suffix not in (".dts", ".dtsi"):
-            continue
-        for lineno, line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), start=1
-        ):
+    sources = [(path.relative_to(root).as_posix(), path.read_text(encoding="utf-8"))
+               for path in sorted(dt_dir.rglob("*.dts*"))
+               if path.suffix in (".dts", ".dtsi")
+               and not (project_fragment is not None and path.name == DEFAULT_FRAGMENT)]
+    if project_fragment is not None:
+        sources.append(("project Linux fragment", project_fragment))
+    for rel, text in sources:
+        for lineno, line in enumerate(text.splitlines(), start=1):
             for match in (*_GPIO_RE.finditer(line), *_PINMUX_RE.finditer(line)):
                 pad = f"P{match.group(1)}{match.group(2)}"
                 for peripheral in m33.get(pad, ()):
                     if (peripheral, pad) in EXEMPT:
                         continue
-                    rel = path.relative_to(root).as_posix()
                     problems.append(
                         f"{rel}:{lineno}: Linux devicetree claims {pad} "
                         f"({match.group(0)}), which {PINMUX.as_posix()} "
@@ -141,6 +224,19 @@ def find_problems(root: Path) -> list[str]:
                         f"metadata/e1m_modules/v2n/core-ownership.yaml with "
                         f"evidence"
                     )
+    a55 = _pads_by_core(root, "a55", ownership)
+    for rel, lineno, pad in _cm33_claims(root):
+        for peripheral in a55.get(pad, ()):
+            problems.append(
+                f"{rel}:{lineno}: the CM33 board enables a node whose pinctrl "
+                f"claims {pad}, which resolves to the A55 "
+                f"(silicon_peripheral: {peripheral!r}; {PINMUX.as_posix()} "
+                f"`core: \"a55\"` or an `assignable:` default in "
+                f"metadata/e1m_modules/v2n/core-ownership.yaml).  Leave the node "
+                f"`disabled` on the board (a project enables it via "
+                f"board.yaml `ownership:`) or correct the attribution with "
+                f"evidence"
+            )
     return problems
 
 
@@ -148,14 +244,27 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT,
                         help="repository root to check (default: this repo)")
+    parser.add_argument("--project", type=Path, action="append", default=[],
+                        help="also run the full pass with this board.yaml's resolved "
+                             "ownership and generated Linux fragment; repeatable "
+                             "(default: every V2N-family examples/**/board.yaml)")
     args = parser.parse_args()
 
     problems = find_problems(args.root)
+    if not args.project:
+        args.project = sorted(
+            b for b in (args.root / "examples").rglob("board.yaml")
+            if re.search(r"^\s*sku:\s*\"?E1M-V2[NM]", b.read_text(encoding="utf-8"), re.M))
+    if args.project:
+        from alp_orchestrate import load_board_yaml
+        for b in args.project:
+            problems += [f"{b}: {m}" for m in find_project_problems(
+                load_board_yaml(b, metadata_root=args.root / "metadata"))]
     if problems:
         for p in problems:
             print(f"amp-pad-claims: {p}", file=sys.stderr)
         return 1
-    print("OK: no Linux devicetree claim on a CM33-attributed RZ/V2N pad.")
+    print("OK: no cross-core pad claim (Linux DT vs CM33 pads, CM33 board vs A55 pads).")
     return 0
 
 

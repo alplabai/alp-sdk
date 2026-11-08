@@ -11,6 +11,14 @@
 #
 # Sourced under `if ALP_SDK` from zephyr/Kconfig once the loader hook
 # is consumed downstream.  This file just declares the symbols.
+#
+# CAUTION (#2985): most per-library accelerator knobs below (ALP_TFLM_*,
+# ALP_CMSIS_DSP_*, ALP_LITTLEFS_*_DMA, ALP_LVGL_*, ALP_MBEDTLS_*, ...) are
+# DECLARATIVE markers -- no source or CMake file consumes them yet, and their
+# `depends on` is SoC-wide, not per-core.  Setting one records the loader's
+# selection in .config; it does NOT by itself compile an accelerated path.
+# Only the knobs that name a real consumer in their help text (for example
+# ALP_SDK_U8G2_VENDORED_CORE, ALP_SDK_AHRS, ALP_SDK_PID) gate build behaviour.
 
 # v0.5 §D.lib.loader -- per-library HW-accelerator Kconfig knobs.
 
@@ -44,17 +52,6 @@ config ALP_TFLM_ETHOS_U55
 	  selects at runtime via base-address + IRQ.  Enabled on every
 	  E* SoC -- it's the family-wide primary on E3 / E5 / E7 (no
 	  U85) and the secondary on E4 / E6 / E8 (alongside the U85).
-
-config ALP_TFLM_ETHOS_U65
-	bool "TFLite-Micro on NXP i.MX 93 Ethos-U65 NPU"
-	depends on ALP_SOC_NXP_IMX9_IMX93
-	help
-	  Compile TFLite-Micro kernels against the Ethos-U65 NPU
-	  embedded in i.MX 93.  Same TFLM op-resolver as U55 / U85;
-	  Vela's `--accelerator-config ethos-u65-256` target.  The
-	  legacy `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y` knob is the
-	  N93-specific driver shim that complements this kernel-level
-	  knob.
 
 config ALP_TFLM_HELIUM
 	bool "TFLite-Micro CMSIS-NN with Helium MVE (Cortex-M55)"
@@ -449,3 +446,34 @@ config ALP_SDK_MODEL_READER
 	  Selects ZCBOR for the manifest-map decode.  Off by default; the
 	  runtime model loader (and any hand-written firmware that consumes
 	  .alpmodel packages directly) opts in.
+
+# ----------------------------------------------------------------------
+# AWS IoT / Azure IoT embedded-C SDKs (west group `extras-cloud`)
+# ----------------------------------------------------------------------
+
+config ALP_AWS_IOT
+	bool "Build the AWS IoT Device SDK for Embedded C (coreMQTT + coreJSON)"
+	depends on ALP_SDK
+	help
+	  Compiles coreMQTT and coreJSON from the west-pinned
+	  aws-iot-device-sdk-embedded-C checkout (vendors/aws-iot/).  Needs
+	  `west update --group-filter +extras-cloud`.  The TLS transport
+	  (transport_interface.h) is application-supplied; no shim ships.
+
+config ALP_AWS_IOT_DEFAULT_CONFIG
+	bool "Use coreMQTT's default configuration"
+	default y
+	depends on ALP_AWS_IOT
+	help
+	  Defines MQTT_DO_NOT_USE_CUSTOM_CONFIG so coreMQTT uses its built-in
+	  defaults (core_mqtt_config_defaults.h).  Set to n to supply your own
+	  core_mqtt_config.h on the application's include path.
+
+config ALP_AZURE_IOT
+	bool "Build the Azure SDK for Embedded C (az_core + IoT Hub client)"
+	depends on ALP_SDK
+	help
+	  Compiles az_core (span/json/base64/context/log) and the az_iot hub
+	  client from the west-pinned azure-sdk-for-c checkout
+	  (vendors/azure-iot/).  Needs `west update --group-filter
+	  +extras-cloud`.  The MQTT/TLS transport is application-supplied.
