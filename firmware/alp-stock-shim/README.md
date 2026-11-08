@@ -3,7 +3,7 @@
 # alp-stock-shim
 
 Minimal Zephyr image for SoM preset M-core defaults that use
-`app: alp-stock-shim`, and the CM33 image every E1M-V2M103 SoM ships with.
+`app: alp-stock-shim`.
 
 The shim claims no peripheral, no interrupt and no IPC endpoint: no `sci0`
 (a floating RXD faults the core before `main`), no RIIC8 / `i2c-8`, no port 9
@@ -11,7 +11,7 @@ The shim claims no peripheral, no interrupt and no IPC endpoint: no `sci0`
 enable the GD32 link for real CM33 firmware, so
 `boards/<board>.conf` turns SPI and GPIO off and `boards/<board>.overlay`
 disables `&sci7` and `&gpio9`: P96 (SCK7) and P97 (chip-select) are left
-untouched. Those files are per board because the other boards that default to
+untouched. Only the E1M-V2N101 and E1M-V2M101 CM33 boards have these release files today; the other SKUs that default to this app (E1M-V2N102 / V2N103 / V2M102 / V2M103) have no board tree yet, and each needs a matching `boards/<board>.conf` and `.overlay` when it is generated or the shim would enable SCI7 / `gpio9`. Those files are per board because the other boards that default to
 this app (AEN M55 cores) have no `sci7` / `gpio9` nodes. It gives the orchestrator a buildable, bootable
 peer-core image when a project leaves a secondary M-core at the SoM default,
 while customer applications can still override `cores.<id>.app` with their own
