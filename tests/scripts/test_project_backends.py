@@ -15,6 +15,7 @@ Or via CI as configured in .github/workflows/pr-metadata-validate.yml.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -103,78 +104,27 @@ class TestHwBackendsLoader(unittest.TestCase):
 
     # --- per-SKU expectations ---------------------------------------
 
-    def test_aen301_u55_only_no_u85(self) -> None:
-        """E3 carries two U55s, no U85; family-wide primary is U55."""
-        self.assertEmitted    ("E1M-AEN301", "CONFIG_ALP_TFLM_ETHOS_U55=y")
-        self.assertNotEmitted ("E1M-AEN301", "CONFIG_ALP_TFLM_ETHOS_U85=y")
-        self.assertEmitted    ("E1M-AEN301", "CONFIG_ALP_TFLM_HELIUM=y")
-        self.assertNotEmitted ("E1M-AEN301", "CONFIG_ALP_TFLM_NEON=y")
-
-    def test_aen401_u85_primary_plus_u55_secondary(self) -> None:
-        """E4 = 2x U55 + 1x U85; both driver shims must be linked."""
-        self.assertEmitted ("E1M-AEN401", "CONFIG_ALP_TFLM_ETHOS_U85=y")
-        self.assertEmitted ("E1M-AEN401", "CONFIG_ALP_TFLM_ETHOS_U55=y")
-        # E4 has no A32 -> no Neon.
-        self.assertEmitted    ("E1M-AEN401", "CONFIG_ALP_TFLM_HELIUM=y")
-        self.assertNotEmitted ("E1M-AEN401", "CONFIG_ALP_TFLM_NEON=y")
-
-    def test_aen601_gpu2d_present(self) -> None:
-        """E6 has GPU2D + DAVE2D; LVGL picks GPU2D priority 1."""
-        self.assertEmitted ("E1M-AEN601", "CONFIG_ALP_TFLM_ETHOS_U85=y")
-        self.assertEmitted ("E1M-AEN601", "CONFIG_ALP_TFLM_ETHOS_U55=y")
-        self.assertEmitted ("E1M-AEN601", "CONFIG_ALP_LVGL_GPU2D=y")
+    def test_gfx_compat_gpu2d_still_emitted(self) -> None:
+        """gfx_compat is the one library whose accelerator knobs gate real
+        code (src/lib/gfx_compat); its per-SoM binding must keep resolving."""
         self.assertEmitted ("E1M-AEN601", "CONFIG_ALP_GFX_COMPAT_GPU2D=y")
-        # E6 has A32 -> Neon present for cmsis_dsp / opus / minimp3.
-        # NEON entries on those libraries are after HELIUM, and the
-        # loader's per-class first-match picks HELIUM on Ensemble.
-        self.assertEmitted ("E1M-AEN601", "CONFIG_ALP_TFLM_HELIUM=y")
 
-    def test_aen801_hexspi_resolves_xspi_dma(self) -> None:
-        """E8 uses HexSPI not OctalSPI; the second priority entry
-        (requires_cap: hexspi_dma) must still resolve the same
-        CONFIG_ALP_LITTLEFS_XSPI_DMA driver shim."""
-        self.assertEmitted ("E1M-AEN801", "CONFIG_ALP_LITTLEFS_XSPI_DMA=y")
-
-    def test_v2n101_m33_has_no_drp_ai_tflm_shim(self) -> None:
-        """V2N101's DRP-AI engine is A55/Linux-side; its M33 Zephyr
-        library profile must not claim a nonexistent TFLM shim.  The
-        TLS-library CAU entries remain planned until a real consumer lands."""
-        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_TFLM_DRP_AI=y")
-        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_TFLM_ETHOS_U55=y")
-        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_TFLM_ETHOS_U85=y")
-        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_TFLM_NEON=y")
-        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_MBEDTLS_CAU=y")
-        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_BEARSSL_CAU=y")
-        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_LITTLEFS_EMMC_DMA=y")
-        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
-        # Regression guard: the cmsis_dsp profile dir must equal its
-        # board.yaml token so the loader's profile-path lookup resolves
-        # and the HW-accelerator bindings are not silently dropped.
-        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_CMSIS_DSP_NEON=y")
-        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_CMSIS_DSP_TMU_CORDIC=y")
-        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_CMSIS_DSP_TMU_FFT=y")
-
-    def test_v2m101_m33_has_no_drp_ai_tflm_shim(self) -> None:
-        """V2M101 shares V2N's A55-only DRP-AI engine; adding the DX-M1
-        companion does not make DRP-AI available to its M33 Zephyr slice."""
-        self.assertNotEmitted("E1M-V2M101", "CONFIG_ALP_TFLM_DRP_AI=y")
-
-    def test_universal_fallback_dma_always_emitted(self) -> None:
-        """The unconditional DMA fallback (tensor_dma_copy /
-        i2s_dma / spi_dma) must fire on every SKU because none of
-        them carries a `requires_cap:` matcher."""
-        for sku in ("E1M-AEN301", "E1M-AEN801", "E1M-V2N101"):
+    def test_declarative_accelerator_knobs_not_emitted(self) -> None:
+        """#2985: the per-library accelerator knobs (Ethos-U, Helium, Neon,
+        DMA, GPU2D, TMU, CAU, ...) gated no code; the loader must not emit
+        them on any SKU."""
+        declarative = re.compile(
+            r"CONFIG_ALP_(?:TFLM_(?:ETHOS_U\d+|HELIUM|NEON|DMA_COPY)"
+            r"|LVGL_(?:GPU2D|DAVE2D|TMU|DMA2D)"
+            r"|CMSIS_DSP_(?:HELIUM|NEON|TMU_CORDIC|TMU_FFT|ADC_DMA)"
+            r"|LITTLEFS_(?:XSPI|EMMC|QSPI)_DMA"
+            r"|(?:MINIMP3|OPUS)_(?:HELIUM|NEON|FPU|I2S_DMA)"
+            r"|(?:MBEDTLS|BEARSSL)_(?:CRYPTOCELL|INLINE_AES|CAU|OPTIGA)"
+            r"|MADGWICK_(?:FPU|TMU)|U8G2_(?:DMA2D|TMU|BUS_DMA))=y")
+        for sku in ("E1M-AEN301", "E1M-AEN401", "E1M-AEN601",
+                    "E1M-AEN801", "E1M-V2N101"):
             with self.subTest(sku=sku):
-                self.assertEmitted (sku, "CONFIG_ALP_TFLM_DMA_COPY=y")
-                self.assertEmitted (sku, "CONFIG_ALP_MINIMP3_I2S_DMA=y")
-
-    def test_optiga_truth_cross_family(self) -> None:
-        """OPTIGA Trust M is populated on AEN + V2N, but the
-        mbedTLS/BearSSL handshake integration is still planned.  The
-        loader must not emit active TLS offload claims for it."""
-        self.assertNotEmitted ("E1M-AEN401", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
-        self.assertNotEmitted ("E1M-AEN401", "CONFIG_ALP_MBEDTLS_OPTIGA=y")
-        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_MBEDTLS_OPTIGA=y")
+                self.assertIsNone(declarative.search(self._emit(sku)))
 
     def test_sw_fallback_always_emitted(self) -> None:
         """Each library's SW-fallback CONFIG_*=y is emitted

@@ -62,13 +62,7 @@ integration:
     hw_backends:
       class: sensor fusion
       upstream_source: "xioTechnologies"
-      accelerators:
-        - class: simd
-          priority:
-            - { backend: fpu, kconfig: CONFIG_ALP_MADGWICK_FPU=y }
-        - class: cordic
-          priority:
-            - { requires_cap: tmu_cordic, backend: tmu_cordic, kconfig: CONFIG_ALP_MADGWICK_TMU=y }
+      accelerators: []
       sw_fallback:
         required: true
         kconfig: CONFIG_ALP_MADGWICK_LIBM=y

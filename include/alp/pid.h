@@ -15,9 +15,7 @@
  *
  * The implementation is pure C (no vendor dependency) and builds on every
  * OS target.  It is gated by @c CONFIG_ALP_SDK_PID (the `pid` library knob
- * in `board.yaml`); the profile's HW-accelerator bindings
- * (@c CONFIG_ALP_PID_FPU / @c CONFIG_ALP_PID_TIMER) select a faster path
- * on SoMs that expose one, transparently to this API.
+ * in `board.yaml`).
  *
  * Features: output clamping, integrator anti-windup, and
  * derivative-on-measurement (which avoids the "derivative kick" a step

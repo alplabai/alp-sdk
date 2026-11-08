@@ -46,11 +46,7 @@ integration:
     hw_backends:
       class: industrial bus
       upstream_source: "libmodbus"
-      accelerators:
-        - class: dma
-          priority:
-            - { backend: uart_dma, kconfig: CONFIG_ALP_MODBUS_UART_DMA=y }
-            - { backend: ethernet_dma, kconfig: CONFIG_ALP_MODBUS_ETH_DMA=y }
+      accelerators: []
       sw_fallback:
         required: true
         kconfig: CONFIG_ALP_MODBUS_SYNC_IO=y

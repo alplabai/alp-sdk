@@ -32,10 +32,8 @@
  * SoM's actual flash-backed partition instead (Alif MRAM on E1M-AEN,
  * or Renesas xSPI NOR on E1M-V2N) -- the fs_mount()/fs_open()/
  * fs_read()/fs_write() calls below are unchanged; only the DTS
- * partition backing the label differs.  `ALP_LITTLEFS_XSPI_DMA` /
- * `ALP_LITTLEFS_EMMC_DMA` in zephyr/Kconfig.alp-libraries name the
- * per-family HW-accelerated backends; `ALP_LITTLEFS_SYNC_IO` (this
- * example's default) is the SW fallback that works everywhere.
+ * partition backing the label differs.  `ALP_LITTLEFS_SYNC_IO`
+ * (this example's default) is the SW fallback that works everywhere.
  *
  * [UNTESTED]: this build machine's west workspace never ran `west
  * update` after littlefs was added to the Zephyr name-allowlist (see

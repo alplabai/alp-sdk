@@ -25,11 +25,7 @@ OV5640 ──▶ <alp/camera.h> ──▶ <alp/inference.h> ──▶ post-proce
   `<alp/camera.h>` SoC-receiver path).
 - **TFLM + Ethos-U** dispatch via the `<alp/inference.h>`
   `ALP_INFERENCE_BACKEND_AUTO` path.  Two knob sets are emitted for this
-  example, from two different sources:
-  - the §D.lib.loader's `metadata/libraries/tflite-micro.yaml`
-    `hw_backends` block selects the TFLM shim --
-    `CONFIG_ALP_TFLM_ETHOS_U85=y` (with `_U55=y` linked alongside it on
-    U85 SKUs);
+  example:
   - the capability-derived block in `scripts/alp_orchestrate/kconfig.py`
     emits the backend/variant selects resolved from the SKU's
     `capabilities:` block:

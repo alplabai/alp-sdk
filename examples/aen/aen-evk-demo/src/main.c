@@ -4243,13 +4243,15 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	mux_sel                      = (mux_en != NULL) ? alp_gpio_open(ALP_E1M_GPIO_IO13) : NULL;
 	alp_status_t mux_rc          = (mux_en == NULL) ? mux_en_open_err : ALP_ERR_NOT_READY;
 	if (mux_en != NULL && mux_sel != NULL) {
-		/* /E active low: false asserts and connects I2S3 to the amps. */
-		mux_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
-		if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_en, false);
-		/* S = 0 selects EVK_I2S_AMP (metadata/boards/e1m-evk.yaml evk_i2s_select_t). */
-		if (mux_rc == ALP_OK)
-			mux_rc = alp_gpio_configure(mux_sel, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+		/* Drive S first, THEN assert /E: enabling the mux with S floating
+		 * would briefly route I2S3 to whichever side S happens to read.
+		 * S = 0 selects EVK_I2S_AMP (metadata/boards/e1m-evk.yaml evk_i2s_select_t). */
+		mux_rc = alp_gpio_configure(mux_sel, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 		if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_sel, false);
+		/* /E active low: false asserts and connects I2S3 to the amps. */
+		if (mux_rc == ALP_OK)
+			mux_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+		if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_en, false);
 	}
 	printf("[evkdemo] SOUND: I2S mux ENABLE (E1M IO8 -> CC3501E GPIO_30) + SELECT (E1M "
 	       "IO13 -> CC3501E GPIO_13, 0=amps) -> %d\n",

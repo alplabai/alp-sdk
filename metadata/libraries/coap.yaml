@@ -54,11 +54,7 @@ integration:
     hw_backends:
       class: IoT
       upstream_source: "obgm/libcoap"
-      accelerators:
-        - class: crypto
-          priority:
-            - { backend: mbedtls, kconfig: CONFIG_ALP_COAP_MBEDTLS=y }
-            - { backend: oscore, kconfig: CONFIG_ALP_COAP_OSCORE=y }
+      accelerators: []
       sw_fallback:
         required: true
         kconfig: CONFIG_ALP_COAP_NO_TLS=y
