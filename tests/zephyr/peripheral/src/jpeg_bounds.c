@@ -61,9 +61,9 @@ ZTEST(alp_peripheral, test_jpeg_zero_stride_is_tightly_packed)
 
 	/* include/alp/jpeg.h: 0 means tightly packed (normalized to width), so it
 	 * must be accepted exactly like an explicit stride == width. */
-	zassert_equal(rc_zero, rc_ok, "a zero stride must encode as tightly packed");
+	zassert_equal(rc_ok, ALP_OK, "a correct stride must encode");
+	zassert_equal(rc_zero, ALP_OK, "a zero stride must encode as tightly packed");
 	zassert_equal(rc_undersized, ALP_ERR_INVAL, "a stride below width must be refused");
-	zassert_not_equal(rc_ok, ALP_ERR_INVAL, "a correct stride must still be accepted");
 }
 
 ZTEST(alp_peripheral, test_jpeg_rejects_undersized_chroma_stride)
@@ -103,7 +103,7 @@ ZTEST(alp_peripheral, test_jpeg_rejects_undersized_chroma_stride)
 	alp_jpeg_close(h);
 
 	zassert_equal(rc_undersized, ALP_ERR_INVAL, "an undersized chroma stride must be refused");
-	zassert_not_equal(rc_ok, ALP_ERR_INVAL, "a correct chroma stride must still be accepted");
+	zassert_equal(rc_ok, ALP_OK, "a correct chroma stride must still be accepted");
 }
 
 ZTEST(alp_peripheral, test_jpeg_enforces_advertised_max)
@@ -112,8 +112,9 @@ ZTEST(alp_peripheral, test_jpeg_enforces_advertised_max)
 	alp_jpeg_t       *h   = alp_jpeg_open(&cfg);
 	zassert_not_null(h);
 
-	alp_jpeg_caps_t caps;
+	alp_jpeg_caps_t caps    = { 0 };
 	alp_status_t    caps_rc = alp_jpeg_capabilities(h, &caps);
+	zassert_equal(caps_rc, ALP_OK);
 
 	/* Otherwise-fully-valid request (real plane, a stride that always
 	 * satisfies the declared width) so only the dimension under test can
@@ -137,7 +138,7 @@ ZTEST(alp_peripheral, test_jpeg_enforces_advertised_max)
 	 * backend advertising UINT16_MAX (e.g. alif_hantro.c, unreachable on
 	 * native_sim) has no representable out-of-range request -- skip that
 	 * dimension rather than silently wrapping to 0 (#1645 review). */
-	bool         width_testable = caps.max_width < UINT16_MAX;
+	bool         width_testable = caps.max_width != 0u && caps.max_width < UINT16_MAX;
 	alp_status_t rc_width       = ALP_OK;
 	if (width_testable) {
 		req.width    = (uint16_t)(caps.max_width + 1u);
@@ -147,7 +148,7 @@ ZTEST(alp_peripheral, test_jpeg_enforces_advertised_max)
 		req.y_stride = 16u;
 	}
 
-	bool         height_testable = caps.max_height < UINT16_MAX;
+	bool         height_testable = caps.max_height != 0u && caps.max_height < UINT16_MAX;
 	alp_status_t rc_height       = ALP_OK;
 	if (height_testable) {
 		req.height = (uint16_t)(caps.max_height + 1u);
@@ -156,7 +157,6 @@ ZTEST(alp_peripheral, test_jpeg_enforces_advertised_max)
 
 	alp_jpeg_close(h);
 
-	zassert_equal(caps_rc, ALP_OK);
 	if (width_testable) {
 		zassert_equal(
 		    rc_width, ALP_ERR_OUT_OF_RANGE, "width above the advertised max_width must be refused");

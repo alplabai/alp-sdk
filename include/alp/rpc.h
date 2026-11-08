@@ -421,12 +421,13 @@ const alp_capabilities_t *alp_rpc_capabilities(const alp_rpc_channel_t *ch);
  *                                  (v0.6 cap: 8 entries)
  *
  * @par Oversized or malformed peer frames (#1645)
- * A frame larger than the backend's negotiated maximum (1024 bytes) or
- * one that fails to parse is DROPPED by the backend before @p cb is
- * invoked -- @p cb never sees it.  The drop is reported only to the
- * local console (stderr / a backend log warning), never back to the
- * peer on the wire: from the peer's side, the method call this frame
- * carried simply never arrives.  A peer that expects a reply via
+ * A frame larger than the backend's frame maximum (@c ALP_RPC_TX_FRAME_MAX,
+ * 1024 bytes by default) or one that fails to parse is DROPPED by the
+ * backend before @p cb is invoked -- @p cb never sees it.  An oversized
+ * frame is logged to the local console (stderr); a malformed frame is
+ * dropped silently.  Neither is reported back to the peer on the wire:
+ * from the peer's side, the method call this frame carried simply never
+ * arrives.  A peer that expects a reply via
  * @ref alp_rpc_call on this method sees that call time out
  * (@ref ALP_ERR_TIMEOUT), not a distinct "your frame was too big"
  * error.
@@ -598,9 +599,10 @@ alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, siz
  *       is out of scope for issue #1643.
  *
  * @par A dropped peer response looks like a timeout (#1645)
- * If the peer's response frame is larger than the backend's
- * negotiated maximum (1024 bytes) or fails to parse, the backend
- * drops it silently -- reported only to the local console, never
+ * If the peer's response frame is larger than the backend's frame
+ * maximum (@c ALP_RPC_TX_FRAME_MAX, 1024 bytes by default) or fails to
+ * parse, the backend drops it -- an oversized frame is logged to the
+ * local console, a malformed one is dropped silently, and neither is
  * delivered here shortened -- rather than filling @p resp with a
  * truncated response.  This call then simply runs out @p timeout_ms
  * and returns @ref ALP_ERR_TIMEOUT; it does not distinguish "the peer

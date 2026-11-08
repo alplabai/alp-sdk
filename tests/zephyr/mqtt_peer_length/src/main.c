@@ -383,11 +383,11 @@ ZTEST(alp_mqtt_peer_length, test_oversized_publish_split_across_reads_still_drai
 
 	/* The first chunk (CONNACK + up through the rx_buf boundary) is
 	 * already on the wire; the outer poll below returns as soon as
-	 * that arrives. mqtt_drain_step() then has to ride out the
-	 * broker's 200ms k_sleep() internally (its own poll-to-deadline
-	 * loop, independent of this outer timeout_ms) before this call
-	 * returns -- ALP_MQTT_DRAIN_TIMEOUT_MS (5000ms) comfortably covers
-	 * it. */
+	 * that arrives. The drain then has to ride out the broker's 200ms
+	 * k_sleep() within this call's own budget: the 2000ms timeout_ms
+	 * passed to alp_mqtt_loop() is what covers it. A shorter timeout
+	 * would defer msg_cb to the next loop() call and break the
+	 * count == 1 assertion below. */
 	alp_status_t rc1 = alp_mqtt_loop(m, 2000);
 	zassert_equal(rc1, ALP_OK, "first alp_mqtt_loop() failed: %d", (int)rc1);
 

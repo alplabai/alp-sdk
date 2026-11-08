@@ -161,6 +161,15 @@ static void stop_and_free_channel(struct rpc_be *ch)
 
 static atomic_int g_cb_fired;
 static size_t     g_cb_payload_len;
+static atomic_int g_sentinel_fired;
+
+static void on_sentinel(const void *payload, size_t len, void *user)
+{
+	(void)payload;
+	(void)len;
+	(void)user;
+	atomic_fetch_add(&g_sentinel_fired, 1);
+}
 
 static void on_big_frame(const void *payload, size_t len, void *user)
 {
@@ -187,7 +196,9 @@ static void test_oversized_frame_is_dropped_not_truncated(void)
 	alp_rpc_backend_state_t st = { .be_data = ch, .ops = &_ops };
 	ch->owner                  = &st;
 
+	atomic_store(&g_sentinel_fired, 0);
 	ALP_ASSERT_EQ_INT(y_subscribe(&st, "big_frame", on_big_frame, ch), ALP_OK);
+	ALP_ASSERT_EQ_INT(y_subscribe(&st, "sentinel", on_sentinel, ch), ALP_OK);
 	spawn_rx_thread(ch);
 
 	/* method "big_frame" (8 + NUL) + a 1200-byte payload = 1209 bytes,
@@ -207,10 +218,14 @@ static void test_oversized_frame_is_dropped_not_truncated(void)
 	ssize_t sent = send(sv[1], oversized_frame, (size_t)built, 0);
 	ALP_ASSERT_EQ_INT((int)sent, built);
 
-	/* Bounded wait for the rx thread to have processed (or dropped)
-     * the frame; a small settle time is enough since delivery is
-     * local. */
-	sleep_ms(100);
+	/* AF_UNIX SOCK_DGRAM preserves order, so once a small valid sentinel
+	 * sent AFTER the oversized frame has been dispatched, the rx thread
+	 * has certainly already read (and dropped) the oversized one. */
+	uint8_t sentinel[32];
+	int     sbuilt = frame_build(sentinel, sizeof(sentinel), "sentinel", "", 0);
+	ALP_ASSERT_TRUE(sbuilt > 0);
+	ALP_ASSERT_EQ_INT((int)send(sv[1], sentinel, (size_t)sbuilt, 0), sbuilt);
+	ALP_ASSERT_TRUE(wait_until(&g_sentinel_fired, TEST_TIMEOUT_MS));
 
 	ALP_ASSERT_EQ_INT(atomic_load(&g_cb_fired), 0);
 

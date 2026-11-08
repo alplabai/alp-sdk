@@ -26,16 +26,7 @@
  * -- this test is wired into tests/yocto/CMakeLists.txt behind the
  * SAME `pkg_check_modules(... open-amp libmetal)` gate as
  * rpc_uio_self_close.c, and is skipped (not built, not run) exactly
- * like that sibling test whenever those packages are absent -- true
- * on this repo's current dev host (no libmetal-dev package exists in
- * the Debian/Ubuntu archive) and on this repo's CI today (neither
- * workflow nor test-all.sh installs open-amp/libmetal). That is a
- * pre-existing gap in this whole test class, not introduced here --
- * see the #1645 dispatch report for how this fix's control flow was
- * instead verified end-to-end: it is byte-for-byte the same
- * reject-over-clip shape as yocto_drv.c's rpc_rx_main() fix (2b,
- * tests/yocto/rpc_yocto_peer_length.c), which needs no libmetal and
- * DOES run here, red then green.
+ * like that sibling test whenever those packages are absent.
  *
  * Build (when open-amp/libmetal ARE available):
  *   cmake -B build -DALP_OS=yocto -DALP_BUILD_TESTS=ON
@@ -49,6 +40,15 @@
 #include <string.h>
 
 #include "test_assert.h"
+
+/* alp_rpc_close_finalize() is normally defined by src/rpc_dispatch.c;
+ * this binary does not link alp::sdk. Never invoked here (no callback
+ * closes the channel) -- it only satisfies the linker, as in
+ * rpc_uio_self_close.c. */
+void alp_rpc_close_finalize(void *owner)
+{
+	(void)owner;
+}
 
 /* Builds a `struct rpc_be` with just the state uio_ept_cb() touches:
  * call_mutex/sub_mutex + the subs table. uio_ept_cb() never reaches
