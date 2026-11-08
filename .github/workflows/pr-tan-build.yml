@@ -101,9 +101,12 @@ jobs:
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         timeout-minutes: 2
         with:
-          # merge_group: compare against the queue's base commit (empty on other
-          # events, where dorny picks the PR / push base itself).
-          base: ${{ github.event.merge_group.base_sha }}
+          # merge_group: the queue's base commit. push: the pre-push SHA, so the
+          # diff is before..after (empty base would diff the default branch
+          # against main and false-pass every post-merge push; an all-zero
+          # `before` on a new branch falls back to the default merge-base).
+          # pull_request: empty, dorny uses the API.
+          base: ${{ github.event.merge_group.base_sha || (github.event_name == 'push' && github.event.before) || '' }}
           filters: |
             relevant:
             - 'src/**'

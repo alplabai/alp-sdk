@@ -207,11 +207,10 @@ def test_metadata_validate_summary_is_requireable() -> None:
     assert "failure|cancelled" in run  # detect failed/cancelled -> fail
     # a gate job result other than success/legit-skip falls through to exit 1
     assert re.search(r"\*\)\s+echo \"::error::validate concluded", run)
-    # merge_group is path-filtered by detect like the other events (#2972)
+    # validate re-runs the cross-file parity gates on EVERY queue entry (cheap;
+    # a neighbour's merge can break parity); path filter is PR/push only.
     for name in gate_jobs:
-        assert "== 'merge_group'" not in jobs[name]["if"]
-        assert "needs.detect.outputs.relevant == 'true'" in jobs[name]["if"]
-    assert '"merge_group"' in run
+        assert "github.event_name == 'merge_group'" in jobs[name]["if"]
 
 
 def test_doc_drift_summary_is_requireable() -> None:
@@ -383,6 +382,10 @@ def test_every_push_or_queue_detect_checks_out_before_dorny() -> None:
         assert co, f"{wf.name}: detect runs on push/merge_group without a checkout"
         assert co[0].get("with", {}).get("fetch-depth") == 0, wf.name
         assert "'pull_request'" not in co[0].get("if", "").replace("!= 'pull_request'", ""), wf.name
+        with_ = steps[idx[0]]["with"]
         if runs_on_queue:
-            assert "merge_group.base_sha" in str(steps[idx[0]]["with"]), wf.name
+            assert "merge_group.base_sha" in str(with_), wf.name
+        if runs_on_push:
+            # an empty base on push diffs the default branch, false-passing main
+            assert "github.event.before" in str(with_.get("base", "")), wf.name
     assert checked >= 6, "expected the six push/merge_group detect jobs"

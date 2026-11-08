@@ -15,7 +15,8 @@
 # ubuntu-latest).  This workflow ADDS Mac + Win coverage; it does
 # not replace any existing gate.
 #
-# `merge_group`: `python-smoke` RUNS its ubuntu-latest leg on this event
+# `merge_group`: `python-smoke` runs its ubuntu-latest leg on this event
+# when `detect` (git diff against the queue's base_sha) finds a watched path
 # (alp-sdk#2972) because `python-smoke · all` is a required context on
 # `dev`, so the queue tests the rebased content, not only the PR head.
 # macOS/Windows legs stay pull_request/push-only to keep the shared runner
@@ -177,21 +178,18 @@ on:
   # `pull_request` -- for a queued entry. pr-twister.yml and
   # pr-static-analysis.yml already needed this for their own required
   # contexts (#1415); a future required-context here would hit the same
-  # AWAITING_CHECKS hang without it. Bare (no `paths:`): `merge_group`
-  # doesn't support the same path-filter semantics `pull_request`/`push`
-  # get above, and the `detect` job below is gated OFF on `merge_group`
-  # rather than trusted to resolve a merge-queue base/head pair correctly
-  # (that isn't something this repo has verified -- same call
-  # `pr-bootstrap-distro-install.yml`'s own `detect` job makes). `merge_group`
+  # AWAITING_CHECKS hang without it. Bare (no `paths:`): the path filter
+  # lives in the `detect` job below, which also runs on `merge_group` (checkout
+  # + `base` = the queue's base_sha, #2972). `merge_group`
   # also can't be scoped by matrix leg at the trigger level, so each
   # matrix job below scopes its own `strategy.matrix.os` (a job-level
   # `if:` can't do this -- `matrix` isn't in the context list
   # `jobs.<job_id>.if` gets, enforced by scripts/check_workflow_expressions.py)
   # to just `ubuntu-latest` on that event -- this PRESUMES the eventual
   # required context ends up ubuntu-latest-only (alp-sdk#1528 leaves that
-  # open) -- since `merge_group` fires unconditionally on every `dev`
-  # merge-queue entry with no `paths:` to narrow it, and the other two
-  # legs would otherwise bill full matrix cost (macOS 10x, Windows 2x) on
+  # open) -- since `merge_group` fires on every `dev`
+  # merge-queue entry (detect only narrows it to relevant ones), and the other
+  # two legs would otherwise bill full matrix cost (macOS 10x, Windows 2x) on
   # every queue entry while gating nothing. If the maintainer instead
   # requires the macOS/Windows contexts, widen this cap to include those
   # legs FIRST -- promoting them as required while they're capped out of
@@ -214,8 +212,9 @@ jobs:
   # Cheap path detector -- NOT a required context itself, same shape as
   # pr-bootstrap-distro-install.yml's own `detect` job (copied, not
   # reinvented -- see that file's comment for the full rationale).
-  # Gated off on `merge_group` (see the trigger comment above); always
-  # runs fast on `pull_request`/`push`/`workflow_dispatch`. Its output
+  # Runs on every event but `workflow_dispatch` (git diff against the
+  # queue's base_sha on `merge_group`, the pre-push SHA on `push`, the API on
+  # `pull_request`). Its output
   # gates the heavy matrix jobs below.
   # ---------------------------------------------------------------
   detect:
@@ -241,9 +240,12 @@ jobs:
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         timeout-minutes: 2
         with:
-          # merge_group: compare against the queue's base commit (empty on other
-          # events, where dorny picks the PR / push base itself).
-          base: ${{ github.event.merge_group.base_sha }}
+          # merge_group: the queue's base commit. push: the pre-push SHA, so the
+          # diff is before..after (empty base would diff the default branch
+          # against main and false-pass every post-merge push; an all-zero
+          # `before` on a new branch falls back to the default merge-base).
+          # pull_request: empty, dorny uses the API.
+          base: ${{ github.event.merge_group.base_sha || (github.event_name == 'push' && github.event.before) || '' }}
           filters: |
             relevant:
               - 'metadata/**'

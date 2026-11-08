@@ -23,9 +23,8 @@ name: pr-metadata-validate
 #   - The summary name is static (no matrix interpolation) so a skipped
 #     run still reports under the name branch protection matches.
 #
-# On `merge_group` `detect` runs too (checkout + `base` = the queue's
-# base_sha) and `validate` runs when it finds a watched path, minus the two
-# pytest steps. Reason: the queue ref is the PR rebased
+# On `merge_group` `validate` runs UNCONDITIONALLY (the path filter applies to
+# pull_request/push only), minus the two pytest steps. Reason: the queue ref is the PR rebased
 # onto the PRs ahead of it, and these gates are cross-file parity checks
 # (metadata <-> headers <-> docs <-> examples) whose answer can change under
 # a neighbour's merge -- that is the one thing a queue run can catch that
@@ -79,9 +78,12 @@ jobs:
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         timeout-minutes: 2
         with:
-          # merge_group: compare against the queue's base commit (empty on other
-          # events, where dorny picks the PR / push base itself).
-          base: ${{ github.event.merge_group.base_sha }}
+          # merge_group: the queue's base commit. push: the pre-push SHA, so the
+          # diff is before..after (empty base would diff the default branch
+          # against main and false-pass every post-merge push; an all-zero
+          # `before` on a new branch falls back to the default merge-base).
+          # pull_request: empty, dorny uses the API.
+          base: ${{ github.event.merge_group.base_sha || (github.event_name == 'push' && github.event.before) || '' }}
           filters: |
             relevant:
             - 'metadata/**'
@@ -206,7 +208,7 @@ jobs:
     # skip ONLY when `detect` ran, succeeded and found no watched path
     # changed. merge_group, workflow_dispatch and any `detect` non-success
     # run the real job.
-    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
+    if: always() && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     runs-on: ubuntu-latest
     # The ceiling must exceed the job's LONGEST step cap, not the sum of
     # every cap (test_job_ceiling_exceeds_its_longest_step_timeout in
