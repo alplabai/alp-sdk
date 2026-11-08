@@ -52,10 +52,10 @@ inline std::atomic<int> g_overlap_events{ 0 };
 inline bool g_cpu_only = false;
 
 /* What the fake DRPAI_GET_STATUS reports after a Run().  Defaults are an
- * idle driver with no error; g_status_open_errno != 0 fails the extra open
- * (only after the first, i.e. the status query's, open -- see the fake). */
+ * idle driver with no error.  g_status_open_errno != 0 fails every open. */
 inline uint32_t g_status_state       = 1; /* DRPAI_STATUS_IDLE */
 inline int32_t  g_status_err         = 0; /* DRPAI_ERRINFO_SUCCESS */
 inline int      g_status_ioctl_errno = 0; /* nonzero: ioctl fails with it */
+inline int      g_status_open_errno  = 0; /* nonzero: open fails with it */
 
 } /* namespace drpai_test */

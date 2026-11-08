@@ -270,18 +270,30 @@ alp_status_t _drpai_mem_start(uint64_t &out, uint64_t &out_size)
 	return ALP_OK;
 }
 
-/** Report whether the job the runtime just ran succeeded.
+/** Read the driver's record of the job the runtime just ran.
  *
- *  MeraDrpRuntimeWrapper::Run() is void, so a rejected or timed-out
- *  DRPAI_START is otherwise invisible.  The driver keeps the job result in
- *  device-global state (priv->drpai_status), not per fd, and DRPAI_GET_STATUS
- *  reads it.  The runtime still holds its own fd here, so this extra open()
- *  only takes the driver semaphore (<= 1000 ms) briefly: the first-open
- *  re-init (which would clear the result) runs only when no fd is open.
+ *  MeraDrpRuntimeWrapper::Run() is void.  The driver keeps the job result in
+ *  device-global state (priv->drpai_status), not per fd; DRPAI_GET_STATUS
+ *  reads it.
  *
- *  @return ALP_OK; ALP_ERR_TIMEOUT when the job is still RUN or the status
- *          open/ioctl timed out; ALP_ERR_IO for a DRP/AIMAC error, reset or
- *          suspend, or any other failure of the query itself. */
+ *  Detected: a job still in RUN after Run() returned, and a DRP/AIMAC error,
+ *  reset or suspend the driver recorded.  NOT detected: a DRPAI_START the
+ *  driver rejects before it starts the job (not ready, busy, bad argument,
+ *  semaphore timeout).  The driver clears the result and sets RUN only after
+ *  those checks, so the previous job's result is still there and reads as
+ *  success.  A runtime that resets the NPU on its own wait timeout also reads
+ *  as ALP_ERR_IO, not ALP_ERR_TIMEOUT.
+ *
+ *  The driver re-inits the result on the first open of the device.  That
+ *  does not happen here only if the runtime's fd is still open during Run(),
+ *  which the closed MERA2 runtime is not known to guarantee.  If it is not,
+ *  this open is the first and the result reads IDLE/SUCCESS: the check
+ *  degrades to ALP_OK, never to a false error.
+ *
+ *  @return ALP_OK; otherwise ALP_ERR_TIMEOUT (job still RUN, or the query's
+ *          semaphore wait timed out), ALP_ERR_BUSY (shared-memory lock held
+ *          by another user), or ALP_ERR_IO (recorded job error, or any other
+ *          query failure). */
 alp_status_t _drpai_job_status()
 {
 	const int fd = ::open(kDrpAiDevice, O_RDWR | O_CLOEXEC);
@@ -746,8 +758,8 @@ extern "C" alp_status_t alp_inference_drpai_invoke(struct alp_inference *h_)
 		}
 	}
 
-	/* Run() is void and blocks until DRP-AI completes; a rejected or
-	 * timed-out DRPAI_START is not reported by it, so ask the driver. */
+	/* Run() is void and blocks until DRP-AI completes, so ask the driver
+	 * what it recorded (see _drpai_job_status() for what that can miss). */
 	st->runtime.Run();
 	return _drpai_job_status();
 }

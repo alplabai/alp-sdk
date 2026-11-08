@@ -573,11 +573,19 @@ driver has no queue (a second `DRPAI_START` while a job runs returns
   therefore cost the sum of their latencies.
 - **A failed job is reported after `Run()`.** The runtime's `Run()`
   returns void, so `alp_inference_invoke()` asks the driver
-  (`DRPAI_GET_STATUS` on a second open of `/dev/drpai0`; the runtime's own
-  fd keeps the NPU initialised, so the extra open only takes the driver
-  semaphore, up to 1000 ms). A job still in RUN or a status query that
-  times out returns `ALP_ERR_TIMEOUT`; a DRP/AIMAC error, reset, suspend or
-  failed query returns `ALP_ERR_IO`.
+  (`DRPAI_GET_STATUS` on a second open of `/dev/drpai0`). The ioctl takes
+  the driver semaphore again (up to 1000 ms, plus the open's own wait) and,
+  with shared-memory support, the shared-memory lock, so it can also fail
+  with `EINPROGRESS`/`EADDRNOTAVAIL`. A job still in RUN or a query that
+  times out returns `ALP_ERR_TIMEOUT`; a lock conflict returns
+  `ALP_ERR_BUSY`; a recorded DRP/AIMAC error, reset or suspend, or any
+  other query failure, returns `ALP_ERR_IO`. Not detected: a `DRPAI_START`
+  the driver rejects before it starts the job (it clears the result only
+  after its checks, so the previous result still reads as success). The
+  driver re-inits its status on the first open of the device; the MERA2
+  runtime is a closed prebuilt, so if it does not keep its fd open during
+  `Run()` the query reads idle/success and `invoke()` returns `ALP_OK`, as
+  before. Not yet bench-verified on V2N.
 - **DRP-AI is one process per board.** The arena placement above is per
   process, so two processes would both load at the arena base and corrupt
   each other. The first DRP-AI handle in a process therefore takes an

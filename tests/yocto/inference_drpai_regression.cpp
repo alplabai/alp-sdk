@@ -419,7 +419,22 @@ void test_invoke_reports_driver_job_status()
 	drpai_test::g_status_ioctl_errno = ENOTTY;
 	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_ERR_IO);
 
+	drpai_test::g_status_ioctl_errno = ETIMEDOUT;
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_ERR_TIMEOUT);
+	drpai_test::g_status_ioctl_errno = EINPROGRESS;
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_ERR_BUSY);
+
 	drpai_test::g_status_ioctl_errno = 0;
+	drpai_test::g_status_err         = -3; /* suspend/reset: any recorded error */
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_ERR_IO);
+	drpai_test::g_status_err = 0;
+
+	drpai_test::g_status_open_errno = ETIMEDOUT;
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_ERR_TIMEOUT);
+	drpai_test::g_status_open_errno = EACCES;
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_ERR_IO);
+	drpai_test::g_status_open_errno = 0;
+
 	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_OK);
 
 	alp_inference_drpai_close(&a);

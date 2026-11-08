@@ -40,7 +40,7 @@ typedef struct drpai_status {
 } drpai_status_t;
 
 #define DRPAI_GET_DRPAI_AREA  0x4010c401UL
-#define DRPAI_GET_STATUS      0x8088c403UL
+#define DRPAI_GET_STATUS      0x8088c403UL /* arbitrary unique value */
 #define DRPAI_STATUS_IDLE     (1)
 #define DRPAI_STATUS_RUN      (2)
 #define DRPAI_ERRINFO_SUCCESS (0)
@@ -56,6 +56,10 @@ inline int alp_fake_drpai_open(const char *path, int flags)
 	(void)path;
 	if (!drpai_test::g_device_present) {
 		errno = ENOENT;
+		return -1;
+	}
+	if (drpai_test::g_status_open_errno != 0) {
+		errno = drpai_test::g_status_open_errno;
 		return -1;
 	}
 	return ::open("/dev/null", flags);

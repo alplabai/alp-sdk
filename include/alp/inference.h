@@ -376,7 +376,11 @@ alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tenso
  * The DRP-AI3 runtime's `Run()` returns void, so after it returns the
  * backend queries the driver (`DRPAI_GET_STATUS`, one extra open of
  * `/dev/drpai0`): a job still running maps to @ref ALP_ERR_TIMEOUT, a
- * hardware error, reset, suspend or failed query to @ref ALP_ERR_IO.
+ * recorded hardware error, reset or suspend to @ref ALP_ERR_IO.  A failed
+ * query returns @ref ALP_ERR_TIMEOUT, @ref ALP_ERR_BUSY or @ref ALP_ERR_IO.
+ * A start the driver rejects before running is not seen and still returns
+ * @ref ALP_OK, as does every job if the runtime does not hold the device
+ * open during `Run()`.
  *
  * @param[in] inf  Handle from @ref alp_inference_open.
  *
