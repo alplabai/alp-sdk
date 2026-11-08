@@ -151,6 +151,9 @@ on:
       - '.github/workflows/pr-twister-aen.yml'
       - 'scripts/select_aen_twister.py'
       - 'tests/zephyr/inference_tflm_dim_bound/**'
+      - 'src/backends/inference/**'
+      - 'include/alp/inference.h'
+      - 'src/inference_dispatch.c'
       - 'src/backends/inference/tflm.cpp'
   push:
     branches: [main, dev]
@@ -204,6 +207,9 @@ on:
       - 'west.yml'
       - 'metadata/toolchains.json'
       - 'tests/zephyr/inference_tflm_dim_bound/**'
+      - 'src/backends/inference/**'
+      - 'include/alp/inference.h'
+      - 'src/inference_dispatch.c'
       - 'src/backends/inference/tflm.cpp'
   workflow_dispatch:
   # #2541: nightly run on the default branch (dev), so the ccache PR runs

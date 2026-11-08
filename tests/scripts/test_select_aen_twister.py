@@ -254,5 +254,7 @@ def test_matrix_refuses_roots_without_counts():
 def test_tflm_dim_bound_scenario_runs_in_the_job():
     wf = (REPO / ".github" / "workflows" / "pr-twister-aen.yml").read_text(encoding="utf-8")
     assert wf.count("- 'tests/zephyr/inference_tflm_dim_bound/**'") == 2
+    for trigger in ("src/backends/inference/**", "include/alp/inference.h", "src/inference_dispatch.c"):
+        assert wf.count(f"- '{trigger}'") == 2
     assert "-T alp-sdk/tests/zephyr/inference_tflm_dim_bound" in wf
     assert (REPO / "tests/zephyr/inference_tflm_dim_bound/testcase.yaml").is_file()
