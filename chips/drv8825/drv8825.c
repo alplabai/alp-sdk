@@ -81,6 +81,13 @@ alp_status_t drv8825_set_sleep(drv8825_t *dev, bool sleeping)
 	return alp_gpio_write(dev->nenbl, sleeping); /* nENBL high disables */
 }
 
+alp_status_t drv8825_set_enable(drv8825_t *dev, bool enabled)
+{
+	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+	if (dev->nenbl == NULL) return ALP_ERR_NOSUPPORT;
+	return alp_gpio_write(dev->nenbl, !enabled); /* active-low enable */
+}
+
 void drv8825_deinit(drv8825_t *dev)
 {
 	if (dev == NULL) return;

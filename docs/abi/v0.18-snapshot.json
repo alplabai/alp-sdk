@@ -1,5 +1,5 @@
 {
-  "generated": "2026-11-07",
+  "generated": "2026-11-08",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -3962,6 +3962,10 @@
         "drv8825_set_direction": {
           "hash": "f4d733b357026eaf",
           "signature": "alp_status_t drv8825_set_direction(drv8825_t *dev, bool forward);"
+        },
+        "drv8825_set_enable": {
+          "hash": "136941058e708c71",
+          "signature": "alp_status_t drv8825_set_enable(drv8825_t *dev, bool enabled);"
         },
         "drv8825_set_microstep": {
           "hash": "7aad577eb44517ed",
