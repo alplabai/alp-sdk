@@ -299,9 +299,9 @@ static alp_status_t t_write(alp_uart_backend_state_t *st, const uint8_t *data, s
  *   - Partial fill (`0 < collected < len`) or nothing collected at
  *     all: a real port would keep listening until the deadline
  *     instead of returning the moment its queue ran dry, so advance
- *     the virtual clock by the FULL timeout_ms and return ALP_OK with
- *     the partial bytes already copied into `data`, or ALP_ERR_TIMEOUT
- *     if nothing was collected.
+ *     the virtual clock by the FULL timeout_ms and return
+ *     ALP_ERR_TIMEOUT either way (ALP_OK means all `len` bytes; the
+ *     partial bytes are consumed and `data` is unspecified).
  *   - An error reached at the head with nothing collected yet on this
  *     call returns immediately with the injected status (see the
  *     `is_error` branch inside the loop below) -- that is a distinct
@@ -361,7 +361,7 @@ t_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout
 	 * than returning early just because its queue ran dry -- advance
 	 * by the FULL timeout_ms either way. */
 	(void)alp_testing_clock_advance_ms(timeout_ms);
-	return (collected > 0) ? ALP_OK : ALP_ERR_TIMEOUT;
+	return ALP_ERR_TIMEOUT;
 }
 
 static void t_close(alp_uart_backend_state_t *st)

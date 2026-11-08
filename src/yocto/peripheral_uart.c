@@ -452,8 +452,8 @@ alp_status_t alp_uart_read_fd_bounded(int fd, uint8_t *data, size_t len, uint32_
 			return alp_status_from_posix_errno(errno);
 		}
 		if (pr == 0) {
-			/* Deadline reached with no more data available. */
-			return (got > 0) ? ALP_OK : ALP_ERR_TIMEOUT;
+			/* Deadline reached before len bytes: ALP_OK means all len. */
+			return ALP_ERR_TIMEOUT;
 		}
 		if (pfd.revents & (POLLERR | POLLNVAL)) {
 			return ALP_ERR_IO;
@@ -472,7 +472,7 @@ alp_status_t alp_uart_read_fd_bounded(int fd, uint8_t *data, size_t len, uint32_
              * and the byte being consumed elsewhere -- go around
              * and re-poll rather than spin or fail spuriously. */
 			if (pfd.revents & POLLHUP) {
-				return (got > 0) ? ALP_OK : ALP_ERR_IO;
+				return ALP_ERR_IO; /* peer gone before len bytes */
 			}
 			continue;
 		}

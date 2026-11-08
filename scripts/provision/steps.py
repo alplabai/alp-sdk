@@ -979,7 +979,13 @@ class Preflight(Step):
             c = next((c for c in ctx.bundle.get("components", []) if c.get("role") == role), None)
             if c:
                 ev[key] = c.get("sha256", "")
-        ev["rootfs_bundle_version"] = str(ctx.bundle.get("release_version", ""))
+        version = str(ctx.bundle.get("release_version", ""))
+        if ((ctx.bundle_dir / "bundle.json").is_file() and not ctx.bundle.get("signature")
+                and not ledger_out.is_unsigned_bundle(version)):
+            # check_som_bundle.py only verifies a signature that is present; a bundle.json with
+            # none would otherwise pass with self-declared sha256s and could be recorded SHIPPABLE.
+            version = f"unsigned:{version}"
+        ev["rootfs_bundle_version"] = version
         try:
             for op in gates.IdentityOp:
                 gates.identity_frame(op, b"\xff" * gates.SECURE_PAGE_LEN
@@ -1693,6 +1699,12 @@ class EepromManifest(Step):
         ev = {"manifest_staged_crc32": _crc(blob[:0x7C]),
               "manifest_staged_sha256": hashlib.sha256(blob).hexdigest()}
         bus = ctx.i2c("eeprom")
+        committed = ctx.unit_dir / f"{ctx.serial}.manifest.bin"
+        if committed.exists() and not ctx.replace_identity:
+            # promote_manifest would refuse this AFTER the EEPROM was rewritten, leaving the array
+            # and the committed manifest.bin out of step; refuse before touching the unit.
+            raise Refused(f"refused: {committed.name} is already committed in the ledger; changing "
+                          "the identity needs --replace-identity (with --reprovision-from)")
         _archive_old_identity(ctx, "manifest", blob)
         ctx.mutate(f"stage {ctx.serial}.manifest.staged.bin in the ledger",
                    lambda: _stage(ctx, f"{ctx.serial}.manifest.staged.bin", blob))
@@ -2806,7 +2818,7 @@ class Record(Step):
         # only, noted below.
         legacy_defect = before.get("act88760_gpio4_defect", "").strip().lower() == "yes"
         merged = {**before, **auto}
-        bench_only = merged.get("rootfs_bundle_version", "").startswith("build-dir:")
+        bench_only = ledger_out.is_unsigned_bundle(merged.get("rootfs_bundle_version", ""))
         defaults = {"disposition": "bench-only"} if bench_only else {}
         would = [k for k, v in auto.items() if before.get(k) != str(v)] + [k for k in defaults if k not in before]
         changed = ctx.mutate(f"merge {len(would)} key(s) into {unit_yaml.name}: {', '.join(would)}",

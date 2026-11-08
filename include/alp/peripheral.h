@@ -1059,16 +1059,47 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
 /**
  * @brief Blocking UART read with millisecond timeout.
  *
+ * Returns @ref ALP_OK ONLY when all @p len bytes were received.
  * @p timeout_ms bounds the ENTIRE call, not just the gap between two
- * already-arrived bytes.  If the deadline is reached with zero bytes
- * collected, the call returns @ref ALP_ERR_TIMEOUT.  If at least one
- * byte arrived before the deadline but fewer than @p len, the call
- * returns @ref ALP_OK with the partial bytes in @p data -- the
- * caller has no count of how many, so read in smaller chunks (or
- * pair with @ref alp_uart_rx_ringbuf_attach) when a partial-fill
- * count matters.  @c timeout_ms == 0 is a single non-blocking poll:
- * return immediately with @ref ALP_ERR_TIMEOUT if no byte is already
- * available.
+ * already-arrived bytes: if the deadline is reached before @p len bytes
+ * arrived -- with zero bytes or with only some -- the call returns
+ * @ref ALP_ERR_TIMEOUT.  On ANY non-OK return the contents of @p data
+ * are unspecified and the bytes received so far are consumed (they are
+ * not redelivered).  For partial or streaming reads that need a count,
+ * on Zephyr attach an RX ring with @ref alp_uart_rx_ringbuf_attach and
+ * use @ref alp_uart_rx_ringbuf_pop; on backends without the ring (Yocto,
+ * baremetal) call this with @p len == 1 in a loop.  @c timeout_ms == 0
+ * is a single non-blocking poll: it returns @ref ALP_OK only if @p len
+ * bytes are already available, otherwise @ref ALP_ERR_TIMEOUT.
+ *
+ * Data loss is never silent.  Without a ring buffer attached the read
+ * polls the controller FIFO, so a burst longer than the FIFO that
+ * arrives faster than the caller polls (high baud, a long
+ * timeout-free gap between calls) overruns it; the call then returns
+ * @ref ALP_ERR_IO instead of @ref ALP_OK with a corrupted frame (UART
+ * overrun, framing or parity error reported by the driver).  On
+ * ns16550-class UARTs (the Alif UARTs) TX polling reads the
+ * line-status register, which clears the overrun flag; @ref alp_uart_write
+ * therefore checks for a line error before each byte and the next
+ * read or ring pop reports it as @ref ALP_ERR_IO, but an overrun that
+ * lands inside the single LSR read of one TX byte can still be missed.
+ * For full-duplex use, or bursts longer than the hardware FIFO, attach
+ * an RX ring buffer with @ref alp_uart_rx_ringbuf_attach (Zephyr:
+ * CONFIG_ALP_SDK_UART_RX_RINGBUF=y): while one is attached this call
+ * takes bytes from the ring, woken by the RX interrupt rather than
+ * polling, and returns @ref ALP_ERR_IO if bytes were lost (ring
+ * overflow or a hardware FIFO overrun seen by the RX interrupt) since
+ * the last read/pop.  Loss already recorded when the call starts is
+ * reported before any byte is consumed.
+ *
+ * On @ref ALP_ERR_IO bytes may already have been consumed from the ring
+ * or FIFO -- treat the stream as having a gap and resynchronise.
+ *
+ * Concurrency: with a ring attached, this call and
+ * @ref alp_uart_rx_ringbuf_pop are the SAME single consumer of the ring;
+ * call them from one thread, or serialise them in the caller.  If the
+ * ring is detached while this call waits, it returns promptly with
+ * @ref ALP_ERR_NOT_READY (any bytes already received are consumed).
  *
  * @param[in]  port        Handle from @ref alp_uart_open.
  * @param[out] data        Destination buffer.
@@ -1077,8 +1108,11 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  *                         don't block.
  *
  * @return ALP_OK / ALP_ERR_INVAL (@p data NULL with @p len > 0) /
- *         ALP_ERR_NOT_READY (NULL or closed @p port) /
- *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ *         ALP_ERR_NOT_READY (NULL or closed @p port, or the ring buffer
+ *         was detached during the wait) /
+ *         ALP_ERR_TIMEOUT (fewer than @p len bytes by the deadline) /
+ *         ALP_ERR_IO (line error or RX overrun: bytes were lost) /
+ *         ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms);
 
@@ -1117,8 +1151,10 @@ const alp_capabilities_t *alp_uart_capabilities(const alp_uart_t *port);
 /*     buffers in-kernel; baremetal lands once UART IRQ wiring does).  */
 /*                                                                     */
 /* Concurrency: alp_uart_rx_ringbuf_pop / _count run from the          */
-/* consumer thread only; the producer side (UART IRQ) runs inside      */
-/* the SDK and uses LwRB's single-producer-single-consumer guarantees. */
+/* consumer thread only, and alp_uart_read() on the parent port is     */
+/* the same consumer while a ring is attached (one thread, or          */
+/* caller-serialised); the producer side (UART IRQ) runs inside the    */
+/* SDK and uses LwRB's single-producer-single-consumer guarantees.     */
 /* ------------------------------------------------------------------ */
 
 typedef struct alp_uart_rx_ringbuf alp_uart_rx_ringbuf_t;
@@ -1159,7 +1195,10 @@ alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_si
  * @brief Pop up to @p max_len bytes out of the ring.
  *
  * Non-blocking.  Writes the number of bytes actually copied into
- * @p got (may be zero if the ring is empty).
+ * @p got (may be zero if the ring is empty).  If the RX interrupt had to
+ * drop bytes because the ring was full since the last report, the
+ * buffered bytes are still copied but the call returns
+ * @ref ALP_ERR_IO once, so the loss is never silent.
  *
  * @param rb         Handle from alp_uart_rx_ringbuf_attach.
  * @param out        Caller-supplied destination buffer.
@@ -1168,6 +1207,8 @@ alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_si
  *
  * @return ALP_OK on success.  ALP_ERR_NOT_READY if @p rb is NULL or
  *         detached.  ALP_ERR_INVAL if @p out is NULL with @p max_len > 0.
+ *         ALP_ERR_IO if the ring overflowed (bytes lost) since the last
+ *         pop/read.
  */
 alp_status_t
 alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len, size_t *got);
