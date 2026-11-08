@@ -86,15 +86,68 @@ def test_the_two_copies_do_not_overlap_and_sit_above_every_boot_write(preset):
         assert max(a, b) + size <= boot["partition_bytes"]
 
 
-PATCH_0016 = META / "recipes-bsp/u-boot/u-boot/0016-rzv2n-dev-ALP-E1M-persistent-environment.patch"
+UBOOT_PATCHES = META / "recipes-bsp/u-boot/u-boot"
+PATCH_0018 = UBOOT_PATCHES / "0018-rzv2n-dev-ALP-E1M-mender-ab-and-signed-fit-boot.patch"
+
+
+def _flags_list() -> list[tuple[str, str]]:
+    """(name, flags) of the allowlist as the patch series leaves it: the
+    "name:flags,..." string lines the last patch that adds any of them
+    carries (a later patch may re-type the entries and leave the #define as
+    context)."""
+    entry = re.compile(r"^\w+:[a-z]{2}(,\w+:[a-z]{2})*,?$")
+    body = None
+    for patch in sorted(UBOOT_PATCHES.glob("00*.patch")):
+        added = [m.group(1) for ln in patch.read_text(encoding="utf-8").splitlines()
+                 if ln.startswith("+\t") and (m := re.fullmatch(r'\+\t"([^"]*)"(?: \\)?', ln)) and entry.match(m.group(1))]
+        if added:
+            body = "".join(added)
+    assert body, "no CFG_ENV_FLAGS_LIST_STATIC strings in the patch series"
+    return [tuple(e.split(":")) for e in body.split(",") if e]
+
+
+def test_every_allowlist_entry_uses_a_valid_u_boot_flag():
+    """env/flags.c: type is one of s d x b (+ i m with CONFIG_NET), access one
+    of a r o c (+ w with CONFIG_ENV_WRITEABLE_LIST).  An unknown letter is not
+    an error in U-Boot, it silently disables the type check."""
+    for name, flags in _flags_list():
+        assert len(flags) == 2 and flags[0] in "sdxbim" and flags[1] in "arocw", (name, flags)
 
 
 def test_only_ota_variables_are_importable_from_the_saved_environment():
     """The write allowlist is what stops fw_setenv from changing how a unit
     boots: it must be on, and nothing that controls booting may be listed."""
     assert _cfg()["CONFIG_ENV_WRITEABLE_LIST"] == "y"
-    names = set(re.findall(r"(\w+):sw", PATCH_0016.read_text(encoding="utf-8")))
+    flags = dict(_flags_list())
+    names = set(flags)
     assert {"upgrade_available", "bootcount", "mender_boot_part"} <= names
     assert not names & {"bootcmd", "bootargs", "bootdelay", "bootdelaykey", "preboot",
                         "bootcmd_check", "emmcload", "sd2load"}
     assert not any(n.startswith("bootstopkey") for n in names)
+    # what reaches a Mender decision is typed: the saved string is a number
+    assert {flags[n][0] for n in ("upgrade_available", "bootcount", "mender_boot_part",
+                                  "mender_saveenv_canary")} == {"d"}
+    assert flags["mender_boot_part_hex"][0] == "x"
+
+
+def test_mender_env_device_is_the_one_u_boot_reads():
+    """meta-mender derives /etc/fw_env.config's device from the env part: 2 is
+    /dev/mmcblk0boot1, the default 0 is the user area U-Boot never reads."""
+    env = _boot(PRESETS[0])["uboot_env"]
+    text = MENDER.read_text(encoding="utf-8")
+    assert re.search(rf'^MENDER_UBOOT_CONFIG_SYS_MMC_ENV_PART \?= "{env["part"]}"$', text, re.M)
+    assert re.search(rf'^BOOTENV_SIZE \?= "{hex(env["size"])}"$', text, re.M)
+
+
+def test_mender_bootcmd_picks_the_slot_from_literals_only():
+    """The saved environment is writable from Linux: the slot numbers in the
+    ALP bootcmd must be literals equal to mender.inc's A/B partitions, and the
+    saved string must never be pasted into the mmc spec or the cmdline."""
+    mender = MENDER.read_text(encoding="utf-8")
+    part = {s: re.search(rf'^MENDER_ROOTFS_PART_{s} \?= "\$\{{MENDER_STORAGE_DEVICE_BASE\}}(\d+)"', mender, re.M).group(1)
+            for s in "AB"}
+    patch = PATCH_0018.read_text(encoding="utf-8")
+    for s in "AB":
+        assert f"setenv alp_mmc 0:{part[s]};setenv alp_root /dev/mmcblk0p{part[s]}" in patch
+    added = "\n".join(ln for ln in patch.splitlines() if ln.startswith("+") and not ln.startswith("+ *"))
+    assert not re.search(r"alp_mmc \$\{|alp_root \$\{|setenv alp_\w+ \$\{|mender_kernel_root|mender_uboot_root", added)

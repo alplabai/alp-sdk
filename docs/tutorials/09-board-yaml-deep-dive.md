@@ -491,7 +491,7 @@ The build absorbs three outputs per project:
 * `build/generated/dts-partitions.dtsi` -- a DTS overlay decorating
   `&<dt_label>` with a `partitions { compatible = "fixed-partitions"; ... }`
   child node.  Apps reach individual partitions via Zephyr's
-  `FIXED_PARTITION_ID(<name>_partition)`.
+  `PARTITION_ID(<name>_partition)`.
 * `CONFIG_FILE_SYSTEM=y` + the per-fs Kconfig (`LITTLEFS` /
   `FAT_FILESYSTEM_ELM` / `FILE_SYSTEM_EXT2`) + per-partition
   `CONFIG_FS_LITTLEFS_PARTITION_<NAME>=y` in each Zephyr slice's

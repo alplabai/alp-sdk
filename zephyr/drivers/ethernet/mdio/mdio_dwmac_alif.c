@@ -86,6 +86,21 @@ struct mdio_dwmac_alif_config {
 	uint8_t clock_range;
 };
 
+struct mdio_dwmac_alif_data {
+	/* Serialises the poll-idle / program / poll-idle sequence: the PHY
+	 * link-monitor work item and an app or shell PHY access would otherwise
+	 * both see the bus idle and overwrite each other's MAC_MDIO_ADDRESS. */
+	struct k_mutex lock;
+};
+
+static int mdio_dwmac_alif_init(const struct device *dev)
+{
+	struct mdio_dwmac_alif_data *data = dev->data;
+
+	k_mutex_init(&data->lock);
+	return 0;
+}
+
 static bool mdio_dwmac_alif_wait_idle(mem_addr_t addr_reg)
 {
 	for (int i = 0; i < MDIO_DWMAC_ALIF_BUSY_TRIES; i++) {
@@ -106,8 +121,8 @@ static uint32_t mdio_dwmac_alif_addr_cmd(const struct mdio_dwmac_alif_config *cf
 	       MAC_MDIO_ADDRESS_GOC_GB;
 }
 
-static int mdio_dwmac_alif_read(const struct device *dev, uint8_t prtad, uint8_t regad,
-				 uint16_t *data)
+static int mdio_dwmac_alif_read_locked(const struct device *dev, uint8_t prtad, uint8_t regad,
+				       uint16_t *data)
 {
 	const struct mdio_dwmac_alif_config *cfg = dev->config;
 	mem_addr_t addr_reg = cfg->mac_base + MAC_MDIO_ADDRESS;
@@ -129,8 +144,8 @@ static int mdio_dwmac_alif_read(const struct device *dev, uint8_t prtad, uint8_t
 	return 0;
 }
 
-static int mdio_dwmac_alif_write(const struct device *dev, uint8_t prtad, uint8_t regad,
-				  uint16_t data)
+static int mdio_dwmac_alif_write_locked(const struct device *dev, uint8_t prtad, uint8_t regad,
+					uint16_t data)
 {
 	const struct mdio_dwmac_alif_config *cfg = dev->config;
 	mem_addr_t addr_reg = cfg->mac_base + MAC_MDIO_ADDRESS;
@@ -146,6 +161,30 @@ static int mdio_dwmac_alif_write(const struct device *dev, uint8_t prtad, uint8_
 	return mdio_dwmac_alif_wait_idle(addr_reg) ? 0 : -ETIMEDOUT;
 }
 
+static int mdio_dwmac_alif_read(const struct device *dev, uint8_t prtad, uint8_t regad,
+				uint16_t *data)
+{
+	struct mdio_dwmac_alif_data *priv = dev->data;
+	int rc;
+
+	k_mutex_lock(&priv->lock, K_FOREVER);
+	rc = mdio_dwmac_alif_read_locked(dev, prtad, regad, data);
+	k_mutex_unlock(&priv->lock);
+	return rc;
+}
+
+static int mdio_dwmac_alif_write(const struct device *dev, uint8_t prtad, uint8_t regad,
+				 uint16_t data)
+{
+	struct mdio_dwmac_alif_data *priv = dev->data;
+	int rc;
+
+	k_mutex_lock(&priv->lock, K_FOREVER);
+	rc = mdio_dwmac_alif_write_locked(dev, prtad, regad, data);
+	k_mutex_unlock(&priv->lock);
+	return rc;
+}
+
 static DEVICE_API(mdio, mdio_dwmac_alif_api) = {
 	.read = mdio_dwmac_alif_read,
 	.write = mdio_dwmac_alif_write,
@@ -156,7 +195,9 @@ static DEVICE_API(mdio, mdio_dwmac_alif_api) = {
 		.mac_base = DT_REG_ADDR(DT_INST_PARENT(n)),                                      \
 		.clock_range = CONFIG_MDIO_DWMAC_ALIF_CLOCK_RANGE,                                \
 	};                                                                                        \
-	DEVICE_DT_INST_DEFINE(n, NULL, NULL, NULL, &mdio_dwmac_alif_cfg_##n, POST_KERNEL,        \
+	static struct mdio_dwmac_alif_data mdio_dwmac_alif_data_##n; \
+	DEVICE_DT_INST_DEFINE(n, mdio_dwmac_alif_init, NULL, &mdio_dwmac_alif_data_##n, \
+			       &mdio_dwmac_alif_cfg_##n, POST_KERNEL, \
 			       CONFIG_MDIO_INIT_PRIORITY, &mdio_dwmac_alif_api);
 
 DT_INST_FOREACH_STATUS_OKAY(MDIO_DWMAC_ALIF_INIT)

@@ -142,8 +142,11 @@ not registered there either (`404` for it, not a reservation placeholder).
 
 Linux is the canonical baseline.  All CI gates run on
 `ubuntu-latest`.  If you're picking a distro to evaluate from
-scratch, Ubuntu 22.04 LTS or 24.04 LTS will line up with the
-shipped CI exactly.
+scratch, Ubuntu 24.04 LTS (apt CMake 3.28) is the simplest match.
+Ubuntu 22.04 LTS ships CMake 3.22, below the 3.28 floor
+(`prerequisites.cmakeMinVersion` in `metadata/bootstrap.json`, set for
+Zephyr 4.5) -- install a newer one with `pip install cmake` or the
+Kitware APT repository.
 
 ### 2.1 Base toolchain
 

@@ -42,6 +42,11 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 # layout: alp-sdk/ + meta-alp-sdk/ siblings).
 ALP_SYSTEM_MANIFEST_PATH ??= "${TOPDIR}/../alp-sdk/build/system-manifest.yaml"
 
+# The .dtsi sits alongside the manifest under build/generated/.  Derived at
+# parse time (not setVar'd inside a task: a task's datastore does not carry
+# over to do_install, which would see this unset).
+ALP_DTS_RESERVATIONS_PATH = "${@os.path.join(os.path.dirname(d.getVar('ALP_SYSTEM_MANIFEST_PATH')), 'generated', 'dts-reservations.dtsi')}"
+
 inherit allarch
 
 S = "${WORKDIR}"
@@ -56,15 +61,12 @@ python do_alp_resolve_manifest() {
             "first or override ALP_SYSTEM_MANIFEST_PATH on the bitbake "
             "command line." % manifest)
 
-    # The .dtsi sits alongside the manifest under build/generated/.
-    dtsi = os.path.join(os.path.dirname(manifest),
-                        'generated', 'dts-reservations.dtsi')
+    dtsi = d.getVar('ALP_DTS_RESERVATIONS_PATH', True)
     if not os.path.isfile(dtsi):
         bb.fatal(
             "alp-dts-reservations: expected dts-reservations.dtsi at "
             "'%s' (computed from ALP_SYSTEM_MANIFEST_PATH).  Re-run the "
             "orchestrator to regenerate it." % dtsi)
-    d.setVar('ALP_DTS_RESERVATIONS_PATH', dtsi)
 }
 addtask alp_resolve_manifest before do_install after do_unpack
 

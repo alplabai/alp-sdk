@@ -58,10 +58,13 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
-/* in_use is the LAST member (issue #1115 round-2 dev review, mirrors
- * dsp/sw_fallback.c's struct dsp_be): pool_acquire() below memsets only
- * the bytes ahead of it, so the atomic claim is never transiently
- * undone by the reset. */
+/* pool_acquire() below memsets only the bytes ahead of in_use (issue
+ * #1115 round-2 dev review, mirrors dsp/sw_fallback.c's struct dsp_be),
+ * so the atomic claim is never transiently undone by the reset.
+ * in_use, lifecycle and active_ops sit AFTER that boundary on purpose:
+ * lifecycle and active_ops return to UNOPENED / 0 through the close
+ * protocol, and a late stale-handle op_enter() incrementing active_ops
+ * must not be wiped by a re-claim. */
 struct alp_spi {
 	int      fd;
 	uint32_t bus_id;
@@ -69,6 +72,9 @@ struct alp_spi {
 	uint32_t freq_hz;
 	uint8_t  bits_per_word;
 	bool     in_use;
+	/* Op/close guard (issue #629 pattern); see the block comment above. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
 };
 
 static struct alp_spi g_spi_pool[ALP_SDK_YOCTO_MAX_SPI_HANDLES];
@@ -96,6 +102,7 @@ static void pool_release(struct alp_spi *h)
 		(void)close(h->fd);
 		h->fd = -1;
 	}
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	alp_slot_release(&h->in_use);
 }
 
@@ -171,6 +178,7 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
 	h->cs_pin_id     = cfg->cs_pin_id;
 	h->freq_hz       = cfg->freq_hz;
 	h->bits_per_word = bits;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	alp_internal_set_last_error(ALP_OK);
 	return h;
 }
@@ -180,17 +188,19 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
 	 * matching every Zephyr dispatcher (issue #1834, same shape as
 	 * #1734's GPIO fix). */
-	if (bus == NULL || !bus->in_use) {
+	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	alp_status_t rc = ALP_OK;
 	if (len == 0) {
-		return ALP_OK;
+		goto out;
 	}
 	/* SPI_IOC_MESSAGE caps `len` at UINT32_MAX; we additionally
      * guard against size_t overflow on 64-bit hosts -- a single
      * transfer >4 GiB is the caller's mistake. */
 	if (len > UINT32_MAX) {
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+		goto out;
 	}
 	struct spi_ioc_transfer xfer = {
 		.tx_buf        = (uintptr_t)tx,
@@ -200,9 +210,11 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		.bits_per_word = bus->bits_per_word,
 	};
 	if (ioctl(bus->fd, SPI_IOC_MESSAGE(1), &xfer) < 0) {
-		return alp_status_from_posix_errno(errno);
+		rc = alp_status_from_posix_errno(errno);
 	}
-	return ALP_OK;
+out:
+	alp_handle_op_leave(&bus->active_ops);
+	return rc;
 }
 
 alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
@@ -211,23 +223,22 @@ alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
 	 * matching every Zephyr dispatcher (issue #1834).  A malformed
 	 * @p tx/@p len pairing is a separate condition -- ALP_ERR_INVAL,
 	 * checked only once the handle itself is known good. */
-	if (bus == NULL || !bus->in_use) {
+	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	alp_status_t rc = ALP_OK;
 	if (tx == NULL && len > 0) {
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+	} else if (len > 0) {
+		ssize_t n = write(bus->fd, tx, len);
+		if (n < 0) {
+			rc = alp_status_from_posix_errno(errno);
+		} else if ((size_t)n != len) {
+			rc = ALP_ERR_IO;
+		}
 	}
-	if (len == 0) {
-		return ALP_OK;
-	}
-	ssize_t n = write(bus->fd, tx, len);
-	if (n < 0) {
-		return alp_status_from_posix_errno(errno);
-	}
-	if ((size_t)n != len) {
-		return ALP_ERR_IO;
-	}
-	return ALP_OK;
+	alp_handle_op_leave(&bus->active_ops);
+	return rc;
 }
 
 alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len)
@@ -236,26 +247,35 @@ alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len)
 	 * matching every Zephyr dispatcher (issue #1834).  A malformed
 	 * @p rx/@p len pairing is a separate condition -- ALP_ERR_INVAL,
 	 * checked only once the handle itself is known good. */
-	if (bus == NULL || !bus->in_use) {
+	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	alp_status_t rc = ALP_OK;
 	if (rx == NULL && len > 0) {
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+	} else if (len > 0) {
+		ssize_t n = read(bus->fd, rx, len);
+		if (n < 0) {
+			rc = alp_status_from_posix_errno(errno);
+		} else if ((size_t)n != len) {
+			rc = ALP_ERR_IO;
+		}
 	}
-	if (len == 0) {
-		return ALP_OK;
-	}
-	ssize_t n = read(bus->fd, rx, len);
-	if (n < 0) {
-		return alp_status_from_posix_errno(errno);
-	}
-	if ((size_t)n != len) {
-		return ALP_ERR_IO;
-	}
-	return ALP_OK;
+	alp_handle_op_leave(&bus->active_ops);
+	return rc;
 }
 
 void alp_spi_close(alp_spi_t *bus)
 {
+	if (bus == NULL) {
+		return;
+	}
+	/* Gate out new ops, then wait for in-flight ones to leave before the
+	 * fd is closed (read()/write() on a spidev can block in the
+	 * controller driver, hence the sleep-poll drain).  false means
+	 * already closed/closing -- a second close() stays a no-op. */
+	if (!alp_handle_begin_close_blocking(&bus->lifecycle, &bus->active_ops)) {
+		return;
+	}
 	pool_release(bus);
 }

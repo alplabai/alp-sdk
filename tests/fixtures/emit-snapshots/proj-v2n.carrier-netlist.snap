@@ -603,7 +603,7 @@
       "board_category": "buses",
       "board_macro": "XEVK_I2C_BUS_DSI_CSI1",
       "board_role": null,
-      "dispatch": "direct",
+      "dispatch": "gd32_bridge",
       "endpoints": [
         {
           "kind": "e1m",
@@ -612,9 +612,15 @@
         {
           "kind": "board-macro",
           "ref": "XEVK_I2C_BUS_DSI_CSI1"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC8/PC9"
         }
       ],
-      "board_doc": "Display/camera control I2C bank 1."
+      "board_doc": "Display/camera control I2C bank 1.",
+      "dispatch_pin": "PC8/PC9"
     },
     {
       "net_id": "XEVK_SPI_BUS_ARDUINO",
@@ -1029,6 +1035,29 @@
       ],
       "board_doc": "PEC12R-4222F rotary encoder: ENC0_X = A phase, ENC0_Y = B phase; push switch on XEVK_PIN_ENCODER_SW (E1M_X_GPIO_IO28).  ENC1-3 pads are broken out but unpopulated.",
       "dispatch_pin": "PA0/PB3"
+    },
+    {
+      "net_id": "E1M_CAN_STBY",
+      "e1m": "E1M_CAN_STBY",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_CAN_STBY"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PB13"
+        }
+      ],
+      "dispatch_pin": "PB13",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
     },
     {
       "net_id": "E1M_X_ADC1",

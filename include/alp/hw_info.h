@@ -79,6 +79,7 @@
 #include <stdint.h>
 
 #include "alp/peripheral.h" /* alp_status_t */
+#include "alp/static_assert.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -477,29 +478,27 @@ alp_status_t alp_soc_secure_fw_ping(void);
 /* Compile-time guard: the manifest must be exactly 128 bytes and
  * tightly packed so the production programmer's binary lines up
  * byte-for-byte with the runtime reader's view. */
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-_Static_assert(sizeof(alp_hw_info_eeprom_t) == 128,
-               "alp_hw_info_eeprom_t must be 128 bytes (check struct packing)");
-#endif
+ALP_STATIC_ASSERT(sizeof(alp_hw_info_eeprom_t) == 128,
+                  "alp_hw_info_eeprom_t must be 128 bytes (check struct packing)");
 
 /* Compile-time guard: the Secure Data Page mirror must be exactly 64 bytes
  * (the physical page size) and tightly packed -- see
  * alp_secure_page_mirror_t's doc comment for why every field's offset was
  * chosen to make that hold without a packed attribute. */
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-_Static_assert(sizeof(alp_secure_page_mirror_t) == 64,
-               "alp_secure_page_mirror_t must be 64 bytes (check struct packing)");
+ALP_STATIC_ASSERT(sizeof(alp_secure_page_mirror_t) == 64,
+                  "alp_secure_page_mirror_t must be 64 bytes (check struct packing)");
+
 /* A total-size check alone cannot distinguish "no padding" from "padding
  * here, one fewer padding byte there" -- pin two individual field offsets
  * too (the doc comment above explains why these two).  If either ever
  * fires, some target's ABI padded a field this layout assumed would be
  * naturally aligned; the fix is a new schema_version + magic, not a
  * packed attribute retrofitted onto an already-locked format. */
-_Static_assert(offsetof(alp_secure_page_mirror_t, mfg_year) == 0x38,
-               "alp_secure_page_mirror_t.mfg_year drifted off offset 0x38 -- unexpected padding?");
-_Static_assert(offsetof(alp_secure_page_mirror_t, crc32) == 0x3C,
-               "alp_secure_page_mirror_t.crc32 drifted off offset 0x3C -- unexpected padding?");
-#endif
+ALP_STATIC_ASSERT(
+    offsetof(alp_secure_page_mirror_t, mfg_year) == 0x38,
+    "alp_secure_page_mirror_t.mfg_year drifted off offset 0x38 -- unexpected padding?");
+ALP_STATIC_ASSERT(offsetof(alp_secure_page_mirror_t, crc32) == 0x3C,
+                  "alp_secure_page_mirror_t.crc32 drifted off offset 0x3C -- unexpected padding?");
 
 #ifdef __cplusplus
 } /* extern "C" */

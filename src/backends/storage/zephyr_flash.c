@@ -17,6 +17,11 @@
  * Registered as silicon_ref="*" at priority 100; the dispatcher's
  * selector picks this when CONFIG_FLASH_MAP is on and no vendor
  * extension claims a higher priority for the active silicon.
+ * zephyr_littlefs (110) is tried first and claims an instance_id
+ * whose flash_area backs a mounted littlefs volume.  This backend
+ * refuses (ALP_ERR_BUSY) any flash_area that backs a mounted fs, so
+ * raw access to it is impossible whatever the mount is named; every
+ * other instance_id is a raw flash_area ID.
  */
 
 #include <errno.h>
@@ -33,6 +38,7 @@
 
 #include "alp_errno.h"
 #include "storage_ops.h"
+#include "zephyr_mounts.h"
 
 static alp_status_t _errno_to_alp(int err)
 {
@@ -54,6 +60,10 @@ static alp_status_t z_open(const alp_storage_config_t  *cfg,
 	 * NOSUPPORT makes alp_storage_open() fall through to the next
 	 * backend by priority (zephyr_disk serves SD_MMC). */
 	if (cfg->kind == ALP_STORAGE_KIND_SD_MMC) return ALP_ERR_NOSUPPORT;
+
+	/* A raw write under a mounted fs corrupts it.  BUSY (not NOSUPPORT)
+	 * so the dispatcher does not fall through to another backend. */
+	if (alp_zmnt_find_mounted(cfg->instance_id) != NULL) return ALP_ERR_BUSY;
 
 	const struct flash_area *fa  = NULL;
 	int                      err = flash_area_open(cfg->instance_id, &fa);
