@@ -226,18 +226,28 @@ def _jlink_commander_script(
 
 # J-Link exits 0 even when it never opened the probe, so success is decided
 # from the transcript as well as the exit code (as provision/bench.py does).
+# Known J-Link failure forms, anchored to line start so benign text
+# ("0 errors", "failed" inside other prose) cannot trip it.
 _JLINK_FAIL_RE = re.compile(
-    r"(?i)\berror\b|cannot connect|could not|failed")
-_JLINK_OK_RE = re.compile(r"(?i)O\.K\.")
+    r"(?im)^\s*(?:\*{3,}\s*error\b|error:|cannot connect to target"
+    r"|could not find core|failed to)")
+# Evidence the load really ran: the `Downloading file [...]` banner, then a
+# completion line after it.  A bare `O.K.` is not enough -- J-Link prints
+# `Connecting to J-Link via USB...O.K.` on connect alone.
+_JLINK_DOWNLOAD_RE = re.compile(r"(?m)^Downloading file \[.*\]\.\.\.")
+_JLINK_DONE_RE = re.compile(
+    r"(?im)^(?:O\.K\.|Verify successful\.?|J-Link: Flash download: "
+    r"(?:Total:.*|O\.K\.))\s*$")
 
 
 def _jlink_transcript_error(output: str) -> "str | None":
     """Return a reason when the J-Link transcript does not show a clean flash."""
     m = _JLINK_FAIL_RE.search(output)
     if m:
-        return f"transcript reports {m.group(0)!r}"
-    if not _JLINK_OK_RE.search(output):
-        return "transcript has no 'O.K.' programming confirmation"
+        return f"transcript reports {m.group(0).strip()!r}"
+    d = _JLINK_DOWNLOAD_RE.search(output)
+    if not d or not _JLINK_DONE_RE.search(output, d.end()):
+        return "transcript has no completed 'Downloading file' step"
     return None
 
 

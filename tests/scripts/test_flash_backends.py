@@ -784,11 +784,32 @@ def test_swd_probe_jlink_happy_path() -> None:
 
 _JLINK_OK_LOG = "Downloading file [x.hex]...\nJ-Link: Flash download: O.K.\n"
 
+_JLINK_FULL_LOG = (
+    "SEGGER J-Link Commander V9.46\n"
+    "Connecting to J-Link via USB...O.K.\n"
+    "Firmware: J-Link V11 compiled Jan  1 2026\n"
+    "Found 1 JTAG device, Core ID: 0x6BA02477 (None)\n"
+    "Cortex-M33 identified.\n"
+    "Downloading file [/tmp/x.hex]...\n"
+    "J-Link: Flash download: Bank 0 @ 0x80000000: 1 range affected "
+    "(5767168 bytes)\n"
+    "J-Link: Flash download: Total: 26.541s (Prepare: 0.1s, Compare: 1.2s)\n"
+    "O.K.\n"
+)
+
+
+def test_swd_probe_jlink_full_transcript_passes() -> None:
+    assert swd_probe._jlink_transcript_error(_JLINK_FULL_LOG) is None
+    assert swd_probe._jlink_transcript_error(
+        "Downloading file [x.bin]...\nVerify successful.\n") is None
+
 
 @pytest.mark.parametrize("log", [
     "Cannot connect to target.\n",                    # never reached the probe
     "Downloading file...\nERROR: Could not download\n",
     "J-Link Commander V9.46\n",                       # no programming confirmation
+    # Connect succeeded (prints O.K.) but no download ever ran.
+    "Connecting to J-Link via USB...O.K.\n",
 ])
 def test_swd_probe_jlink_rc0_with_bad_transcript_is_not_success(log) -> None:
     with patch("flash_backends.swd_probe.shutil.which",
