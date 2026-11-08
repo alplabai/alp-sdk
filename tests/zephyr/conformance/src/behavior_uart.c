@@ -28,6 +28,8 @@
 #include <alp/testing/common.h>
 #include <alp/testing/uart.h>
 
+#include "alp/chips/quectel_bg77.h"
+
 /* Local copy of main.c's / behavior_gpio.c's enum-membership helper --
  * both are static to their own TU. */
 static bool status_in_enum(alp_status_t s)
@@ -225,8 +227,8 @@ ZTEST(alp_testing_uart_behavior, test_timeout_boundary_delivered_after_deadline)
 
 /* Partial/short read: fewer bytes are queued than requested, and
  * nothing more is forthcoming within the window -- alp_uart_read()
- * documents ALP_OK with the partial data whenever at least one byte
- * arrived before the deadline.  Per that same contract (timeout_ms
+ * returns ALP_ERR_TIMEOUT (ALP_OK means all len bytes, issue #2934).
+ * Per the same contract (timeout_ms
  * bounds the WHOLE call, not the gap between bytes -- see
  * <alp/peripheral.h>), a real port would keep listening until the
  * deadline rather than return the instant its queue ran dry, so the
@@ -246,14 +248,43 @@ ZTEST(alp_testing_uart_behavior, test_partial_short_read)
 
 	uint8_t buf[5] = { 0 };
 	zassert_equal(alp_uart_read(h, buf, sizeof(buf), timeout_ms),
-	              ALP_OK,
-	              "read() must return ALP_OK on a partial fill (>0 bytes collected)");
-	zassert_mem_equal(buf, msg, sizeof(msg), "short read did not deliver the queued bytes");
+	              ALP_ERR_TIMEOUT,
+	              "read() must time out on a partial fill (ALP_OK means all len bytes)");
 	zassert_equal(alp_testing_clock_now_ms(),
 	              start + timeout_ms,
 	              "a partial fill must wait out the WHOLE timeout_ms (alp_uart_read bounds the "
 	              "entire call, not the gap between bytes) -- the clock must land on the "
 	              "deadline, not on the last-consumed byte's timestamp");
+
+	alp_uart_close(h);
+}
+
+/* Chip *_read_response() helpers promise "up to max bytes, ALP_OK on at least
+ * one byte": an AT reply is shorter than the caller's buffer, and
+ * alp_uart_read() alone would time out on it under the full-read rule
+ * (issue #2934).  Drives quectel_bg77_read_response() over the test double. */
+ZTEST(alp_testing_uart_behavior, test_chip_read_response_returns_short_reply)
+{
+	const uint32_t port_id  = 17;
+	const uint8_t  reply[]  = { 'O', 'K', '\r', '\n' };
+	uint8_t        buf[32]  = { 0 };
+	size_t         received = 0;
+
+	zassert_equal(
+	    alp_testing_uart_rx_feed(port_id, reply, sizeof(reply)), ALP_OK, "rx_feed failed");
+	alp_uart_t *h = open_port(port_id);
+	zassert_not_null(h);
+
+	quectel_bg77_t dev;
+	zassert_equal(quectel_bg77_init(&dev, h, NULL, NULL), ALP_OK);
+	zassert_equal(quectel_bg77_read_response(&dev, buf, sizeof(buf), &received, 50), ALP_OK);
+	zassert_equal(received, sizeof(reply));
+	zassert_mem_equal(buf, reply, sizeof(reply));
+
+	/* Nothing queued: ALP_ERR_TIMEOUT with a zero count. */
+	zassert_equal(quectel_bg77_read_response(&dev, buf, sizeof(buf), &received, 10),
+	              ALP_ERR_TIMEOUT);
+	zassert_equal(received, 0u);
 
 	alp_uart_close(h);
 }
@@ -285,7 +316,7 @@ ZTEST(alp_testing_uart_behavior, test_injected_error_surfaces_documented_status)
 }
 
 /* An error queued BEHIND already-collected data must not be consumed
- * on the same call: the call reports OK with the partial data, and
+ * on the same call: the call reports ALP_ERR_TIMEOUT (partial data), and
  * the error stays queued for the next read(). */
 ZTEST(alp_testing_uart_behavior, test_error_behind_data_stays_queued)
 {
@@ -301,9 +332,8 @@ ZTEST(alp_testing_uart_behavior, test_error_behind_data_stays_queued)
 
 	uint8_t buf[4] = { 0 };
 	zassert_equal(alp_uart_read(h, buf, sizeof(buf), 10),
-	              ALP_OK,
-	              "read() must stop at the queued error and return the data collected so far");
-	zassert_equal(buf[0], byte, "read() did not return the byte queued ahead of the error");
+	              ALP_ERR_TIMEOUT,
+	              "read() must stop at the queued error; a partial fill is not ALP_OK");
 
 	zassert_equal(alp_uart_read(h, buf, sizeof(buf), 10),
 	              ALP_ERR_IO,
@@ -358,5 +388,25 @@ ZTEST(alp_testing_uart_behavior, test_reset_all_frees_side_state)
 	              0,
 	              "reset_all() must have cleared the TX capture ring for this port");
 
+	alp_uart_close(h);
+}
+
+/* A handle left open across alp_testing_reset_all() must not alias the
+ * slot's next occupant: ops fail instead of touching another instance. */
+ZTEST(alp_testing_uart_behavior, test_stale_handle_after_reset_fails)
+{
+	alp_uart_t *stale = open_port(3);
+	zassert_not_null(stale, "uart test double must open ANY instance");
+
+	alp_testing_reset_all();
+	/* Takes over the slot the stale handle used to occupy. */
+	alp_uart_t *h = open_port(4);
+	zassert_not_null(h, "re-open after reset_all() failed");
+
+	const uint8_t msg[] = { 0x01 };
+	zassert_equal(
+	    alp_uart_write(stale, msg, sizeof(msg)), ALP_ERR_NOT_READY, "stale handle op must fail");
+
+	alp_uart_close(stale);
 	alp_uart_close(h);
 }

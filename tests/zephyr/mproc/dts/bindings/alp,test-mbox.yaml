@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+description: Test-only mbox mock for tests/zephyr/mproc (src/mbox_mock.c).
+compatible: "alp,test-mbox"
+include: [base.yaml, mailbox-controller.yaml]
+properties:
+  mtu:
+    type: int
+    default: 0
+    description: Value mbox_mtu_get() reports; 0 mimics a doorbell-only controller.

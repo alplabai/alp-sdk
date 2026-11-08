@@ -140,13 +140,14 @@ ZTEST(alp_adc_registry, test_read_uv_inval_on_null_handle)
 
 /* ---------- Capability propagation tests --------------------------- */
 
-ZTEST(alp_adc_registry, test_alif_handle_advertises_trigger_not_oversample_cap)
+ZTEST(alp_adc_registry, test_alif_handle_advertises_neither_trigger_nor_oversample_cap)
 {
 	/* #1648 tier-1 review: alif_e7 / alif_e8 no longer advertise
      * ALP_ADC_CAP_HW_OVERSAMPLE -- their vendored Alif driver
      * rejects every non-zero adc_sequence.oversampling outright, so
      * advertising the capability was a lie one layer up from the
-     * per-open refusal.  HW_TRIGGER is unaffected and still advertised. */
+     * per-open refusal.  HW_TRIGGER is no longer advertised either: reads
+     * are software-started single-shot only. */
 	alp_adc_t *h = _make_fake_handle("alif:ensemble:e7");
 	zassert_not_null(h);
 	const alp_capabilities_t *caps = alp_adc_capabilities(h);
@@ -157,7 +158,7 @@ ZTEST(alp_adc_registry, test_alif_handle_advertises_trigger_not_oversample_cap)
      * assert it is absent, not just that HW_TRIGGER is present. */
 	zassert_true(alp_capabilities_has(caps, ALP_INSTANCE_CAP_REPORTED));
 	zassert_false((caps->class_flags & ALP_ADC_CAP_HW_OVERSAMPLE) != 0u);
-	zassert_true((caps->class_flags & ALP_ADC_CAP_HW_TRIGGER) != 0u);
+	zassert_false((caps->class_flags & ALP_ADC_CAP_HW_TRIGGER) != 0u);
 }
 
 ZTEST(alp_adc_registry, test_wildcard_handle_advertises_no_hw_caps)

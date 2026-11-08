@@ -394,14 +394,25 @@ def validate_board_yaml(path_or_content: str) -> dict[str, Any]:
             tmp_path.unlink(missing_ok=True)
 
 
-def emit(board_yaml_path: str, mode: str) -> dict[str, Any]:
+def emit(
+    board_yaml_path: str,
+    mode: str,
+    core: Optional[str] = None,
+    build_root: Optional[str] = None,
+) -> dict[str, Any]:
     """Emit a generated artefact for a project via ``python -m alp_orchestrate``.
 
     Runs ``python -m alp_orchestrate --emit <mode> --input <board_yaml_path>``
-    and returns the generated artefact:
+    (plus ``--core`` / ``--build-root`` when given) and returns the generated artefact:
 
         {"ok": bool, "returncode": int, "mode": str, "artifact": str,
          "stderr": str}
+
+    ``core`` scopes a per-core mode and is required by ``kconfig``;
+    ``build_root`` is the build directory ``build-plan`` records. The
+    subprocess runs with the project directory (the board.yaml's parent) as
+    cwd, so the default relative ``build`` root resolves against the
+    project, exactly as ``tan`` / a shell run from the project would.
 
     ``mode`` must be one of the catalog ``emit_modes`` (see ``list_emit_modes``)
     -- an unknown mode is rejected up front with the valid list. Returns a
@@ -430,19 +441,20 @@ def emit(board_yaml_path: str, mode: str) -> dict[str, Any]:
     env["PYTHONPATH"] = (
         str(SCRIPTS_DIR) + os.pathsep + env.get("PYTHONPATH", "")
     ).rstrip(os.pathsep)
-    proc = _run(
-        [
-            sys.executable,
-            "-m",
-            "alp_orchestrate",
-            "--emit",
-            mode,
-            "--input",
-            str(board.resolve()),
-        ],
-        cwd=REPO_ROOT,
-        env=env,
-    )
+    cmd = [
+        sys.executable,
+        "-m",
+        "alp_orchestrate",
+        "--emit",
+        mode,
+        "--input",
+        str(board.resolve()),
+    ]
+    if core:
+        cmd += ["--core", core]
+    if build_root:
+        cmd += ["--build-root", build_root]
+    proc = _run(cmd, cwd=board.resolve().parent, env=env)
     return {
         "ok": proc.returncode == 0,
         "returncode": proc.returncode,

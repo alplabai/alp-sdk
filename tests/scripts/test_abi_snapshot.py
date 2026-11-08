@@ -1137,3 +1137,17 @@ def test_include_graph_handles_a_top_level_if_above_the_guard(tmp_path):
 
     # The guard is detected, so the include one level inside it still counts.
     assert "alp/always.h" in graph["alp/facade.h"], graph["alp/facade.h"]
+
+
+def test_hw_rev_override_block_does_not_replace_default_macro(tmp_path):
+    """A `#ifdef ALP_<BOARD>_HW_REV_<REV>` override is opt-in (#2889): the
+    snapshot keeps the default build's value, not the last #define seen."""
+    snap = _extract_src(
+        tmp_path,
+        "#define EVK_PIN_LED_RED ALP_E1M_GPIO_PWM0\n"
+        "#ifdef ALP_E1M_EVK_HW_REV_R3\n"
+        "#undef EVK_PIN_LED_RED\n"
+        "#define EVK_PIN_LED_RED ALP_E1M_GPIO_PWM3\n"
+        "#endif\n",
+    )
+    assert snap["macros"]["EVK_PIN_LED_RED"]["value"] == "ALP_E1M_GPIO_PWM0"

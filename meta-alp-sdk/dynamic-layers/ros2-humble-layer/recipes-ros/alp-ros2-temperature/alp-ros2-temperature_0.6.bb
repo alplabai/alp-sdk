@@ -2,9 +2,10 @@
 #
 # Builds the minimal ROS 2 alp_som_temperature node from
 # alp-sdk/examples/v2n/v2n-ros2-som-temperature/ (portable <alp/temperature.h>
-# only).  NOT in packagegroup-alp-ros until the example is on main
-# (SRCREV floats on branch=main).  Lives in dynamic-layers/ros2-humble-layer/ -- parsed only when
-# upstream meta-ros2-humble is in bblayers.conf.  BENCH-UNVERIFIED.
+# only).  NOT in packagegroup-alp-ros: BENCH-UNVERIFIED.  SRCREV comes from
+# alp-sdk-version.inc (the release commit on main carries the example).
+# Lives in dynamic-layers/ros2-humble-layer/ -- parsed only when
+# upstream meta-ros2-humble is in bblayers.conf.
 #
 # Copyright (C) 2026 Alp Lab AB
 
@@ -19,9 +20,8 @@ HOMEPAGE = "https://github.com/alplabai/alp-sdk"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=787726818c896f394f6627ab59d98d69"
 
-# Same pinning pattern as alp-perception (floats on edge; release builds repin).
+# SRCREV (the release-tag commit) comes from alp-sdk-version.inc.
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
-SRCREV  = "${AUTOREV}"
 require recipes-core/alp-sdk/alp-sdk-version.inc
 # Links the per-machine libalp_sdk.so, so must not be shared across machines (#2850).
 PACKAGE_ARCH = "${MACHINE_ARCH}"

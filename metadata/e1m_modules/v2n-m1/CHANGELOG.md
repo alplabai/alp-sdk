@@ -19,7 +19,13 @@ Detailed internal rev notes are held outside this tree.
   3. Route PCIe muxes to DEEPX path.
   4. Release `M1_RESET`.
 
-## r2..r8 -- reserved
+## r2 -- production (board `2625-R2`)
+
+Provisioned from the 2026-W38 V2M103 batch onward; `min_sdk_version`
+is `0.17.0`.  No r1 -> r2 pin or chip delta is recorded in this tree
+yet.
+
+## r3..r8 -- reserved
 
 See `../v2n/CHANGELOG.md` for the rev-tracking format.
 

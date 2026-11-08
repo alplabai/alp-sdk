@@ -30,10 +30,16 @@ _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "pr-metadata-validate.yml"
 
 
 def _workflow_paths(trigger: str) -> list[str]:
-    # `on:` parses as the YAML boolean True, so accept either spelling.
+    # The path list lives in the `detect` job's dorny/paths-filter (#2972), not
+    # in `on.<trigger>.paths`: the trigger is unfiltered so the required
+    # summary context reports on every PR. Same list for pull_request + push.
     data = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
-    triggers = data.get("on", data.get(True))
-    return list(triggers[trigger]["paths"])
+    step = next(
+        s
+        for s in data["jobs"]["detect"]["steps"]
+        if s.get("uses", "").startswith("dorny/paths-filter@")
+    )
+    return list(yaml.safe_load(step["with"]["filters"])["relevant"])
 
 
 def _pattern_to_regex(pattern: str) -> re.Pattern[str]:

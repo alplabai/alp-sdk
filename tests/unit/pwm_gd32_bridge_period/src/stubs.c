@@ -28,13 +28,18 @@ void alp_z_v2n_supervisor_release(void)
 {
 }
 
+unsigned stub_pwm_set_calls;
+uint32_t stub_pwm_set_last_period_ns;
+uint32_t stub_pwm_set_last_duty_ns;
+
 alp_status_t
 gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns, uint32_t duty_ns)
 {
 	(void)ctx;
 	(void)channel;
-	(void)period_ns;
-	(void)duty_ns;
+	stub_pwm_set_calls++;
+	stub_pwm_set_last_period_ns = period_ns;
+	stub_pwm_set_last_duty_ns   = duty_ns;
 	return ALP_OK;
 }
 

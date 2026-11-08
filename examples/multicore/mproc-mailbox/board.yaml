@@ -27,23 +27,15 @@ cores:
 # `src/backends/mproc/zephyr_drv.c` and both main.c's hardcode --
 # it is NOT a free-form label like an rpmsg channel name.
 #
-# #1069 gave E1M-AEN801 a real `memory_map:` (metadata/e1m_modules/
-# E1M-AEN801.yaml), but this carve-out still resolves `status: blocked`
-# (`--emit system-manifest`): the five fine-grained regions
-# (mcuboot/he_slot0/hp_slot0/reserved/storage) are MRAM, not RAM, and are
-# marked `carveout: false` so the allocator can't silently place this
-# raw_shmem ring inside flash-class memory; `mram_main` (the only other
-# region accessible from both m55_hp and m55_he) is ALSO flash-class --
-# its extent equals the SoC's declared App MRAM aperture exactly (the
-# whole-device alias; `base` resolved to 0x80000000 in #2053), not safe
-# as an IPC carve-out target either. The carve-out being blocked does
-# not affect this example:
-# the generated `<alp/system_ipc.h>` / DTS reservation it would drive
-# aren't consumed here (main.c / peer/main.c open "alp_shmem0" by its DT
-# alias, wired by the board overlay directly, not by the orchestrator's
-# resolved address) -- only the `_emit_cross_core_shmem_cache` Kconfig path
-# this PR adds reads this block, and that path doesn't need resolution to
-# fire.
+# The carve-out resolves against the SoM's `sram_ipc` memory_map row
+# (64 KiB of global SRAM0 at 0x023E0000, metadata/e1m_modules/
+# E1M-AEN801.yaml / E1M-AEN803.yaml; DFP soc_features.h
+# SOC_FEAT_BULK_SRAM0_BASE 0x02000000): the MRAM regions are flash-class
+# and `carveout: false`, so SRAM0 is the only RAM both m55_hp and m55_he
+# reach.  `--emit system-manifest` allocates 4 KiB at 0x023ef000, which
+# boards/*.overlay and peer/boards/*.overlay mirror by hand as the
+# alp-shmem0 / alp-mbox1 / alp-mbox-rx1 aliases (the orchestrator does
+# not emit DT aliases itself); keep the three in step.
 ipc:
   - kind: raw_shmem
     endpoints: [m55_hp, m55_he]
