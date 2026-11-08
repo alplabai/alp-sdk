@@ -297,15 +297,28 @@ swd_xfer(gd32_swd_t *ctx, bool ap, bool rnw, uint8_t addr_a32, uint32_t *data_io
 /* Higher-level DP / AP helpers                                         */
 /* ------------------------------------------------------------------ */
 
+/* A FAULT latches STICKYERR and every later AP access FAULTs until ABORT clears it;
+ * a WAIT that never ends leaves the transaction pending.  Clear (STKCMPCLR |
+ * STKERRCLR | WDERRCLR | ORUNERRCLR) or cancel (DAPABORT), best effort, then
+ * map the ack to a status. */
+static alp_status_t swd_fail(gd32_swd_t *ctx, gd32_swd_ack_t ack)
+{
+	uint32_t abort_val = (ack == GD32_SWD_ACK_WAIT) ? 0x01u : 0x1Eu;
+	if (ack == GD32_SWD_ACK_WAIT || ack == GD32_SWD_ACK_FAULT) {
+		(void)swd_xfer(ctx, false, false, DP_REG_ABORT, &abort_val);
+	}
+	return (ack == GD32_SWD_ACK_WAIT) ? ALP_ERR_TIMEOUT : ALP_ERR_IO;
+}
+
 static alp_status_t swd_read_dp(gd32_swd_t *ctx, uint8_t a, uint32_t *out)
 {
 	for (unsigned i = 0u; i < GD32_SWD_MAX_WAIT_RETRIES; ++i) {
 		gd32_swd_ack_t ack = swd_xfer(ctx, false, true, a, out);
 		if (ack == GD32_SWD_ACK_OK) return ALP_OK;
 		if (ack == GD32_SWD_ACK_WAIT) continue;
-		return ALP_ERR_IO;
+		return swd_fail(ctx, ack);
 	}
-	return ALP_ERR_TIMEOUT;
+	return swd_fail(ctx, GD32_SWD_ACK_WAIT);
 }
 
 static alp_status_t swd_write_dp(gd32_swd_t *ctx, uint8_t a, uint32_t v)
@@ -315,9 +328,9 @@ static alp_status_t swd_write_dp(gd32_swd_t *ctx, uint8_t a, uint32_t v)
 		gd32_swd_ack_t ack = swd_xfer(ctx, false, false, a, &tmp);
 		if (ack == GD32_SWD_ACK_OK) return ALP_OK;
 		if (ack == GD32_SWD_ACK_WAIT) continue;
-		return ALP_ERR_IO;
+		return swd_fail(ctx, ack);
 	}
-	return ALP_ERR_TIMEOUT;
+	return swd_fail(ctx, GD32_SWD_ACK_WAIT);
 }
 
 static alp_status_t swd_select_ap(gd32_swd_t *ctx, uint8_t ap_num, uint8_t bank)
@@ -333,9 +346,9 @@ static alp_status_t swd_write_ap(gd32_swd_t *ctx, uint8_t a, uint32_t v)
 		gd32_swd_ack_t ack = swd_xfer(ctx, true, false, a, &tmp);
 		if (ack == GD32_SWD_ACK_OK) return ALP_OK;
 		if (ack == GD32_SWD_ACK_WAIT) continue;
-		return ALP_ERR_IO;
+		return swd_fail(ctx, ack);
 	}
-	return ALP_ERR_TIMEOUT;
+	return swd_fail(ctx, GD32_SWD_ACK_WAIT);
 }
 
 static alp_status_t swd_read_ap(gd32_swd_t *ctx, uint8_t a, uint32_t *out)
@@ -352,11 +365,11 @@ static alp_status_t swd_read_ap(gd32_swd_t *ctx, uint8_t a, uint32_t *out)
 			break;
 		}
 		if (ack == GD32_SWD_ACK_WAIT) continue;
-		return ALP_ERR_IO;
+		return swd_fail(ctx, ack);
 	}
 	/* Every attempt answered WAIT: the read was never accepted, so RDBUFF
 	 * would hand back the PREVIOUS AP read as if it were this one. */
-	if (!accepted) return ALP_ERR_TIMEOUT;
+	if (!accepted) return swd_fail(ctx, GD32_SWD_ACK_WAIT);
 	return swd_read_dp(ctx, DP_REG_RDBUFF, out);
 }
 
@@ -639,6 +652,13 @@ alp_status_t gd32_swd_halt(gd32_swd_t *ctx)
 
 /* ----- flash helpers ------------------------------------------------ */
 
+/* An error bit left by an earlier operation would fail the next one in
+ * fmc_wait_busy(); write-1-clear the error bits only, never BSY. */
+static alp_status_t fmc_clear_errors(gd32_swd_t *ctx)
+{
+	return swd_mem_write32(ctx, FMC_REG_SR, FMC_SR_PROGERR_MASK);
+}
+
 static alp_status_t fmc_wait_busy(gd32_swd_t *ctx)
 {
 	for (unsigned i = 0u; i < 16384u; ++i) {
@@ -718,7 +738,8 @@ alp_status_t gd32_swd_flash_erase(gd32_swd_t *ctx, uint32_t addr, uint32_t size)
 	if (s != ALP_OK) return s;
 
 	for (uint32_t sec = start_sector; sec < end_sector_excl; ++sec) {
-		s = fmc_wait_busy(ctx);
+		s = fmc_clear_errors(ctx);
+		if (s == ALP_OK) s = fmc_wait_busy(ctx);
 		if (s != ALP_OK) {
 			(void)fmc_lock(ctx);
 			return s;
@@ -757,7 +778,8 @@ alp_status_t gd32_swd_flash_write(gd32_swd_t *ctx, uint32_t addr, const uint8_t 
 	if (s != ALP_OK) return s;
 	s = fmc_unlock(ctx);
 	if (s != ALP_OK) return s;
-	s = swd_mem_write32(ctx, FMC_REG_CR, FMC_CR_PG);
+	s = fmc_clear_errors(ctx);
+	if (s == ALP_OK) s = swd_mem_write32(ctx, FMC_REG_CR, FMC_CR_PG);
 	if (s != ALP_OK) {
 		(void)fmc_lock(ctx);
 		return s;
