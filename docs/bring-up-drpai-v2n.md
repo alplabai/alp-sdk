@@ -582,8 +582,10 @@ driver has no queue (a second `DRPAI_START` while a job runs returns
   runtime holds no fd, nothing is opened and `invoke()` returns `ALP_OK`,
   as before; a first open would reset a device the runtime is using, wipe
   the job result, and could fail with `EIO`/`ETIMEDOUT` for a job that ran
-  fine. With the fd held, the open and the ioctl each wait up to 1000 ms
-  on the driver semaphore, and the ioctl takes the shared-memory lock, so
+  fine. With the fd held, the open, the ioctl and the close each wait up
+  to 1000 ms on the driver semaphore (a timeout in the open or close leaves
+  that semaphore over-released, a vendor driver bug, so later driver calls
+  are no longer serialised), and the ioctl takes the shared-memory lock, so
   it can also fail with `EINPROGRESS`/`EADDRNOTAVAIL`. A job still in RUN
   or a query that times out returns `ALP_ERR_TIMEOUT`; a lock conflict
   returns `ALP_ERR_BUSY`; a recorded DRP/AIMAC error, reset or suspend, or

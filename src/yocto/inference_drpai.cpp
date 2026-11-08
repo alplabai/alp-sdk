@@ -319,8 +319,12 @@ bool _drpai_fd_held()
  *  Our open/close are only safe while another fd of this process holds the
  *  device (driver refcount >= 2 at our open, >= 3 at our close): then
  *  drpai_open_process() / drpai_close_process() do not run, and the query
- *  only waits on the driver semaphore (up to 1000 ms for the open, 1000 ms
- *  for the ioctl) and the shared-memory lock.  If the runtime holds no fd,
+ *  only waits on the driver semaphore (up to 1000 ms each for the open,
+ *  the ioctl and the close) and the shared-memory lock.  A semaphore
+ *  timeout in our open or close leaves the driver semaphore one count too
+ *  high (the vendor driver releases it on that path too), so after an
+ *  ALP_ERR_TIMEOUT from the query later driver calls are no longer
+ *  serialised.  If the runtime holds no fd,
  *  our open would be the first (CPG init, status reset to IDLE, two device
  *  resets, and a failure there is -EIO/-ETIMEDOUT for a job that ran fine)
  *  and our close the last-but-one (another reset).  In that case nothing is
