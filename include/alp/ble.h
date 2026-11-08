@@ -319,7 +319,7 @@ alp_status_t alp_ble_disconnect(alp_ble_conn_t *conn);
  *       on the Zephyr backend, which returns ALP_ERR_NOT_READY (the
  *       procedure is abandoned exactly as on a timeout).  The CC3501E bridge
  *       backend cannot interrupt a transaction in flight: there the call
- *       returns when the bridge answers or @p timeout_ms elapses.
+ *       returns when the bridge answers or @p timeout_ms elapses (Refs #3103).
  *
  * @return ALP_OK / ALP_ERR_NOT_READY (closed, or closed while waiting) /
  *         ALP_ERR_INVAL / ALP_ERR_TIMEOUT /

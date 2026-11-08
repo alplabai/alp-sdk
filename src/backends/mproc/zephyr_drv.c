@@ -97,13 +97,13 @@ struct alp_mbox_db_slot {
 #define ALP_MBOX_DB_PAYLOAD_MAX (sizeof(((struct alp_mbox_db_slot *)0)->data))
 
 struct mbox_be {
-	const struct device     *dev;
+	const struct device *dev;
 	int                      mtu;     /* mbox_mtu_get(dev); 0 = doorbell-only, <0 = unknown */
 	struct alp_mbox_db_slot *db_slot; /* non-NULL only for a doorbell-only controller */
 	const struct device     *rx_dev;  /* == dev unless an alp-mbox-rxN alias splits TX/RX */
-	uint32_t                 channel;
-	alp_mbox_msg_cb_t        cb;
-	void                    *cb_user;
+	uint32_t             channel;
+	alp_mbox_msg_cb_t    cb;
+	void                *cb_user;
 #if defined(CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING)
 	uint32_t tx_sequence; /* monotonic outbound counter */
 	uint8_t  tx_scratch[CONFIG_ALP_SDK_MPROC_FRAME_MAX_BYTES];

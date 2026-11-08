@@ -311,7 +311,10 @@ alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
  * @note A concurrent @ref alp_audio_out_close wakes a blocked call, which
  *       returns ALP_ERR_NOT_READY; @p out_frames then holds the frames
  *       accepted before the wake.  close() completes without waiting out
- *       @p timeout_ms.
+ *       @p timeout_ms while the call waits for buffer space; on the Zephyr
+ *       backend a call already blocked handing a buffer to the I2S driver's
+ *       transmit queue is not interruptible and returns when the driver
+ *       accepts it.
  * @return ALP_OK / ALP_ERR_NOT_READY (not open, or closed while waiting) /
  *         ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
  *         ALP_ERR_TIMEOUT / a deferred-start trigger failure (see above).

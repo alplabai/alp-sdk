@@ -43,6 +43,7 @@
 #define ALP_SLICED_WAIT(closing_p, timeout_ms, slice_ms, rc, call, is_timeout) \
 	({ \
 		bool          _alp_cancelled = false; \
+		bool          _alp_first     = true; \
 		const bool    _alp_forever   = ((timeout_ms) == UINT32_MAX); \
 		const int64_t _alp_deadline  = k_uptime_get() + (int64_t)(timeout_ms); \
 		for (;;) { \
@@ -52,6 +53,13 @@
 			} \
 			int64_t _alp_left = \
 			    _alp_forever ? (int64_t)ALP_SLICE_WAIT_MS : _alp_deadline - k_uptime_get(); \
+			/* Budget spent between the last slice and now: report the \
+			 * previous slice's timeout, never a 0 ms (K_NO_WAIT) call \
+			 * whose "nothing yet" code is not the timeout code. */ \
+			if (!_alp_first && !_alp_forever && _alp_left <= 0) { \
+				break; \
+			} \
+			_alp_first = false; \
 			if (_alp_left < 0) { \
 				_alp_left = 0; \
 			} \

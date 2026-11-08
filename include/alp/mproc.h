@@ -400,8 +400,8 @@ alp_status_t alp_hwsem_try_lock(alp_hwsem_t *sem);
  * @param[in] sem         Semaphore handle.
  * @param[in] timeout_ms  Max wait in milliseconds.  The sentinel value
  *                        @c UINT32_MAX means "wait indefinitely"
- *                        (maps to Zephyr's @c K_FOREVER on the
- *                        Zephyr backend); a value of @c 0 returns
+ *                        (the Zephyr backend waits in short slices a
+ *                        concurrent close can interrupt); a value of @c 0 returns
  *                        immediately if the semaphore isn't free.
  *
  * @note A concurrent @ref alp_hwsem_close wakes a blocked call, which

@@ -110,7 +110,7 @@ struct hw_in_be {
 	 * means native, no decimator. */
 	uint32_t            ratio;
 	alp_dsp_decimator_t dec;
-	bool                in_use;
+	bool    in_use;
 };
 
 static struct hw_in_be g_in_be_pool[CONFIG_ALP_SDK_MAX_AUDIO_IN_HANDLES];

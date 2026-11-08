@@ -18,6 +18,8 @@
 
 #include <alp/mproc.h>
 
+#include "alp_sliced_wait.h"
+
 #define STACK_SZ 2048
 static K_THREAD_STACK_DEFINE(waiter_stack, STACK_SZ);
 static K_THREAD_STACK_DEFINE(closer_stack, STACK_SZ);
@@ -105,6 +107,38 @@ ZTEST(mproc_hwsem_close_cancel, test_timeout_still_reported)
 	zassert_true(dt >= 120 && dt < 400, "timeout %d ms off the requested 120", (int)dt);
 	alp_hwsem_close(other);
 	alp_hwsem_close(holder);
+}
+
+/* The closing-flag expression runs between the previous slice's deadline
+ * check and the next slice's budget computation: let a millisecond pass in it so the budget is exactly spent there.  The wait must
+ * then report the previous slice's timeout, never issue a 0 ms call. */
+static int g_zero_slices;
+static int g_closing_flag;
+
+static int *tick_then_flag(void)
+{
+	k_busy_wait(1000); /* native_sim: simulated time only moves here */
+	return &g_closing_flag;
+}
+
+ZTEST(mproc_hwsem_close_cancel, test_exhausted_budget_never_issues_zero_ms_slice)
+{
+	for (int i = 0; i < 20; i++) {
+		int      rc = 0;
+		uint32_t slice;
+		bool     cancelled = ALP_SLICED_WAIT(tick_then_flag(),
+		                                     3u,
+		                                     slice,
+		                                     rc,
+		                                     ({
+			                                 if (slice == 0) g_zero_slices++;
+			                                 -EAGAIN;
+		                                     }),
+		                                     rc == -EAGAIN);
+		zassert_false(cancelled);
+		zassert_equal(rc, -EAGAIN);
+	}
+	zassert_equal(g_zero_slices, 0, "%d zero-ms slices", g_zero_slices);
 }
 
 ZTEST_SUITE(mproc_hwsem_close_cancel, NULL, NULL, NULL, NULL, NULL);
