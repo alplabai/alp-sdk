@@ -46,8 +46,8 @@ The server side (Hakan's repo) hands the device an artifact
    mismatch.
 4. **Commit + reset.** Mender flips the bootloader's A/B selector,
    issues a reset.
-5. **Confirm health post-reset.** Within `MENDER_INVENTORY_POLL_INTERVAL_SECONDS`
-   (default 28800 s) the device confirms it boots, contacts the
+5. **Confirm health post-reset.** Within `MENDER_UPDATE_POLL_INTERVAL_SECONDS`
+   (`ota.poll_interval_s`; meta-mender default 1800 s) the device confirms it boots, contacts the
    server, and acknowledges the new version.  If the device
    doesn't confirm within `MENDER_RETRY_POLL` (default 5 min), the
    bootloader rolls back to the previous slot on the next reset.

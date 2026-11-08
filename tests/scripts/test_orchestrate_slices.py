@@ -1005,7 +1005,7 @@ def test_local_conf_mender_tenant_literal_emitted(tmp_path: Path) -> None:
 
 
 def test_local_conf_mender_poll_interval_uses_the_variable_meta_mender_reads(tmp_path: Path) -> None:
-    """meta-mender reads MENDER_INVENTORY_POLL_INTERVAL_SECONDS; the old
+    """meta-mender reads MENDER_UPDATE_POLL_INTERVAL_SECONDS; the old
     MENDER_INVENTORY_INTERVAL name is read by nothing."""
     body = """
 som:
@@ -1026,5 +1026,5 @@ ota:
 """
     project = load_board_yaml(_write_board(tmp_path, body))
     conf = _slice_local_conf(project, project.cores["a55_cluster"])
-    assert 'MENDER_INVENTORY_POLL_INTERVAL_SECONDS ?= "900"' in conf
+    assert 'MENDER_UPDATE_POLL_INTERVAL_SECONDS ?= "900"' in conf
     assert "MENDER_INVENTORY_INTERVAL" not in conf
