@@ -99,11 +99,12 @@ static int mhuv2_send(const struct device *dev, int wait, uint32_t ch_id,
 
 	struct MHUV2_SND *SND = (struct MHUV2_SND *)DEVICE_MMIO_GET(dev);
 
-	/* ipm_send() contract: -EBUSY while the previous word is unconsumed
+	/* CH_ST holds the whole 32-bit word, not just bit 0.
+	 * ipm_send() contract: -EBUSY while the previous word is unconsumed
 	 * (CH_SET would overwrite it).  Checked before touching ACCESS_REQUEST:
 	 * the shared register may be held high for the in-flight word, and
 	 * mhuv2_send_isr() clears it once CH_ST reads 0. */
-	if ((SND->CHANNEL[ch_id].CH_ST & MHU_CH_INT_ST_SET) == MHU_CH_INT_ST_SET) {
+	if (SND->CHANNEL[ch_id].CH_ST != 0) {
 		return -EBUSY;
 	}
 
@@ -395,7 +396,7 @@ static int mhuv2_poll_out(const struct device *dev, uint32_t ch_id,
 	}
 
 	/* Send busy error if the previous ch xfer is not yet completed */
-	if ((SND->CHANNEL[ch_id].CH_ST & MHU_CH_INT_ST_SET) == MHU_CH_INT_ST_SET) {
+	if (SND->CHANNEL[ch_id].CH_ST != 0) {
 		/* Reset access request and restore the NVIC line before returning */
 		SND->ACCESS_REQUEST = !MHU_ACC_REQ;
 		ret                 = -EBUSY;
@@ -418,7 +419,7 @@ static int mhuv2_poll_out(const struct device *dev, uint32_t ch_id,
 
 	/* wait for the current ch xfer to complete */
 	while (usec_timeout--) {
-		if ((SND->CHANNEL[ch_id].CH_ST & MHU_CH_INT_ST_SET) != MHU_CH_INT_ST_SET) {
+		if (SND->CHANNEL[ch_id].CH_ST == 0) {
 			ack = true;
 			break;
 		}

@@ -36,7 +36,7 @@ ZTEST(ipm_mhuv2_send, test_send_busy_when_previous_word_unconsumed)
 {
 	uint32_t word = 0xA5A5A5A5u;
 
-	HW(g_regs.CHANNEL[1].CH_ST) = MHU_CH_INT_ST_SET; /* receiver has not cleared it */
+	HW(g_regs.CHANNEL[1].CH_ST) = 0x80000000u; /* pending word, bit 0 clear */
 	g_regs.CHANNEL[1].CH_SET    = 0x11111111u;
 	g_regs.ACCESS_REQUEST       = MHU_ACC_REQ; /* held for the in-flight word */
 
@@ -51,4 +51,16 @@ ZTEST(ipm_mhuv2_send, test_send_ok_when_channel_free)
 
 	zassert_equal(ipm_send(&g_dev, 0, 1, &word, sizeof(word)), 0);
 	zassert_equal(g_regs.CHANNEL[1].CH_SET, word);
+}
+
+ZTEST(ipm_mhuv2_send, test_poll_out_busy_when_previous_word_unconsumed)
+{
+	uint32_t word = 0xA5A5A5A5u;
+
+	HW(g_regs.CHANNEL[1].CH_ST) = 0x80000000u; /* pending word, bit 0 clear */
+	g_regs.CHANNEL[1].CH_SET    = 0x11111111u;
+	g_cfg.irq_type              = 1; /* poll_out is ENOTSUP without an IRQ type */
+
+	zassert_equal(mhuv2_poll_out(&g_dev, 1, &word, sizeof(word), K_NO_WAIT), -EBUSY);
+	zassert_equal(g_regs.CHANNEL[1].CH_SET, 0x11111111u, "pending word must not be overwritten");
 }
