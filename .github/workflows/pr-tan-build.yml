@@ -46,8 +46,9 @@ name: pr-tan-build
 #     workflow cannot raise on a queue ref (#1415).
 #   - The summary name is static; it passes on a legitimate skip and fails on
 #     failure / cancelled / any unexpected skip.
-# merge_group runs the real matrix (both SoM-family legs, ~45 min cap): the
-# queue must test the rebased content and the matrix is already minimal.
+# merge_group runs the real matrix (both SoM-family legs, ~45 min cap) only
+# when detect finds a watched path against the queue's base_sha; the matrix is
+# already minimal.
 on:
   pull_request:
     branches: [main, dev]
@@ -78,17 +79,31 @@ jobs:
   # Not a required context. Skipped on merge_group / workflow_dispatch, where
   # the real jobs always run (see their `if:`).
   detect:
-    if: github.event_name == 'pull_request'
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
     steps:
+      # push / merge_group: dorny diffs with git, so it needs a checkout WITH
+      # history (a bare runner has no repo: `fatal: not a git repository`, exit
+      # 128, which reddened the summary on every push). pull_request uses the API.
+      - name: Checkout (history for the git diff)
+        if: github.event_name != 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
       - name: Detect tan-build-relevant changes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         timeout-minutes: 2
         with:
+          # merge_group: compare against the queue's base commit (empty on other
+          # events, where dorny picks the PR / push base itself).
+          base: ${{ github.event.merge_group.base_sha }}
           filters: |
             relevant:
             - 'src/**'
@@ -115,7 +130,7 @@ jobs:
     # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
     # path changed. merge_group, workflow_dispatch and any `detect`
     # non-success run the real job.
-    if: always() && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     name: tan-build · ${{ matrix.family }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -344,7 +359,7 @@ jobs:
               exit 0
               ;;
             skipped)
-              if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ]; } \
+              if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ] || [ "${EVENT_NAME}" = "merge_group" ]; } \
                  && [ "${DETECT_RESULT}" = "success" ] && [ "${DETECT_RELEVANT}" != "true" ]; then
                 echo "PASS: tan-build legitimately skipped -- detect ran, succeeded, and found no watched path changed"
                 exit 0

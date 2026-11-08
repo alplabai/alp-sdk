@@ -39,6 +39,8 @@ name: pr-abi-snapshot
 #     workflow cannot raise on a queue ref (#1415).
 #   - The summary name is static; it passes on a legitimate skip and fails on
 #     failure / cancelled / any unexpected skip.
+# Required on `main` only (not `dev`: the PR trigger never fires for dev PRs).
+# The `merge_group:` trigger is kept so a queue entry can never hang on it.
 # The snapshot diff stays PR-to-main/release/** only (informational pre-1.0).
 # On merge_group the workflow reports but does no work: `snapshot-diff` is
 # skipped and the summary passes with an explicit 'not applicable' log line,

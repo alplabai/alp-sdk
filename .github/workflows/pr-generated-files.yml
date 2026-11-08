@@ -86,17 +86,31 @@ jobs:
   # Not a required context. Skipped on merge_group / workflow_dispatch, where
   # the real jobs always run (see their `if:`).
   detect:
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
     steps:
+      # push / merge_group: dorny diffs with git, so it needs a checkout WITH
+      # history (a bare runner has no repo: `fatal: not a git repository`, exit
+      # 128, which reddened the summary on every push). pull_request uses the API.
+      - name: Checkout (history for the git diff)
+        if: github.event_name != 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
       - name: Detect generated-files-relevant changes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         timeout-minutes: 2
         with:
+          # merge_group: compare against the queue's base commit (empty on other
+          # events, where dorny picks the PR / push base itself).
+          base: ${{ github.event.merge_group.base_sha }}
           filters: |
             relevant:
             - 'metadata/**'
@@ -144,7 +158,7 @@ jobs:
     # Fail CLOSED: skip ONLY when `detect` ran, succeeded and found no watched
     # path changed. merge_group, workflow_dispatch and any `detect`
     # non-success run the real job.
-    if: always() && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     name: check · generated files in sync
     runs-on: ubuntu-latest
     # #1477: worst observed successful run 32s across 3 sampled runs.
@@ -519,7 +533,7 @@ jobs:
               exit 0
               ;;
             skipped)
-              if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ]; } \
+              if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ] || [ "${EVENT_NAME}" = "merge_group" ]; } \
                  && [ "${DETECT_RESULT}" = "success" ] && [ "${DETECT_RELEVANT}" != "true" ]; then
                 echo "PASS: check legitimately skipped -- detect ran, succeeded, and found no watched path changed"
                 exit 0
