@@ -54,7 +54,13 @@ typedef struct {
 	bool        initialised;
 } drv8825_t;
 
-/** @brief Bind context to caller-opened PWM + GPIO handles. */
+/** @brief Bind context to caller-opened PWM + GPIO handles.
+ *
+ * Leaves the driver disabled: STEP duty 0, DIR low, nENBL driven high
+ * (outputs off, coils de-energised).  The first failing PWM/GPIO write
+ * is returned and the context is left uninitialised.
+ * @return ALP_OK, ALP_ERR_INVAL (dev/step/dir NULL), or the first
+ *         alp_pwm_set_duty / alp_gpio_write error. */
 alp_status_t drv8825_init(drv8825_t  *dev,
                           alp_pwm_t  *step,
                           alp_gpio_t *dir,
@@ -80,6 +86,20 @@ alp_status_t drv8825_set_step_rate(drv8825_t *dev, uint32_t freq_hz);
 
 /** @brief Enable (false) or disable (true) the driver output. */
 alp_status_t drv8825_set_sleep(drv8825_t *dev, bool sleeping);
+
+/**
+ * @brief Energise (true) or de-energise (false) the coils via nENBL.
+ *
+ * nENBL is active low: @p enabled true drives it low.  Init leaves the
+ * driver disabled, so call this with true before stepping.
+ *
+ * @param dev      Initialised context.
+ * @param enabled  true = outputs on, false = outputs off.
+ * @return ALP_OK, ALP_ERR_NOT_READY (dev NULL / not initialised),
+ *         ALP_ERR_NOSUPPORT (no nENBL pin bound), or the
+ *         alp_gpio_write error.
+ */
+alp_status_t drv8825_set_enable(drv8825_t *dev, bool enabled);
 
 /** @brief Release driver context. */
 void drv8825_deinit(drv8825_t *dev);

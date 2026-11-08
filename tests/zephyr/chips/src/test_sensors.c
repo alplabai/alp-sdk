@@ -572,6 +572,33 @@ ZTEST(alp_chips, test_icm42670_init_null_args)
 /* icm42670 -- fake-backed register-protocol tests                    */
 /* ------------------------------------------------------------------ */
 
+ZTEST(alp_chips, test_fake_icm42670_init_sets_fs_and_preserves_odr)
+{
+	fake_icm42670_reset();
+	/* Chip reset value is FS 0x0 (+-16 g / 2000 dps); seed a non-zero ODR
+	 * nibble so a blind write of the FS byte would clobber it. */
+	fake_icm42670_set_reg(0x21u, 0x05u); /* ACCEL_CONFIG0: FS 0, ODR 0x5 */
+	fake_icm42670_set_reg(0x20u, 0x06u); /* GYRO_CONFIG0:  FS 0, ODR 0x6 */
+
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	icm42670_t dev;
+	zassert_equal(icm42670_init(&dev, bus, ICM42670_I2C_ADDR_LOW), ALP_OK);
+
+	/* FS_SEL [6:5] = 0x3 (+-2 g / +-250 dps), ODR [3:0] unchanged. */
+	zassert_equal(fake_icm42670_get_reg(0x21u) & 0x60u, 0x60u);
+	zassert_equal(fake_icm42670_get_reg(0x21u) & 0x0Fu, 0x05u);
+	zassert_equal(fake_icm42670_get_reg(0x20u) & 0x60u, 0x60u);
+	zassert_equal(fake_icm42670_get_reg(0x20u) & 0x0Fu, 0x06u);
+	zassert_equal(dev.accel_fs, ICM42670_ACCEL_FS_2G);
+	zassert_equal(dev.gyro_fs, ICM42670_GYRO_FS_250_DPS);
+
+	icm42670_deinit(&dev);
+	alp_i2c_close(bus);
+}
+
 ZTEST(alp_chips, test_fake_icm42670_configure_int_pin1_preserves_int2_field)
 {
 	fake_icm42670_reset();
