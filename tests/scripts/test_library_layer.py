@@ -435,10 +435,10 @@ def test_flagship_manifests_present() -> None:
     assert FLAGSHIP_LIBS <= on_disk, f"missing flagship manifests: {FLAGSHIP_LIBS - on_disk}"
 
 
-def test_ros2_is_tier_b() -> None:
-    """ROS 2 is a heavy Yocto layer, not an alp-sdk-CI-built library -> Tier B."""
+def test_ros2_is_tier_a() -> None:
+    """ROS 2 is Tier A: `bitbake alp-image-edge` built with meta-ros2-humble (#372)."""
     doc = yaml.safe_load((LIBRARIES_DIR / "ros2.yaml").read_text(encoding="utf-8"))
-    assert doc["tier"] == "B"
+    assert doc["tier"] == "A"
     assert doc["license"] == "Apache-2.0"
 
 

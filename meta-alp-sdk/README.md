@@ -304,13 +304,12 @@ above: `MACHINE = "e1m-v2n101-a55"` (or `e1m-v2m101-a55`), then
 `alp-image-common.inc`'s `FEATURE_PACKAGES_alp-ros` maps to
 `packagegroup-alp-ros` -- whose `RDEPENDS:${PN}` names both `rclcpp` and
 `alp-perception` (`dynamic-layers/ros2-humble-layer/recipes-core/packagegroups/packagegroup-alp-ros.bb`).
-Without a Yocto CI build lane in alp-sdk CI, that dependency chain --
-not a finished image manifest -- is the grounded proof this command puts
-both packages on the rootfs; `tests/scripts/test_library_layer.py`
-(`test_ros2_edge_image_pulls_rclcpp_and_alp_perception`) pins the chain so
-it can't silently drift. That gap (no real Yocto CI build) is also why
-`ros2.yaml` stays Tier B: ADR 0018 Tier A requires "built in CI for at
-least one board", which a doc-only proof cannot satisfy.
+Built on the host 2026-11-08 (MACHINE `e1m-v2n101-a55`, meta-ros `scarthgap`):
+`bitbake alp-perception` and `bitbake alp-image-edge` both exit 0, and the
+image's `.rootfs.manifest` lists `rclcpp` and `alp-perception`. That build is
+why `ros2.yaml` is Tier A; `tests/scripts/test_library_layer.py`
+(`test_ros2_edge_image_pulls_rclcpp_and_alp_perception`) pins the dependency
+chain so it cannot silently drift.
 
 The resulting `alp-image-edge-<machine>.wic[.gz]` is the kernel +
 rootfs (the bootloader is production-flashed by Alp).  See

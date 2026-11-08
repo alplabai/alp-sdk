@@ -5,10 +5,10 @@
 # Zephyr side (metadata/libraries/micro-ros.yaml).  This is the heterogeneous
 # Zephyr+Yocto robotics proof ADR 0010 enables.
 #
-# Tier B (recipe-only), grounded (2026-07-03):
-#   ROS 2 is a heavy Yocto-layer concern, not an alp-sdk-CI-built library, so it
-#   ships Tier B per the ADR's cloud/heavy-layer tier: the wiring + compatibility
-#   metadata are maintained and emitted, but alp-sdk CI does not build it.
+# Tier A (built 2026-11-08 on e1m-v2n101-a55), grounded (2026-07-03):
+#   Built on the host (issue #372): MACHINE=e1m-v2n101-a55, `bitbake
+#   alp-perception` then `bitbake alp-image-edge` with meta-ros2-humble, both
+#   RC=0, and rclcpp + alp-perception are in the image rootfs manifest.
 #   The wiring IS real and in-tree:
 #     * meta-alp-sdk/recipes-images/alp-image-common.inc IMAGE_INSTALL lists
 #       `rclcpp` (+ sensor-msgs / vision-msgs / image-transport / cv-bridge) --
@@ -25,8 +25,7 @@
 # PREREQUISITE for a build: the meta-ros2-humble layer must be in bblayers.conf
 #   (meta-alp-sdk/README.md step 4b; it is a LAYERRECOMMENDS, not a hard dep,
 #   so non-ROS images build without it).  The ROS recipe masks ship in
-#   ros2-humble-build.inc, required by conf/distro/alp.conf.  Tier stays B:
-#   Tier A needs a CI build lane, which alp-sdk does not have for Yocto/ROS.
+#   ros2-humble-build.inc, required by conf/distro/alp.conf.
 #
 # Version:  `humble` -- the ROS 2 Humble distro meta-alp-sdk targets
 #   (conf/distro/include/ros2-humble-build.inc; dynamic-layers/ros2-humble-layer recipes inherit
@@ -36,7 +35,7 @@
 schema_version: 1
 name: ros2
 description: "ROS 2 (Humble) -- robotics middleware on the Cortex-A / Yocto peer."
-tier: B
+tier: A
 version: "humble"
 license: Apache-2.0
 
