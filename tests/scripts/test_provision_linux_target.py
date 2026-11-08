@@ -269,7 +269,8 @@ def test_emmc_boot_write_verify(tmp_path):
     assert "dd if=/tmp/fip.bin of=/dev/mmcblk1boot0 bs=512 seek=768 && sync" in fake.commands
     # the readback must come from the media: caches dropped between the write and the md5
     md5_cmd = lt.DROP_CACHES + "; dd if=/dev/mmcblk1boot0 bs=1 skip=393216 count=1000 2>/dev/null | md5sum"
-    assert fake.commands.index(lt.DROP_CACHES) < fake.commands.index(md5_cmd)
+    assert md5_cmd in fake.commands
+    assert fake.commands.index("dd if=/tmp/fip.bin of=/dev/mmcblk1boot0 bs=512 seek=768 && sync") < fake.commands.index(md5_cmd)
 
 
 def test_set_boot_config_verifies():
@@ -289,7 +290,7 @@ def test_rootfs_write_verify_streams_and_compares(tmp_path):
     t, fake = target([("gunzip", ""), ("rereadpt", ""), ("md5sum", f"{md5(raw)}  -\n"), ("drop_caches", "")])
     assert lt.rootfs_write_verify(t, "/dev/mmcblk1", wic)["rootfs_md5"] == md5(raw)
     assert fake.commands[0] == "gunzip -c | dd of=/dev/mmcblk1 bs=4M && sync"
-    assert fake.commands[-2] == lt.DROP_CACHES            # readback from the media, not the page cache
+    assert fake.commands[-1].startswith(lt.DROP_CACHES + "; ")  # readback from the media, not the page cache
     assert fake.commands[-1] == f"{lt.DROP_CACHES}; dd if=/dev/mmcblk1 bs=4096 skip=0 count={len(raw) // 4096} 2>/dev/null | md5sum"
 
 

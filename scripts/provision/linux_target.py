@@ -410,9 +410,8 @@ def emmc_boot_write_verify(t: LinuxTarget, emmc: str, local: Path, sector: int, 
                   timeout=600.0)
         finally:
             t.run(f"echo 1 > {force_ro}", check=False)
-        # drop the page cache first: sync reports no write-back error, and the readback must come
-        # from the media, not from the bytes dd just left in the block device's cache
-        t.run(DROP_CACHES, check=False)
+        # md5() drops the page cache first: sync reports no write-back error, and the readback
+        # must come from the media, not from the bytes dd just left in the block device's cache
         got = t.md5(dev, sector * 512, data_len)
     finally:
         t.run(f"rm -f {shlex.quote(remote)}", check=False)
@@ -468,8 +467,7 @@ def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float 
     # busybox images may lack blockdev: fall back to the BLKRRPART ioctl
     t.run(f"blockdev --rereadpt {emmc} 2>/dev/null || python3 -c "
           f"\"import fcntl, os; fcntl.ioctl(os.open('{emmc}', os.O_RDONLY), 0x125f)\"")
-    t.run(DROP_CACHES, check=False)     # the readback must come from the media (see md5_ranges)
-    got = t.md5(emmc, 0, n)
+    got = t.md5(emmc, 0, n)  # md5() drops the page cache: the readback comes from the media
     if got != want:
         raise BenchError(f"{emmc} readback md5 {got} != uncompressed {wic_gz.name} md5 {want}")
     return {"rootfs_md5": got, "rootfs_bytes_written": str(n), "rootfs_image_bytes": str(n)}

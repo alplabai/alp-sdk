@@ -323,7 +323,8 @@ def _tokenize(path: Path, base_dir: Path, repo: Path) -> str:
     SDK nested inside the project dir must tokenize an SDK-owned path as
     `${SDK_ROOT}`, not `${PROJECT_ROOT}/<sdk>/...` -- and `${PROJECT_ROOT}`
     on a tie (the family sysbuild base and the stock M-core shim app are
-    SDK-owned; most other anchored paths are project-owned). Raises `UnrootedPathError` for a path under neither
+    SDK-owned; most other anchored paths are project-owned). Raises
+    `UnrootedPathError` for a path under neither
     root -- never returns a bare absolute path, so a non-hermetic path can
     never silently reach a `planPathMode: tokened` plan.
     """
