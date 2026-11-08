@@ -389,17 +389,16 @@ static int mhuv2_poll_out(const struct device *dev, uint32_t ch_id,
 
 	struct MHUV2_SND *SND = (struct MHUV2_SND *)DEVICE_MMIO_GET(dev);
 
-	ret = mhuv2_send_access_request(SND);
-	if (ret < 0) {
-		/* Access not granted: restore the NVIC line before returning */
+	/* Busy while the previous word is unconsumed. Checked before touching
+	 * ACCESS_REQUEST: it may be held high for the in-flight word. */
+	if (SND->CHANNEL[ch_id].CH_ST != 0) {
+		ret = -EBUSY;
 		goto out;
 	}
 
-	/* Send busy error if the previous ch xfer is not yet completed */
-	if (SND->CHANNEL[ch_id].CH_ST != 0) {
-		/* Reset access request and restore the NVIC line before returning */
-		SND->ACCESS_REQUEST = !MHU_ACC_REQ;
-		ret                 = -EBUSY;
+	ret = mhuv2_send_access_request(SND);
+	if (ret < 0) {
+		/* Access not granted: restore the NVIC line before returning */
 		goto out;
 	}
 

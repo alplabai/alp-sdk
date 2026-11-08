@@ -26,6 +26,7 @@ static void before(void *fixture)
 {
 	(void)fixture;
 	memset((void *)&g_regs, 0, sizeof(g_regs));
+	memset(&g_cfg, 0, sizeof(g_cfg));
 	HW(g_regs.ACCESS_READY)           = MHU_ACC_RDY;
 	DEVICE_MMIO_ROM_PTR(&g_dev)->addr = (mm_reg_t)&g_regs;
 }
@@ -60,7 +61,9 @@ ZTEST(ipm_mhuv2_send, test_poll_out_busy_when_previous_word_unconsumed)
 	HW(g_regs.CHANNEL[1].CH_ST) = 0x80000000u; /* pending word, bit 0 clear */
 	g_regs.CHANNEL[1].CH_SET    = 0x11111111u;
 	g_cfg.irq_type              = 1; /* poll_out is ENOTSUP without an IRQ type */
+	g_regs.ACCESS_REQUEST       = MHU_ACC_REQ;
 
 	zassert_equal(mhuv2_poll_out(&g_dev, 1, &word, sizeof(word), K_NO_WAIT), -EBUSY);
 	zassert_equal(g_regs.CHANNEL[1].CH_SET, 0x11111111u, "pending word must not be overwritten");
+	zassert_equal(g_regs.ACCESS_REQUEST, MHU_ACC_REQ, "access request untouched on -EBUSY");
 }
