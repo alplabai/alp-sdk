@@ -4,7 +4,8 @@
  *
  * Issue #2983: mhuv2_send() wrote CH_SET without checking that the previous
  * word was consumed.  ipm_send() must return -EBUSY while CH_ST still shows
- * the word, leave CH_SET alone, and drop the access request again.
+ * the word, leave CH_SET and ACCESS_REQUEST alone (the request may be held
+ * high for the in-flight word).
  */
 /* CONFIG_ARM_MHUV2 is unset, so the ISR/init statics have no DT instance. */
 #pragma GCC diagnostic ignored "-Wunused-function"
@@ -37,10 +38,11 @@ ZTEST(ipm_mhuv2_send, test_send_busy_when_previous_word_unconsumed)
 
 	HW(g_regs.CHANNEL[1].CH_ST) = MHU_CH_INT_ST_SET; /* receiver has not cleared it */
 	g_regs.CHANNEL[1].CH_SET    = 0x11111111u;
+	g_regs.ACCESS_REQUEST       = MHU_ACC_REQ; /* held for the in-flight word */
 
 	zassert_equal(ipm_send(&g_dev, 0, 1, &word, sizeof(word)), -EBUSY);
 	zassert_equal(g_regs.CHANNEL[1].CH_SET, 0x11111111u, "pending word must not be overwritten");
-	zassert_equal(g_regs.ACCESS_REQUEST, 0u, "access request dropped on -EBUSY");
+	zassert_equal(g_regs.ACCESS_REQUEST, MHU_ACC_REQ, "access request untouched on -EBUSY");
 }
 
 ZTEST(ipm_mhuv2_send, test_send_ok_when_channel_free)

@@ -171,3 +171,50 @@ ZTEST(se_cryptocell_cache, test_gcm_encrypt_and_decrypt_cache_order)
 	zassert_true(covered(EV_FLUSH_INVD, 0, snd, dec, 100), "plaintext clean+invd before");
 	check_output_post(snd, dec, 100);
 }
+
+/* se_ctx is a dead stack copy of the key, so its address is not nameable
+ * here: a clean of >= 32 bytes before the send that is not the stored key. */
+static bool ctx_cleaned(size_t snd, const void *key)
+{
+	for (size_t i = 0; i < snd; i++) {
+		if (g_ev[i].kind == EV_FLUSH && g_ev[i].len >= 32u && g_ev[i].len < 64u &&
+		    !(g_ev[i].addr <= (uintptr_t)key && (uintptr_t)key < g_ev[i].addr + g_ev[i].len)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+ZTEST(se_cryptocell_cache, test_chacha_encrypt_and_decrypt_cache_order)
+{
+	static uint8_t     __aligned(64) out[192];
+	static uint8_t     __aligned(64) tag[64];
+	uint8_t            iv[12] = { 1 }, aad[7] = { 2 }, plain[100] = { 3 };
+	struct se_aead_be *be = se_aead_acquire();
+	zassert_not_null(be);
+	be->key_len                     = 32u;
+	alp_aead_backend_state_t state  = { .alg = ALP_AEAD_CHACHA20_POLY1305, .be_data = be };
+	uint8_t                 *cipher = &out[4];
+	uint8_t                 *tagp   = &tag[3];
+
+	zassert_equal(_ops.aead_encrypt(&state, iv, 12, aad, 7, plain, 100, cipher, tagp, 16), ALP_OK);
+	size_t snd = send_index();
+	zassert_true(ctx_cleaned(snd, be->key), "se_ctx cleaned");
+	zassert_true(covered(EV_FLUSH, 0, snd, iv, 12), "iv cleaned");
+	zassert_true(covered(EV_FLUSH, 0, snd, aad, 7), "aad cleaned");
+	zassert_true(covered(EV_FLUSH, 0, snd, plain, 100), "plaintext cleaned");
+	zassert_true(covered(EV_FLUSH_INVD, 0, snd, cipher, 100), "ciphertext clean+invd before");
+	zassert_true(covered(EV_FLUSH_INVD, 0, snd, tagp, 16), "tag clean+invd before");
+	check_output_post(snd, cipher, 100);
+	check_output_post(snd, tagp, 16);
+
+	g_nev        = 0u;
+	uint8_t *dec = &out[100];
+	zassert_equal(_ops.aead_decrypt(&state, iv, 12, aad, 7, plain, 100, tagp, 16, dec), ALP_OK);
+	snd = send_index();
+	zassert_true(ctx_cleaned(snd, be->key), "se_ctx cleaned");
+	zassert_true(covered(EV_FLUSH, 0, snd, plain, 100), "ciphertext cleaned");
+	zassert_true(covered(EV_FLUSH, 0, snd, tagp, 16), "tag cleaned (input on decrypt)");
+	zassert_true(covered(EV_FLUSH_INVD, 0, snd, dec, 100), "plaintext clean+invd before");
+	check_output_post(snd, dec, 100);
+}

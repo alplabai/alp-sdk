@@ -99,16 +99,17 @@ static int mhuv2_send(const struct device *dev, int wait, uint32_t ch_id,
 
 	struct MHUV2_SND *SND = (struct MHUV2_SND *)DEVICE_MMIO_GET(dev);
 
+	/* ipm_send() contract: -EBUSY while the previous word is unconsumed
+	 * (CH_SET would overwrite it).  Checked before touching ACCESS_REQUEST:
+	 * the shared register may be held high for the in-flight word, and
+	 * mhuv2_send_isr() clears it once CH_ST reads 0. */
+	if ((SND->CHANNEL[ch_id].CH_ST & MHU_CH_INT_ST_SET) == MHU_CH_INT_ST_SET) {
+		return -EBUSY;
+	}
+
 	ret = mhuv2_send_access_request(SND);
 	if (ret < 0) {
 		return ret;
-	}
-
-	/* ipm_send() contract: -EBUSY while the previous word is unconsumed
-	 * (CH_SET would overwrite it); same check as mhuv2_poll_out(). */
-	if ((SND->CHANNEL[ch_id].CH_ST & MHU_CH_INT_ST_SET) == MHU_CH_INT_ST_SET) {
-		SND->ACCESS_REQUEST = !MHU_ACC_REQ;
-		return -EBUSY;
 	}
 
 	/* Clear Interrupt Status */
