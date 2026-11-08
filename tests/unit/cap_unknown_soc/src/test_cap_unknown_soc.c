@@ -10,6 +10,10 @@
 
 #include <alp/soc_caps.h>
 
+/* The test only proves anything on the unknown-SoC path: fail the build if a
+ * CONFIG_ALP_SOC_* got selected (every ALP_SOC_* is UINT16_MAX only there). */
+BUILD_ASSERT(ALP_SOC_NPU_ARENA_SRAM_KIB == UINT16_MAX, "cap_unknown_soc needs no ALP_SOC selected");
+
 ZTEST_SUITE(alp_cap_unknown_soc, NULL, NULL, NULL, NULL, NULL);
 
 #define CAP_IS_BOOL(cap) ((ALP_CAP_##cap) == 0 || (ALP_CAP_##cap) == 1)
