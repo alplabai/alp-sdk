@@ -60,7 +60,7 @@ enum {
 	do { \
 		zassert_equal(alp_cloud_transport_connect((t), (cfg)), ALP_ERR_IO); \
 		zassert_equal((t)->last_errno, ECONNABORTED, "last_errno = %d", (t)->last_errno); \
-		zassert_true((t)->fd < 0); \
+		zassert_false((t)->connected); \
 	} while (0)
 
 /* The certificate's subject; the socket itself connects to PEER_HOST. */
@@ -269,6 +269,29 @@ ZTEST(cloud_transport_tls, test_alpn_mismatch_is_refused)
 	cfg.alpn       = many;
 	cfg.alpn_count = ARRAY_SIZE(many);
 	zassert_equal(alp_cloud_transport_connect(&t, &cfg), ALP_ERR_INVAL);
+}
+
+ZTEST(cloud_transport_tls, test_sockopt_failure_closes_the_socket)
+{
+	/* More tags than the stack takes: setsockopt(TLS_SEC_TAG_LIST) fails
+	 * with EINVAL after the socket exists. */
+	static const int             tags[CONFIG_TLS_MAX_CREDENTIALS_NUMBER + 1] = { TAG_CA };
+	alp_cloud_transport_t        t   = ALP_CLOUD_TRANSPORT_INIT;
+	alp_cloud_transport_config_t cfg = tls_cfg(PORT_TLS_OK, tags, SERVER_NAME);
+
+	cfg.sec_tag_count = ARRAY_SIZE(tags);
+
+	/* More attempts than the socket table has slots: a leaked socket per
+	 * failure would turn the status into a different error. */
+	for (int i = 0; i < 3 * CONFIG_NET_SOCKETS_TLS_MAX_CONTEXTS; i++) {
+		/* The stack frees a closed socket asynchronously. */
+		k_msleep(50);
+		t.last_errno = 0;
+		int st = alp_cloud_transport_connect(&t, &cfg);
+		zassert_equal(st, ALP_ERR_INVAL, "attempt %d st %d errno %d", i, st, t.last_errno);
+		zassert_equal(t.last_errno, EINVAL);
+		zassert_false(t.connected);
+	}
 }
 
 ZTEST_SUITE(cloud_transport_tls, NULL, tls_setup, NULL, tls_after, NULL);

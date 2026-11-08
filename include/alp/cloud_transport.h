@@ -113,11 +113,15 @@ typedef struct {
 /**
  * @brief Caller-allocated connection state.
  *
- * Initialise with @ref ALP_CLOUD_TRANSPORT_INIT.  The layout is
- * @c [ABI-EXPERIMENTAL]; read @c last_errno, leave @c fd alone.
+ * Initialise with @ref ALP_CLOUD_TRANSPORT_INIT; an all-zero struct (for
+ * example a static one in BSS) is also a valid unconnected transport.  The
+ * layout is @c [ABI-EXPERIMENTAL]; read @c last_errno, leave the rest alone.
  */
 typedef struct {
-	/** Socket descriptor, or a negative value when not connected. */
+	/** True between a successful connect and close.  Descriptor 0 is valid, so
+	 *  @c fd alone cannot say whether a socket is held. */
+	bool connected;
+	/** Socket descriptor, meaningful only while @c connected. */
 	int fd;
 	/**
 	 * Positive errno of the most recent socket-level failure, 0 if none.
@@ -128,7 +132,7 @@ typedef struct {
 } alp_cloud_transport_t;
 
 /** @brief Static initialiser for an unconnected @ref alp_cloud_transport_t. */
-#define ALP_CLOUD_TRANSPORT_INIT { .fd = -1, .last_errno = 0 }
+#define ALP_CLOUD_TRANSPORT_INIT { .connected = false, .fd = -1, .last_errno = 0 }
 
 /**
  * @brief Resolve the host, connect, and (unless plaintext) complete the TLS

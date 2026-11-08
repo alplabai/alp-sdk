@@ -57,6 +57,8 @@ ZTEST(cloud_transport_coremqtt, test_ping_round_trip)
 
 	/* MQTT_Ping does not require a completed CONNECT; it only serialises
 	 * and sends, which is exactly the path under test. */
+	/* Pokes a coreMQTT internal (field as of the pinned extras-cloud checkout);
+	 * revisit on a coreMQTT bump. */
 	mqtt.connectStatus = MQTTConnected;
 	zassert_equal(MQTT_Ping(&mqtt), MQTTSuccess);
 	zassert_equal(zsock_recv(broker, got, sizeof(got), 0), sizeof(got));

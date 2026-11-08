@@ -1,4 +1,7 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 /*
  * coreMQTT TransportInterface_t on top of <alp/cloud_transport.h>.  The return

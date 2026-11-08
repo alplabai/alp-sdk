@@ -9496,8 +9496,8 @@
       },
       "macros": {
         "ALP_CLOUD_TRANSPORT_INIT": {
-          "hash": "862161f5f8a4e6d9",
-          "value": "{ .fd = -1, .last_errno = 0 }"
+          "hash": "87321d2b7e0ac765",
+          "value": "{ .connected = false, .fd = -1, .last_errno = 0 }"
         }
       },
       "typedefs": {
@@ -9519,12 +9519,13 @@
           "kind": "struct"
         },
         "alp_cloud_transport_t": {
-          "definition": "typedef struct { int fd; int last_errno; } alp_cloud_transport_t;",
+          "definition": "typedef struct { bool connected; int fd; int last_errno; } alp_cloud_transport_t;",
           "fields": [
+            "bool connected",
             "int fd",
             "int last_errno"
           ],
-          "hash": "8c31004de53c8f6e",
+          "hash": "cad8606b366306e2",
           "kind": "struct"
         }
       },

@@ -157,7 +157,7 @@ static alp_status_t validate(const alp_cloud_transport_t        *t,
 	if (t == NULL || cfg == NULL || cfg->host == NULL || cfg->host[0] == '\0' || cfg->port == 0U) {
 		return ALP_ERR_INVAL;
 	}
-	if (t->fd >= 0) {
+	if (t->connected) {
 		return ALP_ERR_BUSY;
 	}
 	return cfg->plaintext ? ALP_OK : validate_tls(cfg);
@@ -205,7 +205,8 @@ alp_status_t alp_cloud_transport_connect(alp_cloud_transport_t              *t,
 		return fail(t, err);
 	}
 
-	t->fd = fd;
+	t->fd        = fd;
+	t->connected = true;
 	return ALP_OK;
 }
 
@@ -214,7 +215,7 @@ int32_t alp_cloud_transport_send(alp_cloud_transport_t *t, const void *buf, size
 	if (t == NULL || buf == NULL) {
 		return ALP_ERR_INVAL;
 	}
-	if (t->fd < 0) {
+	if (!t->connected) {
 		return ALP_ERR_NOT_READY;
 	}
 	if (len == 0U) {
@@ -234,7 +235,7 @@ int32_t alp_cloud_transport_recv(alp_cloud_transport_t *t, void *buf, size_t len
 	if (t == NULL || buf == NULL) {
 		return ALP_ERR_INVAL;
 	}
-	if (t->fd < 0) {
+	if (!t->connected) {
 		return ALP_ERR_NOT_READY;
 	}
 	if (len == 0U) {
@@ -257,9 +258,10 @@ int32_t alp_cloud_transport_recv(alp_cloud_transport_t *t, void *buf, size_t len
 
 void alp_cloud_transport_close(alp_cloud_transport_t *t)
 {
-	if (t == NULL || t->fd < 0) {
+	if (t == NULL || !t->connected) {
 		return;
 	}
 	(void)zsock_close(t->fd);
-	t->fd = -1;
+	t->fd        = -1;
+	t->connected = false;
 }

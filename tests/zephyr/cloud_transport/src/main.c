@@ -26,6 +26,7 @@ enum {
 	PORT_PEER_CLOSE,
 	PORT_LIFECYCLE,
 	PORT_NO_LISTENER,
+	PORT_SEND_BLOCKED,
 };
 
 #define RECV_TIMEOUT_MS 100
@@ -75,7 +76,7 @@ ZTEST(cloud_transport, test_connect_rejects_bad_arguments)
 
 	cfg = plaintext_cfg(0);
 	zassert_equal(alp_cloud_transport_connect(&t, &cfg), ALP_ERR_INVAL);
-	zassert_true(t.fd < 0, "a rejected connect must not leave a socket behind");
+	zassert_false(t.connected, "a rejected connect must not leave a socket behind");
 }
 
 ZTEST(cloud_transport, test_tls_is_never_silently_downgraded)
@@ -98,7 +99,7 @@ ZTEST(cloud_transport, test_tls_is_never_silently_downgraded)
 		cfg.sec_tag_count = ARRAY_SIZE(tags);
 		zassert_equal(alp_cloud_transport_connect(&t, &cfg), ALP_ERR_NOSUPPORT);
 	}
-	zassert_true(t.fd < 0);
+	zassert_false(t.connected);
 }
 
 ZTEST(cloud_transport, test_unresolvable_host_is_reported)
@@ -111,7 +112,7 @@ ZTEST(cloud_transport, test_unresolvable_host_is_reported)
 	}
 	cfg.host = "broker.invalid";
 	zassert_equal(alp_cloud_transport_connect(&t, &cfg), ALP_ERR_NOT_FOUND);
-	zassert_true(t.fd < 0);
+	zassert_false(t.connected);
 }
 
 ZTEST(cloud_transport, test_connect_without_listener_fails)
@@ -121,7 +122,7 @@ ZTEST(cloud_transport, test_connect_without_listener_fails)
 
 	zassert_equal(alp_cloud_transport_connect(&t, &cfg), ALP_ERR_IO);
 	zassert_equal(t.last_errno, ECONNREFUSED, "last_errno = %d", t.last_errno);
-	zassert_true(t.fd < 0);
+	zassert_false(t.connected);
 }
 
 ZTEST(cloud_transport, test_round_trip)
@@ -207,11 +208,58 @@ ZTEST(cloud_transport, test_lifecycle)
 	zassert_equal(alp_cloud_transport_send(&t, buf, 0), 0);
 
 	alp_cloud_transport_close(&t);
-	zassert_true(t.fd < 0);
+	zassert_false(t.connected);
 	alp_cloud_transport_close(&t); /* idempotent */
 	alp_cloud_transport_close(NULL);
 	zassert_equal(alp_cloud_transport_send(&t, buf, sizeof(buf)), ALP_ERR_NOT_READY);
 
+	zsock_close(pfd);
+	zsock_close(lfd);
+}
+
+ZTEST(cloud_transport, test_zero_filled_transport_is_unconnected)
+{
+	char                  buf[4] = { 0 };
+	alp_cloud_transport_t t;
+
+	/* A static transport in BSS is all zero, so fd == 0.  That must not read
+	 * as a held socket: descriptor 0 belongs to someone else. */
+	memset(&t, 0, sizeof(t));
+	zassert_equal(alp_cloud_transport_send(&t, buf, sizeof(buf)), ALP_ERR_NOT_READY);
+	zassert_equal(alp_cloud_transport_recv(&t, buf, sizeof(buf)), ALP_ERR_NOT_READY);
+
+	/* close() must not touch descriptor 0: it is still open afterwards. */
+	int fd0 = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+	zassert_true(fd0 >= 0);
+	t.fd = fd0;
+	alp_cloud_transport_close(&t);
+	zassert_equal(t.fd, fd0, "close() acted on an unconnected transport");
+	zassert_ok(zsock_close(fd0), "close() already closed the descriptor");
+}
+
+ZTEST(cloud_transport, test_send_returns_zero_when_it_would_block)
+{
+	static const char            chunk[1024];
+	alp_cloud_transport_t        t   = ALP_CLOUD_TRANSPORT_INIT;
+	alp_cloud_transport_config_t cfg = plaintext_cfg(PORT_SEND_BLOCKED);
+	int                          lfd = peer_listen(PORT_SEND_BLOCKED);
+
+	cfg.send_timeout_ms = 100;
+	zassert_ok(alp_cloud_transport_connect(&t, &cfg));
+	int pfd = peer_accept(lfd);
+
+	/* The peer never reads: once its window and our buffers fill, send()
+	 * times out and must report "nothing accepted" (0), not an error. */
+	int32_t n = 1;
+
+	for (int i = 0; i < 4096 && n > 0; i++) {
+		n = alp_cloud_transport_send(&t, chunk, sizeof(chunk));
+	}
+	zassert_equal(n, 0, "send() = %d, expected 0 on timeout", n);
+	zassert_equal(t.last_errno, 0);
+
+	alp_cloud_transport_close(&t);
 	zsock_close(pfd);
 	zsock_close(lfd);
 }
