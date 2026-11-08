@@ -131,6 +131,11 @@ def _parse_board_macros(
     each ALP_E1M_<CLASS><N> reference in the board header."""
     raw = _read_board_header_with_includes(header_path)
     text = _strip_c_comments(_collapse_line_continuations(raw))
+    # Per-revision route overrides (`#ifdef ALP_<BOARD>_HW_REV_<REV>` ...
+    # `#endif`, see gen_board_header.py) are opt-in; the default view is the
+    # un-guarded base routes.
+    text = re.sub(r"^#ifdef ALP_\w+_HW_REV_\w+$.*?^#endif$", "", text,
+                  flags=re.MULTILINE | re.DOTALL)
     out: dict[str, list[tuple[str, int]]] = {
         "I2C": [], "SPI": [], "UART": [], "PWM": [], "GPIO_IO": [],
     }

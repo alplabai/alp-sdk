@@ -101,6 +101,16 @@ well-formed empty `alp-west-libs.yml`).
 
 ### Plain CMake (baremetal / yocto) -- generated `-D` args (reference / inspection)
 
+The SoC capability profile rides these args too: `-DALP_SOC=<ALP_SOC_...>`
+(the SoM silicon's Kconfig-style symbol, e.g. `ALP_SOC_RENESAS_RZV2N_N44`,
+from `metadata/registries/silicon-kconfig.json`) makes the top-level
+`CMakeLists.txt` define `CONFIG_<symbol>=1` on `alp_sdk_headers`, so
+`<alp/soc_caps.h>` resolves `ALP_SOC_REF_STR` and `ALP_HAS()` exactly as a
+Zephyr build with `CONFIG_ALP_SOC_*=y` does. The Yocto slice carries the same
+value as `ALP_SDK_SOC ?= "..."` in `--emit yocto-conf`; the `alp-sdk` recipe
+forwards it as `-DALP_SOC=`. Omitting it leaves the permissive "unknown SoC"
+profile (`ALP_SOC_REF_STR` is `"unknown"`).
+
 `--emit cmake-args` renders a slice's would-be `-D` arguments as text: an
 on-request surface for inspecting what a baremetal build needs, or for a
 build system that parses the lines itself. The same text (minus the section

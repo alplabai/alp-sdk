@@ -1,0 +1,17 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# The GD32G553 supervisor's NIST SP800-90B TRNG as a Zephyr entropy source
+# (#2951).  The TRNG sits on the on-module GD32, not in the SoC, so this node
+# has no reg/clocks/pinctrl: the driver
+# (zephyr/drivers/entropy/entropy_alp_gd32_trng.c) pulls bytes over the
+# supervisor bridge (gd32g553_trng_read, protocol cmd TRNG_READ).
+#
+# Point `zephyr,entropy` at this node so Zephyr's CSPRNG (and through it the
+# mbedTLS PSA core) seeds from the GD32 instead of TEST_RANDOM_GENERATOR.
+
+description: GD32G553 supervisor TRNG (entropy over the supervisor bridge)
+
+compatible: "alp,gd32-trng"
+
+include: base.yaml

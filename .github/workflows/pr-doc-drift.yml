@@ -51,6 +51,10 @@ on:
     branches: [main, dev]
   push:
     branches: [main, dev]
+  # Required-context shape (alp-sdk#2972): without `merge_group:` a queued PR
+  # would wait forever on `doc-drift · all` (#1415). The gate job carries no
+  # `if:`, so it RUNS on the queue ref and checks the merged tree.
+  merge_group:
   workflow_dispatch:
 
 concurrency:
@@ -75,7 +79,7 @@ jobs:
         timeout-minutes: 5
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         timeout-minutes: 5
         with:
           python-version-file: .python-version
@@ -106,3 +110,30 @@ jobs:
 
       - name: "CC3501E protocol version policy (ADR 0033 Version ledger)"
         run: python3 scripts/check_protocol_version_policy.py
+
+  # Static-named summary: the ONE context meant to be required on `dev`
+  # (#2972). `if: always()` so it reports even when `doc-drift` fails or is
+  # cancelled; the gate job has no path filter, so `skipped` is never a
+  # legitimate outcome here and is treated as a failure.
+  summary:
+    name: doc-drift · all
+    needs: [doc-drift]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Compute verdict from doc-drift's result
+        env:
+          DOC_DRIFT_RESULT: ${{ needs.doc-drift.result }}
+        run: |
+          set -euo pipefail
+          echo "doc-drift.result=${DOC_DRIFT_RESULT}"
+          case "${DOC_DRIFT_RESULT}" in
+            success)
+              echo "PASS: doc-drift ran and succeeded"
+              ;;
+            *)
+              echo "::error::doc-drift concluded '${DOC_DRIFT_RESULT}'"
+              exit 1
+              ;;
+          esac

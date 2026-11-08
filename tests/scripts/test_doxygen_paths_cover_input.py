@@ -50,10 +50,16 @@ def _doxyfile_inputs() -> list[str]:
 
 
 def _workflow_paths() -> list[str]:
-    # `on:` parses as the YAML boolean True, so accept either spelling.
+    # The path list lives in the `detect` job's dorny/paths-filter (#2972), not
+    # in `on.<trigger>.paths`: the trigger is unfiltered so the required
+    # `doxygen · all` summary reports on every PR.
     data = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
-    triggers = data.get("on", data.get(True))
-    return list(triggers["pull_request"]["paths"])
+    step = next(
+        s
+        for s in data["jobs"]["detect"]["steps"]
+        if s.get("uses", "").startswith("dorny/paths-filter@")
+    )
+    return list(yaml.safe_load(step["with"]["filters"])["relevant"])
 
 
 def _pattern_to_regex(pattern: str) -> re.Pattern[str]:
@@ -130,13 +136,9 @@ def test_paths_filter_detector_catches_a_seeded_gap() -> None:
     )
 
 
-def test_superpowers_is_excluded_from_both_sides() -> None:
-    """The Doxyfile excludes docs/superpowers/*; the trigger should agree.
-
-    Not a correctness requirement -- a spurious run is harmless -- but keeping
-    them aligned stops internal design notes from spending CI minutes.
-    """
-    assert not _covered("docs/superpowers/plan.md", _workflow_paths()), (
-        "docs/superpowers/** is EXCLUDE_PATTERNS in the Doxyfile, so it should "
-        "not trigger the workflow either"
-    )
+def test_detect_filter_has_no_negated_entry() -> None:
+    """dorny/paths-filter ORs its entries, so a `!docs/superpowers/**` entry
+    would match every OTHER file and mark every PR relevant (#2972). The
+    Doxyfile's superpowers exclusion therefore cannot be mirrored here; a
+    spurious run on docs/superpowers/** is harmless."""
+    assert not [p for p in _workflow_paths() if p.startswith("!")]

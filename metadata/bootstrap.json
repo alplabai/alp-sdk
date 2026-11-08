@@ -6,6 +6,9 @@
     "requirementsPath": "zephyr/scripts/requirements.txt",
     "pythonMinVersion": "3.12"
   },
+  "halAlif": {
+    "version": "v2.3.0"
+  },
   "venv": {
     "dirName": ".venv",
     "posixBinDir": "bin",
@@ -16,6 +19,7 @@
     "macos": ["git", "cmake", "python3", "ninja"],
     "windows": ["git", "cmake", "python", "ninja"],
     "pythonMinVersion": "3.10",
+    "cmakeMinVersion": "3.28",
     "install": {
       "linux": {
         "apt": {

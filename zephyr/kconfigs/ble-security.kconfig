@@ -101,21 +101,34 @@ config ALP_SDK_SECURITY_V2N_TRNG_ENTROPY
 	default y if ALP_SDK_V2N_SUPERVISOR && ALP_SDK_SECURITY
 	depends on ALP_SDK_V2N_SUPERVISOR && ALP_SDK_SECURITY
 	help
-	  Compile the mbedtls_hardware_poll() implementation in
-	  src/backends/security/zephyr_drv.c that drains true-random bytes
-	  from the GD32G553 supervisor's NIST SP800-90B pre-certified
-	  TRNG.  The mbedtls profile (metadata/library-profiles/mbedtls/
-	  mbedtls_config.h) sets MBEDTLS_NO_PLATFORM_ENTROPY, so
-	  mbedtls's entropy module asks the SDK to supply the platform
-	  entropy poll callback; this option provides that symbol on
-	  V2N.  The portable alp_random_bytes() transparently benefits
-	  -- PSA Crypto's DRBG seeds from this source the first time
-	  it's drawn from.  No effect on alp_random_bytes's public
-	  contract (still ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_IO /
-	  ALP_ERR_INVAL); the GD32 dependency is invisible to apps.
-	  Off-V2N builds leave this OFF -- mbedtls picks whatever
-	  hardware_poll the active vendor's HAL registered, or falls
-	  back to ALP_ERR_IO on alp_random_bytes if nothing is wired.
+	  Build the Zephyr entropy driver (zephyr/drivers/entropy/
+	  entropy_alp_gd32_trng.c, compatible "alp,gd32-trng") over the GD32G553
+	  supervisor's NIST SP800-90B pre-certified TRNG.  The V2N/V2M CM33
+	  boards choose it as zephyr,entropy, and Zephyr's mbedTLS
+	  (modules/mbedtls/zephyr_entropy.c, mbedtls_platform_get_entropy())
+	  reads that chosen device -- so the PSA RNG seeds from the GD32 TRNG,
+	  CONFIG_CSPRNG_ENABLED becomes y, and the weak-RNG check
+	  (ALP_SDK_MBEDTLS_WEAK_RNG) passes without
+	  CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY.  (Zephyr 4.4.1's mbedTLS never calls
+	  mbedtls_hardware_poll(), so that hook is not used.)
+
+	  The bytes come over the supervisor bridge, thread context only; the
+	  first request performs the lazy GD32 handshake.  With this off, the
+	  chosen node is inert and the build has no entropy driver.
+
+	  No effect on alp_random_bytes's public contract (still ALP_OK /
+	  ALP_ERR_NOT_READY / ALP_ERR_IO / ALP_ERR_INVAL).
+
+config ENTROPY_ALP_GD32_TRNG
+	bool
+	default y
+	depends on ENTROPY_GENERATOR
+	depends on DT_HAS_ALP_GD32_TRNG_ENABLED
+	depends on ALP_SDK_SECURITY_V2N_TRNG_ENTROPY
+	select ENTROPY_HAS_DRIVER
+	help
+	  GD32 supervisor TRNG entropy driver; see
+	  ALP_SDK_SECURITY_V2N_TRNG_ENTROPY.
 
 config ALP_SDK_SECURITY_SE_CRYPTOCELL
 	bool "Route <alp/security.h> to the Alif SE CryptoCell (hardware crypto)"

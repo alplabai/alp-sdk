@@ -104,6 +104,10 @@ struct spi_dw_data {
 	uint8_t _unused;
 #ifdef CONFIG_SPI_DW_ALIF_USE_DMA
 	struct k_sem dma_sem;
+	/* Set per transfer before the controller is enabled: true only when THIS transfer
+	 * runs on DMA (a DMA-capable node also runs short/async/slave transfers on the
+	 * interrupt path, whose errors must complete through completed()). */
+	bool xfer_uses_dma;
 	int dma_cb_status;
 	struct spi_dw_dma_state dma_state;  /* DMA transfer state tracking */
 #endif /* CONFIG_SPI_DW_ALIF_USE_DMA */

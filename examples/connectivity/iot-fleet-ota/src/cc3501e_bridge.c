@@ -104,8 +104,10 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	 * on that alone -- go through the PING path below, which still ends in
 	 * cc3501e_reset() if the chip turns out to be silent. */
 	const bool wifi_unknown = alp_gpio_read(wifi_en, &wifi_was_high) != ALP_OK;
-	if (wifi_was_high) {
-		/* Latch the level in DR first so the direction change cannot glitch it low. */
+	if (wifi_was_high || wifi_unknown) {
+		/* Latch the level in DR first so the direction change cannot glitch it low.  An
+		 * unknown level is latched high too: DR bit 5 = 0 would otherwise drop the supply
+		 * of a chip that is already running the moment the pin becomes an output. */
 		aen_wifi_en_latch_high();
 	}
 	(void)alp_gpio_configure(wifi_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);

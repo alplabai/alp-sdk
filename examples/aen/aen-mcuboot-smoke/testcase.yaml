@@ -13,7 +13,7 @@
 # relative key path cannot be fixed in-repo -- MCUboot resolves it against
 # WEST_TOPDIR, not the alp-sdk module root -- see the README + the file's own
 # comment) and the documented invocation passes an absolute
-# -DSB_CONF_FILE=<abs>/alp-sdk/zephyr/sysbuild/aen/sysbuild.conf to supply it.
+# -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE=<abs>/alp-sdk/keys/... to supply it.
 # Neither testcase.yaml `extra_args` nor `sysbuild: true` can synthesize an
 # absolute CI-runner path, so this entry builds with sysbuild's OWN
 # auto-loaded app-local sysbuild.conf instead.  That does NOT hard-fail

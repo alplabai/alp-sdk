@@ -83,7 +83,10 @@ alp_status_t alp_jpeg_encode(alp_jpeg_t                  *h,
                              size_t                       out_cap,
                              size_t                      *out_len)
 {
-	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+	if (h == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (!alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
 	alp_status_t rc;

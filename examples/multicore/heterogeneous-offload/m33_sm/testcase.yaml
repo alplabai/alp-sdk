@@ -8,19 +8,21 @@ sample:
   name: heterogeneous-offload-m33_sm
   description: |
     Heterogeneous-compute offload demo: the M33-SM core (Zephyr)
-    offloads a workload submitted by the A55 cluster (Yocto) via
-    `<alp/rpc.h>`.  This testcase covers ONLY the Zephyr/M33-SM
-    half; the A55 side is bitbake-only.
+    serves the `fft` method of an A55 (Yocto) `alp_rpc_call()` over raw
+    OpenAMP (rpmsg-v2n's bring-up + AMP beacon, not `<alp/rpc.h>`).  This
+    testcase covers ONLY the Zephyr/M33-SM half, build-only on V2N/V2M;
+    the A55 side is bitbake-only.
 
 tests:
-  alp_sdk.examples.heterogeneous_offload.native_sim:
+  alp_sdk.examples.heterogeneous_offload.m33_sm:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
-      - native_sim/native/64
+      - alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33
+      - alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33
     tags:
       - alp-sdk
       - example
       - heterogeneous
-      - rpc
-      - mproc
+      - rpmsg
+      - v2n
     build_only: true
-    extra_args: EXTRA_CONF_FILE=generated/alp.conf CONFIG_ALP_SDK_RPC=y

@@ -81,3 +81,47 @@ ZTEST(dma_pl330_sg_validate, test_zero_count_against_nonempty_chain_rejects)
 
 	zassert_false(dma_pl330_sg_chain_matches(&b0, 0), "count 0 must not match a non-empty chain");
 }
+
+/* A later block with DECREMENT must be rejected, not only the head block. */
+ZTEST(dma_pl330_sg_validate, test_addr_adj_checked_on_every_block)
+{
+	struct dma_block_config b1 = {
+		.source_addr_adj = DMA_ADDR_ADJ_INCREMENT,
+		.dest_addr_adj   = DMA_ADDR_ADJ_DECREMENT,
+	};
+	struct dma_block_config b0 = {
+		.source_addr_adj = DMA_ADDR_ADJ_INCREMENT,
+		.dest_addr_adj   = DMA_ADDR_ADJ_NO_CHANGE,
+		.next_block      = &b1,
+	};
+
+	zassert_false(dma_pl330_sg_addr_adj_supported(&b0, 2), "DECREMENT on block 1 must be rejected");
+	zassert_true(dma_pl330_sg_addr_adj_supported(&b0, 1),
+	             "head block alone (INCREMENT/NO_CHANGE) is supported");
+
+	b1.dest_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
+	zassert_true(dma_pl330_sg_addr_adj_supported(&b0, 2),
+	             "INCREMENT/NO_CHANGE on every block is supported");
+}
+
+/* M2P: the peripheral (dst, NO_CHANGE) must not move between chunks; the memory side walks. */
+ZTEST(dma_pl330_sg_validate, test_next_chunk_addr_m2p_dst_fixed)
+{
+	zassert_equal(dma_pl330_next_chunk_addr(0x20000000ULL, 65536U, DMA_ADDR_ADJ_INCREMENT),
+	              0x20010000ULL,
+	              "memory source advances");
+	zassert_equal(dma_pl330_next_chunk_addr(0x4A000010ULL, 65536U, DMA_ADDR_ADJ_NO_CHANGE),
+	              0x4A000010ULL,
+	              "peripheral FIFO destination stays fixed");
+}
+
+/* P2M: mirrored. */
+ZTEST(dma_pl330_sg_validate, test_next_chunk_addr_p2m_src_fixed)
+{
+	zassert_equal(dma_pl330_next_chunk_addr(0x4A000020ULL, 512U, DMA_ADDR_ADJ_NO_CHANGE),
+	              0x4A000020ULL,
+	              "peripheral data register source stays fixed");
+	zassert_equal(dma_pl330_next_chunk_addr(0x20000000ULL, 512U, DMA_ADDR_ADJ_INCREMENT),
+	              0x20000200ULL,
+	              "memory destination advances");
+}
