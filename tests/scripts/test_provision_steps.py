@@ -9,6 +9,7 @@ Board states replayed here:
 
 from __future__ import annotations
 
+import binascii
 import gzip
 import hashlib
 import json
@@ -103,6 +104,8 @@ def _gd32_fw(tmp_path):
     d.mkdir()
     for i, (name, _a, _k) in enumerate(steps.GD32_IMAGES):
         (d / name).write_bytes(bytes([i + 1]) * 32)
+    # a release image embeds its build-id (cmake/gen_build_id.cmake); Board answers the same one
+    (d / "slot-a.bin").write_bytes(b"\x03" * 16 + b"0.3.1+d53e3d90a19973" + b"\x00" * 8)
     return d
 
 
@@ -116,10 +119,34 @@ def _ctx(tmp_path, bundle=None, **kw):
                      ledger_root=kw.pop("ledger_root", _ledger(tmp_path)), **kw)
 
 
+# Pinned reply bytes (i2ctransfer read of the bridge, CRC-16/CCITT-FALSE little-endian over
+# status+payload). OTA_GET_STATE: bench bytes from 2026W38-0009 (status 0, state 0, active 0,
+# pending 0xff, boot_count 1, err 0). GET_BUILD_ID: status 0 + "0.3.1+d53e3d90a19973", CRC
+# 0x43ba hand-derived with binascii.crc_hqx (poly 0x1021, init 0xFFFF), independent of
+# lt._crc16_ccitt_false; test_pinned_bridge_vectors_agree_with_an_independent_crc re-derives both.
+OTA_STATE_REPLY = bytes.fromhex("000000ff0100005d8d")
+BUILD_ID_REPLY = bytes.fromhex("00302e332e312b6435336533643930613139393733ba43")
+
+
+def _hex(b: bytes) -> str:
+    return " ".join(f"0x{x:02x}" for x in b) + "\n"
+
+
+def _bridge_reply(payload: bytes) -> str:
+    """Reply for a Board whose active slot / build-id a test changed: the pinned vector when it
+    is the one pinned, else the same frame with the CRC from the independent implementation."""
+    body = b"\x00" + payload
+    crc = binascii.crc_hqx(body, 0xFFFF)
+    return _hex(body + bytes((crc & 0xFF, crc >> 8)))
+
+
 class Board(FakeLinux):
     """A stateful Linux target: block devices are byte strings (md5 via files),
     I2C registers live in `regs`, EEPROM array and identity header are modelled,
     and every write command mutates the model so re-probes see the result."""
+
+    gd32_active = 0                              # OTA_GET_STATE `active`: 0 = slot A
+    gd32_build_id = "0.3.1+d53e3d90a19973"       # GET_BUILD_ID (the bench's good build)
 
     def __init__(self, xspi_bl2=b"", xspi_fip=b"", boot0=b"", emmc=b"", act_0x10=0x08,
                  lock=0xFD, rail_on_xspi=None, root="mmcblk1p2"):
@@ -173,6 +200,14 @@ class Board(FakeLinux):
             return 0, "70: 70 -- -- -- -- -- -- --\n"
         if cmd.startswith("i2ctransfer -f -y 8 w4@0x70 0x00 0x01 "):
             return 0, "0x00 0x00 0x0d 0x00 0x9c 0xf2\n"   # GET_VERSION: OK, protocol 0.13.0 (bench bytes)
+        if cmd.startswith("i2ctransfer -f -y 8 w4@0x70 0x00 0x02 "):
+            if self.gd32_build_id == "0.3.1+d53e3d90a19973":
+                return 0, _hex(BUILD_ID_REPLY)                                # GET_BUILD_ID
+            return 0, _bridge_reply(self.gd32_build_id.encode())
+        if cmd.startswith("i2ctransfer -f -y 8 w4@0x70 0x00 0xf5 "):
+            if self.gd32_active == 0:
+                return 0, _hex(OTA_STATE_REPLY)                               # OTA_GET_STATE
+            return 0, _bridge_reply(bytes((0, self.gd32_active, 0xFF, 7, 0, 0)))
         if cmd.startswith("sleep"):
             return 0, ""
         if m := re.match(r"i2ctransfer -y 0 (.*)$", cmd):
@@ -404,6 +439,29 @@ def test_refuses_tier_and_override_is_recorded(tmp_path):
     assert ctx.facts["dram_tier_check"].startswith("overridden")
 
 
+def test_preflight_tags_a_bundle_without_a_signature_unsigned(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.bundle.pop("signature", None)
+    ev = steps.Preflight().run(ctx).evidence
+    assert ev["rootfs_bundle_version"].startswith("unsigned:")
+    ctx.bundle["signature"] = {"key_id": "test"}
+    ev = steps.Preflight().run(ctx).evidence
+    assert not ev["rootfs_bundle_version"].startswith("unsigned:")
+
+
+def test_eeprom_manifest_refuses_before_writing_when_a_manifest_is_committed(tmp_path):
+    board = Board(xspi_bl2=BL2, xspi_fip=FIP)
+    ctx = _ctx(tmp_path, bench=_bench(), linux=board, execute=True)
+    ctx.unit_dir.mkdir(parents=True, exist_ok=True)
+    (ctx.unit_dir / f"{SERIAL}.manifest.bin").write_bytes(b"\x11" * 128)
+    before = bytes(board.array)
+    res = steps.run_steps(ctx, only=["eeprom_manifest"])
+    assert res[-1].status == "failed" and "--replace-identity" in res[-1].detail
+    assert bytes(board.array) == before                       # the EEPROM was never touched
+    assert not any("@0x50" in c and "|| exit 2" in c for c in board.commands)
+    assert (ctx.unit_dir / f"{SERIAL}.manifest.bin").read_bytes() == b"\x11" * 128
+
+
 def test_uboot_dram_banner_is_bucketed(tmp_path):
     ctx = _ctx(tmp_path)
     ok, _ = steps.tier_gate(ctx, 3994)            # "DRAM:  3.9 GiB" on a 4 GiB unit
@@ -571,6 +629,8 @@ def test_gd32_probe_discovers_the_host_when_only_starts_at_gd32_flash(tmp_path, 
     probe = FakeProbe(memory={a: (fw / n).read_bytes() for n, a, _k in steps.GD32_IMAGES})
     probe.env = {}
     monkeypatch.setattr(lt, "gd32_bridge_version", lambda t, bus, addr=0x70: (0, 14, 0))   # no real ssh
+    monkeypatch.setattr(lt, "gd32_ota_state", lambda t, bus, addr=0x70: {"active": 0})
+    monkeypatch.setattr(lt, "gd32_build_id", lambda t, bus, addr=0x70: "0.3.1+d53e3d90a19973")
     ctx = _ctx(tmp_path, bench=_bench(console=_login_console(), probe=probe), gd32_fw=fw, execute=True)
     assert isinstance(steps.Gd32Flash().probe(ctx), steps.Satisfied)
     assert probe.env == {"ALP_PROVISION_HOST": "10.0.0.2"}
@@ -808,7 +868,7 @@ def test_clkgen_verify_pass(tmp_path):
     r = res[-1]
     assert r.name == "clkgen_verify" and r.status == "done", r.detail
     assert r.evidence["clkgen_i2c_addr"] == "0x69"
-    assert "SE2 24.576 MHz (0x1f=0xc7, 0x24=0x8f)" in r.detail
+    assert "0x1f=0xc7, 0x24=0x8f" in r.detail
     assert r.evidence["clkgen_otp_raw"] == " ".join(f"{b:02x}" for b in image)
 
 
@@ -967,6 +1027,7 @@ def test_lock_refused_when_any_step_failed_in_the_state(tmp_path):
 
 def _record_with_bundle_facts(tmp_path, flash_status):
     ctx = _ctx(tmp_path, execute=True)
+    ctx.bundle["signature"] = {"key_id": "test"}      # a release-signed bundle: no `unsigned:` tag
     cat = dict(CATALOGUE["keys"], **{k: {"group": "firmware", "source": "", "mode": "auto",
                                         "ship_required": False}
                                     for k in ("bl2_sha256", "rootfs_bundle_version")})
@@ -1004,6 +1065,7 @@ def _record_after_supersession(tmp_path, old_sha, version="som-9.9.9", groups=No
     ctx.state = {"bundle_sha256": "cur", "steps": cur_steps or {},
                  "superseded": groups(grp) if groups else [grp(old_sha)]}
     ctx.bundle["release_version"] = version
+    ctx.bundle["signature"] = {"key_id": "test"}      # a release-signed bundle: no `unsigned:` tag
     steps.run_steps(ctx, only=["record"])
     u = ctx.unit_dir / f"{SERIAL}.unit.yaml"
     return u.read_text(encoding="utf-8") if u.exists() else ""
@@ -1086,7 +1148,7 @@ def test_record_superseded_build_dir_provenance_still_blocks_ship(tmp_path):
     f.write_text(text, encoding="utf-8")
     unit = ledger_out.read_unit_yaml(f)
     assert unit["disposition"] == "bench-only"       # record's build-dir default
-    assert any("unsigned --build-dir" in r for r in ledger_out.ship_check({**unit, "disposition": "ship"}, {}))
+    assert any("unsigned bundle" in r for r in ledger_out.ship_check({**unit, "disposition": "ship"}, {}))
 
 
 

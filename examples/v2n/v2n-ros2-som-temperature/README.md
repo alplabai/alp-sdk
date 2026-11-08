@@ -37,6 +37,15 @@ sensors today, see [`v2n-m1-ros-perception`](../v2n-m1-ros-perception/).)
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+### Yocto image or colcon in the Yocto SDK
+
 Two ways, same `CMakeLists.txt`:
 
 1. **Yocto image** -- `MACHINE=e1m-v2n101-a55 bitbake alp-image-edge`

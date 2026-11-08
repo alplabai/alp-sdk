@@ -17,8 +17,9 @@ LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=787726818c896f394f6627ab59d98d69
 DEPENDS = "alp-sdk"
 
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
-SRCREV  = "${AUTOREV}"
-PV      = "0.6.0"
+require recipes-core/alp-sdk/alp-sdk-version.inc
+# Links the per-machine libalp_sdk.so, so must not be shared across machines (#2850).
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 # Rebased v0.6 path: AEN-family demos moved under examples/aen/.
 S = "${WORKDIR}/git/examples/aen/edgeai-vision-aen"

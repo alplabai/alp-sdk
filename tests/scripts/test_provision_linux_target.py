@@ -257,9 +257,13 @@ def test_emmc_boot_write_verify(tmp_path):
     img = tmp_path / "fip.bin"
     img.write_bytes(b"\x03" * 1000)
     good = md5(img.read_bytes())
-    t, fake = target([("boot0/size", "8192\n"), ("md5sum", f"{good}  -\n"), ("force_ro|rm -f|^dd ", "")])
+    t, fake = target([("boot0/size", "8192\n"), ("md5sum", f"{good}  -\n"),
+                      ("force_ro|rm -f|^dd |drop_caches", "")])
     assert lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, 0x300) == good
     assert "dd if=/tmp/fip.bin of=/dev/mmcblk1boot0 bs=512 seek=768 && sync" in fake.commands
+    # the readback must come from the media: caches dropped between the write and the md5
+    md5_cmd = "dd if=/dev/mmcblk1boot0 bs=1 skip=393216 count=1000 2>/dev/null | md5sum"
+    assert fake.commands.index(lt.DROP_CACHES) < fake.commands.index(md5_cmd)
     assert "dd if=/dev/mmcblk1boot0 bs=1 skip=393216 count=1000 2>/dev/null | md5sum" in fake.commands
 
 
@@ -277,9 +281,10 @@ def test_rootfs_write_verify_streams_and_compares(tmp_path):
     raw = bytes(range(256)) * 64
     wic = tmp_path / "rootfs.wic.gz"
     wic.write_bytes(gzip.compress(raw))
-    t, fake = target([("gunzip", ""), ("rereadpt", ""), ("md5sum", f"{md5(raw)}  -\n")])
+    t, fake = target([("gunzip", ""), ("rereadpt", ""), ("drop_caches", ""), ("md5sum", f"{md5(raw)}  -\n")])
     assert lt.rootfs_write_verify(t, "/dev/mmcblk1", wic)["rootfs_md5"] == md5(raw)
     assert fake.commands[0] == "gunzip -c | dd of=/dev/mmcblk1 bs=4M && sync"
+    assert fake.commands[-2] == lt.DROP_CACHES            # readback from the media, not the page cache
     assert fake.commands[-1] == f"dd if=/dev/mmcblk1 bs=4096 skip=0 count={len(raw) // 4096} 2>/dev/null | md5sum"
 
 
@@ -841,7 +846,8 @@ def test_emmc_boot1_write_accepts_an_image_ending_exactly_at_the_uboot_env(tmp_p
     img = tmp_path / "fip.bin"
     img.write_bytes(bytes([3]) * 1024)
     good = md5(img.read_bytes())
-    t, fake = target([("boot0/size", "16384\n"), ("md5sum", f"{good}  -\n"), ("force_ro|rm -f|^dd ", "")])
+    t, fake = target([("boot0/size", "16384\n"), ("md5sum", f"{good}  -\n"),
+                      ("force_ro|rm -f|^dd |drop_caches", "")])
     sector = gates.BOOT_ENV_OFFSET // 512 - 2           # 2 sectors * 512 B = the image, ends AT the env
     assert lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, sector) == good
     assert any(c.startswith("dd if=") and " of=" in c for c in fake.commands)
@@ -1029,10 +1035,12 @@ def test_gd32_boot_config_reply_parsing():
     assert lt.gd32_parse_boot_config(_bc_reply(1)) == 1
     with pytest.raises(BenchError, match="CRC mismatch"):
         lt.gd32_parse_boot_config(_bc_reply(1, bad_crc=True))
+    crc = lt._crc16_ccitt_false(bytes((6,)))    # the released v0.3.0 error frame: [status][crc over status] + padding
+    nosupport = _hx(bytes((6, crc & 0xFF, crc >> 8, 0, 0, 0, 0)))
     with pytest.raises(BenchError, match="status 0x06"):
-        lt.gd32_parse_boot_config(_bc_reply(0, status=6))
+        lt.gd32_parse_boot_config(nosupport)
     with pytest.raises(BenchError, match=r"NOSUPPORT.*single-bank.*slot B.*slot A"):
-        lt.gd32_parse_boot_config(_bc_reply(0, status=6))
+        lt.gd32_parse_boot_config(nosupport)
 
 
 def test_gd32_sd_out_flag_set_keeps_other_bits_and_waits_for_the_commit(monkeypatch):

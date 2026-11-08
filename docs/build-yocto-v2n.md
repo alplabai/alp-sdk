@@ -60,6 +60,12 @@ MACHINE=e1m-v2n101-a55 bitbake alp-image-edge
 #  V2N-M1: e1m-v2m101-a55 / e1m-v2m102-a55 / e1m-v2m103-a55)
 ```
 
+Each `e1m-*` machine conf defaults `ALP_SDK_SOC ?= "ALP_SOC_..."` (V2N and
+V2N-M1: `ALP_SOC_RENESAS_RZV2N_N44`), so the plain-`bitbake` flow above still
+builds libalp_sdk with the right SoC capability profile
+(`ALP_SOC_REF_STR`, `ALP_HAS()`, the UIO/MHU rpc backend). A build plan's
+generated `local.conf` sets the same variable with `?=` and wins.
+
 Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
 - `alp-image-edge-*.wic[.gz]` — full SD/eMMC image (bootloader excluded;
   it's already on xSPI).
@@ -245,48 +251,64 @@ To raise the cap to 1.8 GHz, flip one line in the SoM dtsi
 V2N-family SKUs. Validate your own silicon + thermals before enabling it
 fleet-wide.
 
-## Kernel FIT signing (opt-in scaffolding)
+## Verified kernel boot: signed FIT (opt-in)
+
+> **BENCH-UNVERIFIED.** The U-Boot and the signed kernel FIT build, and the
+> FIT, `bootcmd` and control-dtb key were inspected, but a unit has never
+> booted this way. The failure mode is a **reset loop** (no U-Boot shell, a
+> failed boot resets) that only an external eMMC / FIP reflash recovers: try
+> it on a unit you can reflash from outside.
 
 By default U-Boot loads a **raw** `Image` + dtb from `/boot` and boots them
-with no integrity check. An opt-in builds the kernel instead as a **signed
-`fitImage`** — kernel + dtb in one FIT with an **RSA-2048 / SHA-256**
-signature over the configuration (so the kernel and its dtb are bound
-together). Enable it in `conf/local.conf`:
+with no integrity check. The opt-in builds the kernel as a **signed
+`fitImage`** (kernel + dtb in one FIT, **RSA-2048 / SHA-256** over the
+configuration so the two are bound together) and builds U-Boot to boot and
+verify it. Enable it in `conf/local.conf`:
 
 ```bash
 ALP_FIT_SIGNED = "1"
 require conf/include/alp-fit-signing.inc
 ```
 
-When off (the default) the build is unchanged. When on, the kernel deploys
-`fitImage` signed with a **generated dev key** under `build/alp-fit-keys/`
-(gitignored build dir; dev-only — never ship it).
+When off (the default) the build is unchanged. When on:
 
-> **This is build-side scaffolding only — it is not yet enforced.** Making
-> U-Boot *verify* the FIT before boot (`CONFIG_FIT_SIGNATURE` + the
-> production public key in the FIP's U-Boot dtb + `bootcmd` → `bootm`) means
-> rebuilding and reflashing the bootloader, and choosing the production key
-> custody — a separate, brick-class step tracked in `alp-sdk-internal`. The
-> dev-key fitImage here lets you exercise the signed-image build path now.
->
-> **Caveat — not bootable as-is.** With the flag on the kernel deploys
-> **only** the signed `fitImage` (the raw `Image` is no longer produced), and
-> the current (phase-1) bootloader still `ext4load`s `/boot/Image` + `booti`s
-> it — it does **not** `bootm` a FIT. So the flag validates the signed-*build*
-> path, not a bootable board, and the §4 "Fast dev iteration" copy-`Image`
-> recipe does not apply while it is on. Booting the FIT comes with the
-> phase-2 U-Boot work.
+- the kernel deploys `/boot/fitImage` signed with a **generated dev key**
+  under `build/alp-fit-keys/` (gitignored build dir; never ship it);
+- U-Boot (patch `0018`, `fit-signed.cfg`) loads `/boot/fitImage` from the
+  eMMC and runs `bootm` on the configuration node of the board dtb. The
+  public key is embedded in the control dtb of the U-Boot in the FIP as a
+  `required = "conf"` key, so a FIT that is unsigned or fails verification
+  is not booted, and U-Boot halts at start-up if that key is missing;
+- there is no fallback: no `/boot/Image`, no microSD, no
+  `booti`/`bootz`/`go`/`bootelf`/EFI/network/serial-download/`source`
+  commands, no legacy image format, and no way to interrupt autoboot
+  (`CONFIG_BOOTDELAY=-2`). A boot that fails ends in `reset`;
+- the OpenCV accelerator and codec firmware blobs (`OpenCV_Bin.bin`,
+  `Codec_Bin.bin`) are **not** preloaded, because they would be loaded
+  without a signature check.
+
+The **bootloader (FIP) must be rebuilt and reflashed together with the
+image**: a FIP from a default build still `booti`s `/boot/Image` and finds
+none. With no U-Boot shell, an image that does not verify boot-loops; reflash
+the eMMC from outside the unit.
+
+> **Not a complete secure-boot chain.** The key is a dev key (anyone who can
+> build can sign), TF-A does not verify the FIP, and there is no
+> anti-rollback: an older, validly signed FIT still boots. TF-A trusted boot,
+> the production key custody and anti-rollback are separate, owner-decided
+> steps tracked in `alp-sdk-internal`. The §4 "Fast dev iteration" copy-`Image`
+> recipe does not apply while the flag is on.
 
 ## Dev-kit package feed (opkg)
 
-Dev boards can take `alp-sdk`, `alp-sdk-dev` and the example packages without a
+Dev boards can take `alp-sdk` and `alp-sdk-dev` without a
 reflash, from a **signed opkg feed** published per image release line and per
 machine. **Dev kits only: this is not a field-update channel.** Field devices
 stay on image-based A/B OTA (Mender).
 
-**Adding the feed.** An image built with
+**Adding the feed.** An `alp-image-edge` image built with
 `require conf/distro/include/alp-devkit-feed.inc` (in `local.conf`) already has
-it: opkg with GPG and HTTPS support, `/etc/opkg/alp-devkit-feed.conf`
+it (`alp-image-prod` never does: it fails the build if the fragment is set): opkg with GPG and HTTPS support, `/etc/opkg/alp-devkit-feed.conf`
 (`option check_signature 1`) and the Alp feed public key
 (`keys/alp_devkit_feed_signing.pub.asc`, fingerprint
 `2B7807E20B75B471BF88FD7AC9AB032782D3143B`) in the opkg keyring. The fragment also switches the build to the ipk
@@ -306,7 +328,7 @@ unsigned fallback.
 `<base>/<ipk>` by name under one base URL, and a release's assets are a flat
 namespace, so the feed is **one release per line and machine** whose assets are
 a single merged `Packages`, `Packages.gz`, `Packages.sig` and the ipks
-(`all` + the machine arch); the base URL is
+(the allowlisted packages of `all` + the machine arch); the base URL is
 `https://github.com/alplabai/alp-sdk/releases/download/<tag>`. The release is
 refreshed in place, so the URL stays stable. Each release also carries
 `<tag>.tar.gz`, the same files for hosts that cannot use the URL
@@ -316,9 +338,17 @@ as a base: unpack it and use `src/gz alp-devkit file:///path/to/feed` in a
 **ABI.** Keep the image and the feed on the same line. While the SDK is 0.x the
 minor is part of the soname (`libalp_sdk.so.0.17`), so an upgrade cannot load an
 incompatible library into an app linked against the old one: moving to the next
-line means a new image, not `opkg upgrade`. The feed holds only our own layers'
-packages (`all` and the machine arch), not the toolchain's libraries, so it
-relies on the image having been built from the same layers and toolchain.
+line means a new image, not `opkg upgrade`. The feed publishes only an
+allowlist of our packages (`alp-sdk`, `alp-sdk-dev`,
+`alp-devkit-feed-config`) from the `all` and machine-arch dirs; it carries no
+tune-arch (`cortexa55`/`aarch64`) packages and no poky/BSP packages. It can
+therefore only **upgrade packages already in the image** whose dependencies are
+already installed: a package that adds a new dependency, or `alp-sdk-dev` when the
+image lacks its tune-arch RDEPENDS, cannot be resolved from it. The example
+packages are not published: they are tune-arch until their recipes become
+MACHINE_ARCH (#2850 item 2). The packager fails when an allowlisted package is
+missing from the index, a stanza has no `SHA256sum:`, an ipk name falls outside
+`[A-Za-z0-9._-]`, or there are more assets than a GitHub release allows (1000).
 
 **Building and signing (release builder only).** Signing uses Yocto's
 `sign_package_feed` (`PACKAGE_FEED_SIGN`, `PACKAGE_FEED_GPG_NAME`,
@@ -329,7 +359,8 @@ never forced to sign. The private key lives only in `alp-sdk-internal/signing/`
 and in the internal runner's secret store; signing never runs in public
 Actions. After `bitbake alp-image-edge package-index`,
 `scripts/package_devkit_feed.sh --ipk-dir tmp/deploy/ipk --machine <MACHINE> --tag <tag> --out <dir>`
-merges the arches into the flat feed, signs it and writes the tarball; the
+merges the arches into the flat feed, signs it, verifies the signature against the
+committed public key and writes the tarball (`--out` must be empty or new); the
 internal `devkit-feed` workflow uploads the result to the release.
 
 ## Notes

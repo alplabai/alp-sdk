@@ -39,6 +39,8 @@ overrides the board's `default n` and still pulls `CONFIG_I2C` in behind it
 
 ## Build
 
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); the commands below only work from an alp-sdk checkout. For E1M-AEN803 use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`.
+
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-temp-sensor
 ```

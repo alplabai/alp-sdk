@@ -100,6 +100,12 @@ PMIC's `EVENT_00` status register over BRD_I2C.
 
 ## 2. SWD probe attach
 
+> On the E1M EVK 2641-R3 the on-board RP2040 (`U55`, CMSIS-DAP) is the
+> primary debug probe and J-Link is the optional alternative
+> ([`aen-rp2040-debug-probe.md`](aen-rp2040-debug-probe.md)). The RP2040 path
+> is not bench-verified and its attach steps are TBD; the J-Link steps below
+> are the proven ones.
+
 1. Wire the SWD probe to the board's debug header
    (SWDIO/SWCLK/nRST/GND).  Power the board (probe stays
    unpowered; standard 1.8/3.3 V level convention applies).
@@ -214,7 +220,8 @@ SoM preset at `metadata/e1m_modules/<SKU>.yaml` automatically).
    python3 scripts/gen_example_alp_conf.py examples/peripheral-io/gpio-button-led
    west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
        examples/peripheral-io/gpio-button-led \
-       --sysbuild -- -Dgpio-button-led_EXTRA_CONF_FILE=generated/alp.conf -DSB_CONF_FILE=$PWD/zephyr/sysbuild/aen/sysbuild.conf
+       --sysbuild -- -Dgpio-button-led_EXTRA_CONF_FILE=generated/alp.conf -DSB_CONF_FILE=$PWD/zephyr/sysbuild/aen/sysbuild.conf \
+       -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="$PWD/keys/mcuboot_shared_dev_ecdsa_p256.pem"
    west flash    # REFUSES (alp-sdk#2274) -- see docs/aen-provisioning.md §0.5.
    ```
 
@@ -696,7 +703,7 @@ Once §6's runbook passes:
   PHY-reset-release.
 
 More patterns in [`docs/troubleshooting.md`](troubleshooting.md);
-ask on [community.alplab.ai](https://community.alplab.ai/) for
+open a [GitHub issue](https://github.com/alplabai/alp-sdk/issues) for
 anything not covered here.
 
 ## See also

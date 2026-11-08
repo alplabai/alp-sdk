@@ -204,9 +204,11 @@ measures, and running this app faster (cache-on/DTCM) than every other
 AEN801 bench app risks reproducing a different failure than the one this
 app exists to characterise.
 
+For E1M-AEN803 use `alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` and the matching `boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay`.
+
 ## Build
 
-Standalone Zephyr app (no `alp_project.py` `board.yaml` flow), same shape
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout, same shape
 as its `aen-cc3501e-*` siblings:
 
 ```

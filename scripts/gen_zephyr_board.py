@@ -674,6 +674,12 @@ def _aen_check_extents(
         prev_label, prev_end = label, end
 
 
+# Global SRAM0, identical for both M55 cores: Alif DFP AE822FA0E5597
+# soc_features.h SOC_FEAT_BULK_SRAM0_BASE / SOC_FEAT_BULK_SRAM0_SIZE.
+_AEN_SRAM0_BASE = 0x02000000
+_AEN_SRAM0_SIZE = 0x00400000
+
+
 def _aen_check_map_overlaps(
     memory_map: "list[dict[str, Any]]", mram_base: int, total_kib: int,
 ) -> None:
@@ -716,6 +722,23 @@ def _aen_check_map_overlaps(
     ]
     limit = mram_base + total_kib * 1024
     aperture = (mram_base, limit)
+    # RAM-class rows (e.g. the `sram_ipc` IPC carve-out) are not App MRAM:
+    # they are bounds- and overlap-checked against global SRAM0 instead.
+    sram = [row for row in placed
+            if _AEN_SRAM0_BASE <= row[1] < _AEN_SRAM0_BASE + _AEN_SRAM0_SIZE]
+    for name, base, size_kib in sram:
+        end = base + size_kib * 1024
+        if end > _AEN_SRAM0_BASE + _AEN_SRAM0_SIZE:
+            raise ZephyrBoardEmitError(
+                f"AEN memory_map region {name!r} spans "
+                f"0x{base:x}..0x{end:x}, past the end of SRAM0 "
+                f"(0x{_AEN_SRAM0_BASE:x} + 0x{_AEN_SRAM0_SIZE:x})")
+    sram_sorted = sorted(sram, key=lambda r: r[1])
+    for (a_name, a_base, a_kib), (b_name, b_base, _b) in zip(sram_sorted, sram_sorted[1:]):
+        if b_base < a_base + a_kib * 1024:
+            raise ZephyrBoardEmitError(
+                f"AEN memory_map SRAM0 regions {a_name!r} and {b_name!r} overlap")
+    placed = [row for row in placed if row not in sram]
     for name, base, size_kib in placed:
         end = base + size_kib * 1024
         if base < mram_base or end > limit:
@@ -818,6 +841,26 @@ def _aen_missing_region_message(
         "preset's `memory_map:` is incomplete; add the region, or drop the "
         "per-core `<role>_slot0` windows to fall back to the stock "
         "symmetric two-slot layout")
+
+
+_AEN_NOT_OWNER_LINES = [
+    '\t\t\t\tstatus = "disabled"; /* owned by the other M55 core (#2984) */',
+]
+
+
+def _aen_unowned_partitions(
+    memory_map: "list[dict[str, Any]] | None", role: str,
+) -> "set[str]":
+    """Partition labels whose memory_map region excludes this core."""
+    core_id = f"m55_{role}"
+    return {
+        label
+        for label, region_name in (("storage", "storage"),)
+        for r in (memory_map or [])
+        if r.get("name") == region_name
+        and isinstance(r.get("accessible_from"), list)
+        and core_id not in r["accessible_from"]
+    }
 
 
 def _aen_flash_partitions(
@@ -1905,7 +1948,15 @@ def _aen_dts(
         "",
         f"#include <alif/ensemble/{display_variant.lower()}.dtsi>",
         f"#include <alif/ensemble/common/ensemble_rtss_{role}.dtsi>",
+        # The core's own CMSDK watchdog (wdog0, disabled): address checked
+        # against the E4 / E8 DFP soc.h only, so no other family gets it.
+        *([f"#include <alif/ensemble_rtss_{role}_wdog.dtsi>"]
+          if part in ("E4", "E8") else []),
         f"#include <{peripherals_dtsi}>",
+        # E8 M55-HE-local peripherals (M55HE_IRQS[] numbering): HE boards only,
+        # so an M55-HP image never sees the HE vector-map lines (#2984).
+        *(["#include <alif/ensemble_e8_he_peripherals.dtsi>"]
+          if part == "E8" and role == "he" else []),
         "#include <zephyr/dt-bindings/gpio/gpio.h>",
         "#include <zephyr/dt-bindings/i2c/i2c.h>",
         f'#include "{dir_name}-pinctrl.dtsi"',
@@ -2100,6 +2151,10 @@ def _aen_dts(
         "storage": "storage",
         "atoc": "atoc",
     }
+    # A partition whose memory_map region is not accessible_from this core is
+    # kept (the MPU table sizes its window from it) but disabled, so no flash
+    # map entry exists and PARTITION_ID()/FIXED_PARTITION users fail at build.
+    not_owned = _aen_unowned_partitions(memory_map, role) if disjoint_slot0 else set()
     for i, (label, off, size) in enumerate(partitions):
         node = partition_node_labels[label]
         dt_label = partition_dt_labels[label]
@@ -2107,6 +2162,7 @@ def _aen_dts(
             f"\t\t\t{node}: partition@{off:x} {{",
             f'\t\t\t\tlabel = "{dt_label}";',
             f"\t\t\t\treg = <{hex(off)} DT_SIZE_K({size})>;",
+            *(_AEN_NOT_OWNER_LINES if label in not_owned else []),
             "\t\t\t};",
         ]
         if i != len(partitions) - 1:
@@ -2127,6 +2183,18 @@ def _aen_dts(
         "};",
         "",
     ]
+    if part == "E8":
+        # lptimer0 is a single-owner timer (its channel registers and its IRQ,
+        # an M55HE_IRQS[] line, are shared): off on both cores by default, each
+        # app that needs it (STOP wake timer, counter) enables it in its own
+        # board overlay (#2984).
+        lines += [
+            "/* lptimer0 is per-app: an app that needs it enables it in its board overlay. */",
+            "&lptimer0 {",
+            '\tstatus = "disabled";',
+            "};",
+            "",
+        ]
     lines += _aen_brd_i2c_dts(links, part)
     lines += _aen_e1m_i2c0_dts(links)
     if power_domains:
@@ -2251,11 +2319,14 @@ def _aen_som_power_dts(
         d["node_label"]
         for d in (links["brd_i2c"].get("devices") or []) if d.get("node_label")}
     children: list[str] = []
+    gpio_ports: set[str] = set()
     for name, dom in domains.items():
         found = _aen_power_domain_presence(dom, on_module)
         if found is None:
             continue
         state, chip = found
+        gpio_ports.update(c["gpio_node"] for c in dom["controls"]
+                          if c["gpio_node"] != "lpgpio")
         label = dom.get("device_label")
         if label and label not in device_labels:
             raise ZephyrBoardEmitError(
@@ -2383,6 +2454,19 @@ def _aen_som_power_dts(
         "};",
         "",
     ]
+    if gpio_ports:
+        # The SoC peripherals dtsi declares every GPIO port disabled.  A domain
+        # whose pad sits on one needs the port ready, or pin_assert() fails with
+        # ALP_ERR_NOT_READY and the quiesce that STOP/STANDBY runs first aborts.
+        # (`&lpgpio` is enabled with BRD_I2C above.)
+        lines += [
+            "/*",
+            " * GPIO ports carrying a SoM power-domain pad (the SoC peripherals dtsi leaves",
+            " * them disabled).  Without them the SoM power layer cannot drive those pads.",
+            " */",
+        ]
+        for port in sorted(gpio_ports, key=lambda g: (len(g), g)):
+            lines += [f"&{port} {{", '\tstatus = "okay";', "};", ""]
     return lines
 
 
@@ -2747,7 +2831,7 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     ' * candidate -- nothing in this firmware reads or writes the address it',
     ' * resolves to.  The real transport uses the hand-authored DDR window below',
     " * instead, sized from this responder's OpenAMP resource table (512 rpmsg",
-    " * buffers x 512 B x 2 vrings -- m33_sm/src/resource_table.h's",
+    " * buffers x 512 B x 2 vrings -- zephyr/drivers/ipc/resource_table.h's",
     ' * RSC_TABLE_NUM_RPMSG_BUFF).  That sizing happens to consume the whole of',
     ' * `ocram_low` when expressed as `carve_out_kb` in board.yaml (both examples',
     ' * on this SoM request 512, i.e. all 512 KiB of `ocram_low`) -- harmless',
@@ -2771,7 +2855,7 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     ' * below is chosen so the whole carve-out (0x4F700000..0x4FFFFFFF) sits',
     ' * entirely inside that populated range, right up against its top.  The',
     ' * rsctbl/vring/shm regions below are all quoted in the CM33 view, matching',
-    " * upstream's openamp_linux_zephyr sample; see resource_table.h for the",
+    " * upstream's openamp_linux_zephyr sample; see zephyr/drivers/ipc/resource_table.h for the",
     ' * CM33->A55 translation macro this same fix corrected.',
     ' *',
     ' * mbox1 is hand-authored: unlike the RZ/V2L SoC dtsi (r9a07g054.dtsi, which',
@@ -2833,7 +2917,7 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '\t\t * @vring-shm0.end@, leaving every buffer outside it).  Silicon-root-caused',
     '\t\t * alongside the vring-DA fix (#683/#697 bench, 2026-07-11). */',
     '\t\tzephyr,ipc_shm = &vring_shm1;',
-    '\t\tzephyr,ipc = &mbox_consumer;',
+    '\t\tzephyr,ipc = &ipc0;',
     '\t};',
     '',
     '\trsctbl: memory@@rsctbl.hex@ {',
@@ -2874,8 +2958,12 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '\t\treg = <@vring-shm1.addr@ @vring-shm1.size@>;',
     '\t};',
     '',
-    '\tmbox_consumer: mbox-consumer {',
-    '\t\tcompatible = "vnd,mbox-consumer";',
+    '\t/* <alp/rpc.h> ipc_service instance (zephyr/drivers/ipc/ipc_alp_v2n_rpmsg.c);',
+    '\t * also the tx/rx mbox pair the raw-OpenAMP examples read via',
+    '\t * MBOX_DT_SPEC_GET(DT_CHOSEN(zephyr_ipc), ...).  Inert unless',
+    '\t * CONFIG_IPC_SERVICE_BACKEND_ALP_V2N_RPMSG=y. */',
+    '\tipc0: ipc {',
+    '\t\tcompatible = "alp,ipc-v2n-rpmsg";',
     '\t\tmboxes = <&mbox1 1>, <&mbox1 0>;',
     '\t\tmbox-names = "tx", "rx";',
     '\t};',
@@ -3039,6 +3127,7 @@ def _v2n_dts(
         "\tchosen {",
         "\t\tzephyr,sram = &sram;",
         "\t\tzephyr,ram-console = &ram_console;",
+        "\t\tzephyr,entropy = &gd32_trng;",
         "\t\t/*",
         "\t\t * No CM33 serial console on this board.  The only console is the",
         "\t\t * A55's (Linux, on the shared debug UART); sci0 here is the EVK",
@@ -3086,6 +3175,16 @@ def _v2n_dts(
         "\talp_pins: alp-pins {",
         '\t\tcompatible = "alp,pin-array";',
         f"\t\tgpios = <&{cs0['gpio_node']} {cs0['gpio_pin']} GPIO_ACTIVE_LOW>;",
+        "\t};",
+        "",
+        "\t/*",
+        "\t * The GD32 supervisor's TRNG as the Zephyr entropy source (#2951).  Zephyr's",
+        "\t * mbedTLS (TF-PSA-Crypto) reads zephyr,entropy; the driver",
+        "\t * (zephyr/drivers/entropy/entropy_alp_gd32_trng.c) is compiled only under",
+        "\t * CONFIG_ALP_SDK_SECURITY_V2N_TRNG_ENTROPY, so without it this node is inert.",
+        "\t */",
+        "\tgd32_trng: gd32-trng {",
+        '\t\tcompatible = "alp,gd32-trng";',
         "\t};",
     ]
     if pads:

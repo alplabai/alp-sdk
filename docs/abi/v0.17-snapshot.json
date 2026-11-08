@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-12",
+  "generated": "2026-10-21",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1644,8 +1644,8 @@
       },
       "macros": {
         "ALP_CAMERA_CONFIG_DEFAULT": {
-          "hash": "076a556a65bada82",
-          "value": "(id) ((alp_camera_config_t){ .camera_id = (id), .width = 0u, .height = 0u, .fps = 0u, .format = ALP_PIXFMT_RGB565 })"
+          "hash": "f28ff4150c031b0a",
+          "value": "(id) ((alp_camera_config_t){ .camera_id = (id), .width = 0u, .height = 0u, .fps = 30u, .format = ALP_PIXFMT_RGB565 })"
         }
       },
       "typedefs": {
@@ -7776,6 +7776,10 @@
           "hash": "b18ec2860f5c8e83",
           "value": "0x04u"
         },
+        "RV3028C7_WAKE_EVF": {
+          "hash": "f4b49f46eeca6322",
+          "value": "0x02u"
+        },
         "RV3028C7_WAKE_TF": {
           "hash": "a078bc6de6f40481",
           "value": "0x08u"
@@ -12962,6 +12966,10 @@
           "hash": "410c5a53de215113",
           "value": "0x00000020u"
         },
+        "ALP_POWER_WAKE_EXT_EVENT": {
+          "hash": "dcaa59ea9235f378",
+          "value": "0x00000100u"
+        },
         "ALP_POWER_WAKE_GPIO": {
           "hash": "4344dd605d19bdc2",
           "value": "0x00000002u"
@@ -15449,8 +15457,8 @@
           "value": "0"
         },
         "ALP_VERSION_STRING": {
-          "hash": "da54f46fc3f0bace",
-          "value": "\"0.17.0-rc2\""
+          "hash": "e049ddc52c8da9ae",
+          "value": "\"0.17.0\""
         }
       },
       "typedefs": {},

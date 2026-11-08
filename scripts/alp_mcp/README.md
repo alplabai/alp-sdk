@@ -41,7 +41,7 @@ script (`alp-mcp`) rather than a separate repo.
 | Tool | What it does |
 | ---- | ------------ |
 | `validate_board_yaml(path_or_content)` | Runs the board.yaml validator on a file path or inline YAML and returns the diagnostics. |
-| `emit(board_yaml_path, mode)` | Runs `python -m alp_orchestrate --emit <mode> --input <path>` and returns the generated artefact. |
+| `emit(board_yaml_path, mode, core=None, build_root=None)` | Runs `python -m alp_orchestrate --emit <mode> --input <path>` (plus `--core` / `--build-root` when given; `kconfig` needs `core`) with the project directory as cwd, and returns the generated artefact. |
 
 Live tools never silently succeed: a missing tool or input file returns a
 clear `{"ok": false, "error": ...}` object.

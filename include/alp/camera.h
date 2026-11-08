@@ -27,7 +27,9 @@
  *     R01UH1071EJ0120 section 9.8).
  *   - **alif_isp_pico** (silicon_ref `"alif:ensemble:e8"`, priority
  *     100): same real sensor pipeline, plus the E8 VeriSilicon
- *     ISP-Pico's `configure_isp` (same latch-and-ALP_OK posture).
+ *     ISP-Pico's `configure_isp` (validates, latches the config in backend state and
+ *     returns ALP_OK; unlike v2n_n44_isp it does NOT return
+ *     ALP_ERR_NOSUPPORT).
  *     OPT-IN (`CONFIG_ALP_SDK_CAMERA_ALIF_ISP`, default n) --
  *     depends on `VIDEO_ISP_VSI`.  Negotiates a YUV ISP MI output
  *     (converting to RGB565 on the CPU when the caller asked for
@@ -156,9 +158,11 @@ typedef struct {
  *         chip-ID check at init -- never reached device_is_ready()),
  *         ALP_ERR_NOT_READY (yocto_drv: no `alp-camera<N>` DT alias,
  *         or no matching sensor/capture chain in any media device),
- *         ALP_ERR_NOSUPPORT (zephyr_video / v2n_n44_isp /
- *         alif_isp_pico: @c cfg->fps is nonzero and the terminal
- *         sensor device has no frame-rate control at all -- a
+ *         ALP_ERR_NOSUPPORT (zephyr_video: MONO_VLSB / YUV420_PLANAR /
+ *         NV12, which it cannot negotiate -- note MONO_VLSB is the
+ *         zero value, so an unset format fails; zephyr_video /
+ *         v2n_n44_isp / alif_isp_pico: @c cfg->fps is nonzero and the
+ *         terminal sensor device has no frame-rate control at all -- a
  *         backend's own internal default rate failing to apply never
  *         surfaces as an error; yocto_drv: colour pixel format, or the
  *         sensor offers no media-bus code for the requested format),

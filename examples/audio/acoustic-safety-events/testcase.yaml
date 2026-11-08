@@ -31,7 +31,7 @@ tests:
   alp_sdk.example.acoustic_safety_events.aen_build:
     extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
-      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
     build_only: true
     tags:
       - alp-sdk

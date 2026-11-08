@@ -135,6 +135,10 @@ contract above — their board dirs already exist under `tests/hil/`
 constraint (serial, reservation-gated, license-gated tooling) is the
 same for every board on this bench.
 
-The V2N101 ssh-run specs live only in `tests/hil/v2n101-x-evk/` and are
-unverified on a V2N unit; V2N102/V2N103 runs must target that directory
-explicitly, since nothing includes it automatically.
+Each V2N/V2M SKU has its own ssh-run spec set in its board dir
+(`v2n101-x-evk/` .. `v2n103-x-evk/`, `v2m101-x-evk/` .. `v2m103-x-evk/`),
+limited to hardware that SKU's SoM preset populates.  Only the V2M103 set
+is bench-derived; the other SKUs' specs are copies marked NOT BENCH-VERIFIED
+and skip the V2M103-pinned values (kernel release, PHY ID, EXT_CSD, MAC,
+EEPROM manifest).  Nothing includes another SKU's dir automatically, so
+target the SKU's own dir explicitly.

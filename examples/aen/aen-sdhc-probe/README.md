@@ -6,7 +6,13 @@ Register-level bring-up probes for the Ensemble **E8 SD Host Controller**
 is: inert register-level probes, not a working card-readout path (see
 below for why).
 
-## SD is disabled entirely on the E1M-EVK 2626-R2 (#2051)
+> **Working SD on a reworked carrier:** if your E1M-EVK's U38/U39 are the
+> reworked 74LV3257 bus switches, use the
+> [`e1m_evk_microsd`](../../../zephyr/boards/shields/e1m_evk_microsd) shield and
+> [`aen-sdcard-file`](../aen-sdcard-file) instead. This app documents the stock
+> 74LVC157 carrier, where SD stays off.
+
+## SD is disabled entirely on the stock E1M-EVK 2626-R2 (#2051)
 
 The board's SDIO 74LVC157 mux (`U38`/`U39`) has **no high-impedance state**:
 with its `/E` ENABLE input HIGH, the part's Y outputs are forced LOW, not
@@ -115,6 +121,8 @@ without a second app to maintain:
 **Still read-only by construction** — no `CONFIG_FILE_SYSTEM`, no `fs_*`
 call, no `disk_access_write`, no `mkfs` anywhere in this app; none of that
 machinery is even linked in any more (see the CHANGELOG).
+
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); the commands below only work from an alp-sdk checkout. For E1M-AEN803 use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`.
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-sdhc-probe

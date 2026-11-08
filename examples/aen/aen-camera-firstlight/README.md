@@ -36,6 +36,10 @@ for what to build.
 
 ## Build (one image per camera shield)
 
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. The bench result below was taken on an E1M-AEN803, so
+the M55-HE build for that SoM is `alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`;
+the command below shows the AEN801 target.
+
 ```bash
 ZEPHYR_BASE=<zephyr> west build \
   -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-camera-firstlight -- \
@@ -94,10 +98,17 @@ RESULT: capture ok
 | Step | Line | Meaning |
 |---|---|---|
 | 1. open | `alp_camera_open FAILED: ALP_ERR_NOT_READY` | The sensor's chip-ID probe never answered on I2C1 during driver init — **not powered / not answering**. Check the module is seated on J5 and self-enabling (J5 pin 11 / `CAM_EN` must stay 0, see `docs/boards/e1m-evk.md`'s Camera section). A failed open is a valid, informative bench result — it is not a bug in this app. |
-| 2. start | `alp_camera_start -> ALP_ERR_*` | Stream start rejected after a successful open — driver-level failure past the sensor probe; check the CSI-2 D-PHY / CPI clock programming (`fix(aen): program the CSI/CPI pixel-clock dividers...` on this branch). |
+| 2. start | `alp_camera_start -> ALP_ERR_*` | Stream start rejected after a successful open — driver-level failure past the sensor probe; check the CSI-2 D-PHY / CPI clock programming (`fix(aen): program the CSI/CPI pixel-clock dividers...`). |
 | 3. capture | `alp_camera_capture TIMED OUT` | Stream started but no frame landed in 2 s — the sensor answered its I2C probe but nothing is arriving over the CSI-2 lanes (bad lane count/polarity, D-PHY not locking, wrong pixel clock). The single most common cause on this SoM/EVK combination is the missing P/N-crossing camera-connector adapter (see `docs/boards/e1m-evk.md`'s Camera section) — without it the sensor still answers its I2C probe but no frame ever synchronizes. This app has no bench-diagnostic register readout for this path (see `src/main.c`'s comment at the timeout print: `video_csi_dw.c` exposes no public status query) — the timeout itself is the whole bench result today. |
 | 3. capture | `alp_camera_capture OK: N bytes ...` | A frame arrived. CRC32 + the histogram + three sample rows follow. A non-zero CRC alone is weak evidence — a warm RAM-run can leave a previous frame in SRAM0, so a non-zero buffer does not by itself prove a *new* frame arrived. The real proof (see the OV9281 bench pass below) is a buffer pre-filled with a known sentinel (`0xA5`) coming back overwritten, plus the sensor's own test pattern appearing in the data when enabled. |
 | 4. stop/close | `alp_camera_stop` / `alp_camera_close done` | Always run, even after a failure above (except a failed `open`, which has nothing to stop/close). |
+
+## Opt-in: ROI crop (IMX296 only)
+
+`-DAEN_CAMERA_IMX296_ROI=ON` selects the IMX296's second, centred 1280x960 crop
+instead of the default full 1456x1088 frame (the `imx296_roi` testcase scenario).
+It is OFF by default, needs no devicetree overlay, and only matters with the
+IMX296 shield.
 
 ## Opt-in: external trigger (IMX296 only, UNBENCHED)
 
@@ -208,7 +219,7 @@ buffers, then `ALP_ERR_NOMEM` on the second frame).
 
 ## Compile proof in CI; real results on the bench
 
-All six `testcase.yaml` scenarios are `build_only: true` regardless of
+All seven `testcase.yaml` scenarios are `build_only: true` regardless of
 bench status — twister has no bench access, so a green build only proves the
 image compiles and links against the real board target. The OV9281 shield's
 real result (2026-09-21, an E1M-AEN803 on the E1M-EVK, J-Link RAM-run, same

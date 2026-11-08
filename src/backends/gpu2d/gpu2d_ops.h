@@ -12,7 +12,7 @@
  *                     backend native_sim runs and tests.
  *   - alif_dave2d.c : the AEN D/AVE 2D real backend (priority 100,
  *                     per-SKU silicon_refs), gated on the Dave2D
- *                     pack + bench-unverified.
+ *                     pack; bench-verified on E1M-AEN803 (#916).
  * No vendor extensions exist for GPU2D, so the first-member-aliasing
  * pattern the ADC vtable uses is not required here.
  */

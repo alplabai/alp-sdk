@@ -37,6 +37,8 @@ tests:
   alp_sdk.conformance.test_doubles:
     extra_configs:
       - CONFIG_ALP_SDK_TESTING=y
+      - CONFIG_ALP_SDK_BLOCK_BUTTON_LED=y
+      - CONFIG_ALP_SDK_CHIP_QUECTEL_BG77=y
     tags:
       - alp-sdk
       - conformance

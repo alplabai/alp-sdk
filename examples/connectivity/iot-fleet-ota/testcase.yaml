@@ -37,13 +37,9 @@ tests:
     # --from-example` and built for real hardware still refuses.
     extra_configs:
       - CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y
-  # Issue #2173: this scenario named `ensemble_e8_dk/...` -- Alif's own
-  # DevKit board, which no -p flag in this repo selects -- so it was never
-  # built by any job, and the app had in fact stopped compiling for AEN
-  # entirely (the mbedtls PSA floor, fixed in zephyr/Kconfig.alp-libraries).
-  # It now names the board target this app's own board.yaml describes
-  # (som.sku E1M-AEN801, preset e1m-evk, core m55_hp), which
-  # pr-twister-aen.yml does run.
+  # The board target this app's own board.yaml describes (som.sku
+  # E1M-AEN801, preset e1m-evk, core m55_hp), which pr-twister-aen.yml
+  # builds (#2173).
   alp_sdk.examples.iot_fleet_ota.aen:
     extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:

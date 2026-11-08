@@ -104,8 +104,9 @@ PARITY_COVERED: dict[str, tuple[str, str]] = {
 NOT_EMITTABLE: dict[str, str] = {
     "e1m_aen401_m55_hp":
         "metadata/socs/alif/ensemble/e4.json has no `zephyr_peripherals_dtsi`; "
-        "alp-sdk ships no zephyr/dts/alif/ensemble_e4_peripherals.dtsi for the "
-        "E4's own peripheral/NPU node set (the E8 overlay is different silicon)",
+        "the AEN401 board tree stays hand-written (its E4 camera, power and "
+        "xHCI nodes have no generator path). Its on-module dtsi IS generator "
+        "output, pinned by test_aen401_on_module_dtsi_is_generator_output",
     "e1m_aen601_m55_hp":
         "metadata/socs/alif/ensemble/e6.json has no `zephyr_peripherals_dtsi`; "
         "alp-sdk ships no zephyr/dts/alif/ensemble_e6_peripherals.dtsi for the "
@@ -684,6 +685,36 @@ class _MutatedMetadata:
                          encoding="utf-8")
 
 
+class TestAen401OnModuleDtsi(unittest.TestCase):
+    """The hand-written AEN401 board includes
+    `alp_e1m_aen401_m55_hp-on-module.dtsi`: the BRD_I2C bus and the
+    `alp,som-power` node for that SKU (#2876).  Its body must stay exactly what
+    the generator emits for the E1M-AEN401 preset, so a change to
+    on-module-links.yaml reaches this board too."""
+
+    def test_aen401_on_module_dtsi_is_generator_output(self) -> None:
+        import yaml
+        links = gzb._load_aen_on_module_links(METADATA_ROOT)
+        preset = yaml.safe_load(
+            (METADATA_ROOT / "e1m_modules" / "E1M-AEN401.yaml").read_text(
+                encoding="utf-8"))
+        body = "\n".join(
+            gzb._aen_brd_i2c_dts(links, "E4")
+            + gzb._aen_e1m_i2c0_dts(links)
+            + gzb._aen_som_power_dts(
+                preset, gzb._load_aen_power_domains(METADATA_ROOT), links,
+                gzb._load_aen_wired_lpgpio_pads(METADATA_ROOT)))
+        committed = (BOARDS_ROOT / "e1m_aen401_m55_hp"
+                     / "alp_e1m_aen401_m55_hp-on-module.dtsi").read_text(
+                         encoding="utf-8")
+        marker = "#include <zephyr/dt-bindings/gpio/gpio.h>\n\n"
+        self.assertIn(marker, committed)
+        self.assertEqual(committed.split(marker, 1)[1].rstrip("\n"),
+                         body.rstrip("\n"),
+                         "regenerate alp_e1m_aen401_m55_hp-on-module.dtsi "
+                         "from scripts/gen_zephyr_board.py")
+
+
 class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
     """Every SKU, part designator, pin name and base address in a generated
     AEN board tree must be transcribed from metadata, never inherited from
@@ -718,6 +749,20 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
             self.assertNotIn("Ensemble E8", emitted)
             self.assertNotIn("Alif E8", emitted)
             self.assertNotIn("AE822 DFP", emitted)
+
+    def test_watchdog_include_is_scoped_to_the_parts_it_was_checked_against(
+            self) -> None:
+        """`ensemble_rtss_{role}_wdog.dtsi` carries a watchdog address checked
+        against the E4 and E8 DFPs only (#2877): an E8 board includes it, a
+        board mutated to another part does not."""
+        files = emit_zephyr_board("E1M-AEN801", "m55_he", METADATA_ROOT)
+        dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        self.assertIn("#include <alif/ensemble_rtss_he_wdog.dtsi>", dts)
+        with _MutatedMetadata() as mm:
+            mm.json_set(E8_SOC, "part", "E9")
+            files = emit_zephyr_board("E1M-AEN801", "m55_he", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        self.assertNotIn("_wdog.dtsi", dts)
 
     def test_rtc_alarm_risk_is_scoped_to_the_part_it_was_evidenced_against(
             self) -> None:
@@ -1440,6 +1485,61 @@ class TestAenLogModeDefault(unittest.TestCase):
                     f"{defconfig} assigns the LOG_MODE choice symbol "
                     f"directly; use the Kconfig.defconfig `choice LOG_MODE / "
                     f"default LOG_MODE_MINIMAL` form instead (#1373)")
+
+
+class TestEveryAenBoardSharesTheSomLevelDefaults(unittest.TestCase):
+    """Facts of the shared E1M-AEN SoM PCB must hold on every AEN board tree,
+    not only the generated E8 ones (the hand-written AEN401 / AEN601 trees
+    drifted from them: MRAM MPU table, flex-IO 1.8 V, TMP112 guard, I2C0,
+    power-domain GPIO ports)."""
+
+    def _aen_board_dirs(self) -> list[Path]:
+        dirs = sorted(p for p in BOARDS_ROOT.glob("e1m_aen*") if p.is_dir())
+        self.assertTrue(dirs)
+        return dirs
+
+    def test_every_aen_board_sets_the_mram_mpu_table_and_flex_io_default(self) -> None:
+        for board_dir in self._aen_board_dirs():
+            text = (board_dir / "Kconfig").read_text(encoding="utf-8")
+            for sym in ("CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS", "ALIF_FLEX_IO_1V8"):
+                self.assertRegex(
+                    text, rf"config {sym}\n\tdefault y\n",
+                    f"{board_dir.name}/Kconfig does not default {sym} on")
+
+    def test_every_board_with_a_tmp112_node_guards_the_duplicate_driver(self) -> None:
+        for board_dir in self._aen_board_dirs():
+            nodes = "".join(p.read_text(encoding="utf-8")
+                            for p in list(board_dir.glob("*.dts")) + list(board_dir.glob("*.dtsi")))
+            if "ti,tmp112" not in nodes:
+                continue
+            text = (board_dir / "Kconfig.defconfig").read_text(encoding="utf-8")
+            self.assertIn("config TMP112\n\tdefault n\n", text,
+                          f"{board_dir.name} lacks the CONFIG_TMP112 duplicate-link guard (#2043)")
+
+    def test_every_board_with_som_power_enables_its_gpio_ports_and_i2c0(self) -> None:
+        for board_dir in self._aen_board_dirs():
+            for p in list(board_dir.glob("*.dts")) + list(board_dir.glob("*.dtsi")):
+                text = p.read_text(encoding="utf-8")
+                if "alp,som-power-domain" not in text:
+                    continue
+                for port in ("gpio5", "gpio11"):
+                    if f"<&{port} " in text:
+                        self.assertRegex(
+                            text, rf"&{port} \{{\n\tstatus = \"okay\";",
+                            f"{p.name} uses {port} for a power domain but never enables it")
+                self.assertIn("alp-i2c0 = &i2c2;", text, f"{p.name} lacks alp-i2c0")
+
+    def test_mpu_table_cmake_gate_keeps_the_ensemble_family_guard(self) -> None:
+        """Upstream selects CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS on many non-Alif
+        SoCs; the symbol alone must never compile mpu_regions_e8.c (it reads MRAM
+        DT labels and defines a second mpu_config)."""
+        text = (REPO / "zephyr" / "CMakeLists.txt").read_text(encoding="utf-8")
+        m = re.search(
+            r"if\((?P<cond>[^)]*)\)\s*zephyr_sources_ifdef\(CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS"
+            r"\s*\$\{ZEPHYR_CURRENT_MODULE_DIR\}/zephyr/soc-bridge/alif/mpu_regions_e8\.c\)",
+            text)
+        self.assertIsNotNone(m, "mpu_regions_e8.c is not wrapped in an if() family guard")
+        self.assertIn("CONFIG_SOC_FAMILY_ENSEMBLE", m.group("cond"))
 
 
 if __name__ == "__main__":

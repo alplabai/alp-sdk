@@ -26,9 +26,5 @@ RDEPENDS:${PN} = " \
     cv-bridge \
     alp-perception \
 "
-# alp-ros2-temperature is deliberately NOT here yet: its recipe fetches
-# branch=main at ${AUTOREV}, and the example it builds
-# (examples/v2n/v2n-ros2-som-temperature) is not on main until dev is
-# promoted, so do_configure would fail in every ROS-enabled image. Add it
-# here once the example is on main (or the recipe pins a SRCREV). Until then
-# build it explicitly: `bitbake alp-ros2-temperature`.
+# alp-ros2-temperature is deliberately NOT here: it is BENCH-UNVERIFIED.
+# Build it explicitly with `bitbake alp-ros2-temperature`.

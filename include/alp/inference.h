@@ -261,14 +261,18 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg);
 /** Options for loading a `.alpmodel` package (the fat multi-backend
  *  container).  Provide the bytes in-memory (@c data/@c size, MCU embed)
  *  or a storage @c path (Linux).  @c backend = AUTO lets the loader pick
- *  the best blob for the active SoM; pin a specific backend to force it. */
+ *  the best blob for the active SoM; pin a specific backend to force it.
+ *  A caller-owned @c arena (non-NULL) must come with a non-zero
+ *  @c arena_bytes: the manifest never sizes a caller's buffer, and a
+ *  zero size there is rejected with ALP_ERR_INVAL. */
 typedef struct {
-	const void             *data;        /**< Package bytes, or NULL to use @c path. */
-	size_t                  size;        /**< Byte count when @c data is set. */
-	const char             *path;        /**< Storage path (Linux), or NULL. */
-	alp_inference_backend_t backend;     /**< AUTO, or a forced backend. */
-	size_t                  arena_bytes; /**< 0 = size from the manifest. */
-	void                   *arena;       /**< Caller arena, or NULL for backend default. */
+	const void             *data;    /**< Package bytes, or NULL to use @c path. */
+	size_t                  size;    /**< Byte count when @c data is set. */
+	const char             *path;    /**< Storage path (Linux), or NULL. */
+	alp_inference_backend_t backend; /**< AUTO, or a forced backend. */
+	size_t
+	    arena_bytes; /**< 0 = size from the manifest (only when @c arena is NULL; INVAL with a caller arena). */
+	void *arena; /**< Caller arena, or NULL for backend default. */
 } alp_model_open_opts_t;
 
 /**
@@ -283,7 +287,8 @@ typedef struct {
  *
  * @param[in] opts  Load options; @c data (with @c size) or @c path required.
  * @return Open handle, or NULL — read @ref alp_last_error for the cause:
- *         ALP_ERR_INVAL (bad opts / bad magic / corrupt),
+ *         ALP_ERR_INVAL (bad opts / bad magic / corrupt / caller arena
+ *         with arena_bytes == 0),
  *         ALP_ERR_VERSION (package newer than this loader),
  *         ALP_ERR_NO_BACKEND / ALP_ERR_NO_FIT / ALP_ERR_NOT_FOUND (selection),
  *         or any @ref alp_inference_open error from the chosen backend.

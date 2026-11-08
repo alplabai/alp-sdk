@@ -29,7 +29,7 @@ placeholder for `<alp/mproc.h>` IPC framing (see
 [`vendors/nanopb/README.md`](../../../vendors/nanopb/README.md); those
 stubs are not used by this example).
 
-`board.yaml`'s `cores.m55_hp.libraries: [nanopb]` only emits
+`board.yaml`'s top-level `libraries: [{name: nanopb, cores: [m55_hp]}]` only emits
 `CONFIG_ALP_NANOPB_SW=y` (nanopb has no HW-accelerator class -- see
 the `integration.zephyr.hw_backends:` block in
 `metadata/libraries/nanopb.yaml`). It does **not**
@@ -67,12 +67,27 @@ python -m grpc_tools.protoc \
 ## board.yaml HW swap
 
 `som.sku: E1M-AEN801` / `preset: e1m-evk`. This example does no I/O --
-swap `som.sku` to any SoM/preset pair and it still builds; the round
-trip is entirely in-RAM.
+the round trip is entirely in-RAM, so nothing in `src/` is SoM-specific.
+`board.yaml` declares only `m55_hp` (and scopes `nanopb` to it), so a
+non-AEN SoM needs the `cores:` block and the library's `cores:` scope
+changed along with `som.sku`.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```
 # writes examples/connectivity/nanopb-encode-decode/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/connectivity/nanopb-encode-decode
 west build -b native_sim/native/64 examples/connectivity/nanopb-encode-decode \

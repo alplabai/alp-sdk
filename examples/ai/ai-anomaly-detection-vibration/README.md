@@ -1,9 +1,9 @@
 # ai-anomaly-detection-vibration
 
-> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on
+> ⚠️ **`[UNTESTED]` on hardware.** Compiles on
 > `native_sim/native/64` + cross-compiles to
-> `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`.  HiL bring-up with a
-> real motor / pump and a customer-trained model is v0.6 work.
+> `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`.  HiL bring-up with a
+> real motor / pump and a customer-trained model is still open.
 
 Predictive-maintenance edge-AI on the E1M-AEN module: read a
 sliding window of vibration data from the EVK-populated ICM-42670
@@ -20,28 +20,43 @@ Three customer questions get one answer:
   the 1D-CNN flags departures from the baseline learnt at
   commissioning.
 - **"Without a cloud round-trip?"** -- yes, the model runs on
-  the on-die Ethos-U (AEN) or DEEPX DX-M1 (V2N); only the score
+  the on-die Ethos-U (AEN) or DEEPX DX-M1 (V2M101/102/103); only the score
   leaves the device, so the customer's plant network never sees
   raw vibration.
 - **"Cheap enough to deploy on every machine?"** -- yes, the
   AEN801's Ethos-U + clock-gated M55 path runs months on a
-  single battery charge; the V2N path drops into a higher-rate
+  single battery charge; the DEEPX path drops into a higher-rate
   AI-PLC node when speed matters more than power.
 
 ## Hardware
 
 - E1M-AEN801 SoM (or any E1M-AEN variant; SKU lives in
-  `board.yaml`).  Flip to E1M-V2M101 for the DEEPX path.
+  `board.yaml`).  The DEEPX DX-M1 path needs E1M-V2M101 with an A55-side
+  (Yocto) app; changing `som.sku` alone does not build, because
+  `board.yaml` declares `m55_hp` and V2M101 has no M55 cores.
 - E1M-EVK board.  ICM-42670 is already populated at I2C0 0x69.
 - (Production) attach the accelerometer module to the monitored
   asset via a magnet base or a stud-mount fixture.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```
 # writes examples/ai/ai-anomaly-detection-vibration/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/ai/ai-anomaly-detection-vibration
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/ai-anomaly-detection-vibration -- -DEXTRA_CONF_FILE=generated/alp.conf
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/ai/ai-anomaly-detection-vibration -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 
