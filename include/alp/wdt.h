@@ -252,9 +252,12 @@ alp_status_t alp_wdt_disable(alp_wdt_t *wdt);
  *
  * @par Portable contract
  * Close releases the handle only; the SDK never asks the OS to disarm
- * the watchdog on close.  The installed timeout keeps running, so
- * after close() the watchdog must be fed by another owner or the board
- * resets.  Call @ref alp_wdt_disable explicitly BEFORE close() if a
+ * the watchdog on close.  Zephyr never stops it: the installed timeout
+ * keeps running, so after close() it must be fed by another owner or
+ * the board resets.  On Linux the watchdog keeps running after close()
+ * only when the driver supports magic close (WDIOF_MAGICCLOSE) or the
+ * kernel is nowayout; otherwise watchdog_release() stops it on close.
+ * Call @ref alp_wdt_disable explicitly BEFORE close() if a
  * best-effort disable is what the caller wants; its documented
  * @ref ALP_ERR_NOSUPPORT return tells you when the hardware can't
  * honour that.  See docs/abi-markers.md for the v0.17.0 behaviour
@@ -294,7 +297,7 @@ alp_status_t alp_wdt_disable(alp_wdt_t *wdt);
  *     `watchdog_dev.c` (`watchdog_release`) a close without the magic
  *     character keeps the watchdog running (and logs "watchdog did not
  *     stop!") only when the driver advertises `WDIOF_MAGICCLOSE` or the
- *     kernel is built with `CONFIG_WATCHDOG_NOWAYOUT`.  On a driver that
+ *     kernel is built with `CONFIG_WATCHDOG_NOWAYOUT` or the driver's `nowayout=` parameter.  On a driver that
  *     advertises neither, the kernel stops the watchdog on close (and on
  *     process exit or crash), so no reset follows.  A caller that needs
  *     the guaranteed reset must confirm the board's watchdog driver

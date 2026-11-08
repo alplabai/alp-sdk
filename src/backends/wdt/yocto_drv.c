@@ -53,8 +53,8 @@ typedef struct {
 
 /* Test-only interception of the three syscalls y_open() drives before
  * it has a fully-populated backend handle (open() / malloc() / the
- * WDIOC_SETTIMEOUT ioctl's programmed value), plus observation hooks
- * for the WDIOS_DISABLECARD _disarm_and_close() uses to actually disarm.
+ * WDIOC_SETTIMEOUT ioctl's programmed value), plus an observation hook
+ * for the WDIOS_DISABLECARD that _disarm_and_close() issues.
  * Defaults are NULL/real -- production behaviour is unchanged.  Opening
  * a REAL /dev/watchdogN here would arm a genuine hardware watchdog on
  * whatever host runs the test (there usually isn't one, but on a board
@@ -233,7 +233,7 @@ static alp_status_t y_disable(alp_wdt_backend_state_t *st)
  * Matches the portable alp_wdt_close contract (#2981): neither
  * WDIOS_DISABLECARD nor the magic 'V' is issued.  Whether the kernel then
  * keeps the timer running is the driver's call (WDIOF_MAGICCLOSE or
- * CONFIG_WATCHDOG_NOWAYOUT); see alp_wdt_close in wdt.h.
+ * nowayout: CONFIG_WATCHDOG_NOWAYOUT or the driver's nowayout= parameter); see alp_wdt_close in wdt.h.
  */
 static void y_close(alp_wdt_backend_state_t *st)
 {
