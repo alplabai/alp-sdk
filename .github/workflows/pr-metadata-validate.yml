@@ -23,9 +23,8 @@ name: pr-metadata-validate
 #   - The summary name is static (no matrix interpolation) so a skipped
 #     run still reports under the name branch protection matches.
 #
-# On `merge_group` `detect` is skipped (a merge-queue base/head pair is not
-# something dorny/paths-filter is verified against here) and `validate`
-# RUNS, minus the two pytest steps. Reason: the queue ref is the PR rebased
+# On `merge_group` `validate` runs UNCONDITIONALLY (the path filter applies to
+# pull_request/push only), minus the two pytest steps. Reason: the queue ref is the PR rebased
 # onto the PRs ahead of it, and these gates are cross-file parity checks
 # (metadata <-> headers <-> docs <-> examples) whose answer can change under
 # a neighbour's merge -- that is the one thing a queue run can catch that
@@ -54,19 +53,37 @@ concurrency:
 
 jobs:
   # Cheap path detector (same shape as cross-platform-zephyr.yml `detect`).
-  # Not a required context. Skipped on merge_group (see header).
+  # Not a required context. Runs on merge_group too (git diff against the
+  # queue's base_sha), so a docs-only queue entry skips the heavy jobs.
   detect:
-    if: github.event_name != 'merge_group'
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
     steps:
+      # push / merge_group: dorny diffs with git, so it needs a checkout WITH
+      # history (a bare runner has no repo: `fatal: not a git repository`, exit
+      # 128, which reddened the summary on every push). pull_request uses the API.
+      - name: Checkout (history for the git diff)
+        if: github.event_name != 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
       - name: Detect metadata-validate-relevant changes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         timeout-minutes: 2
         with:
+          # merge_group: the queue's base commit. push: the pre-push SHA, so the
+          # diff is before..after (empty base would diff the default branch
+          # against main and false-pass every post-merge push; an all-zero
+          # `before` on a new branch falls back to the default merge-base).
+          # pull_request: empty, dorny uses the API.
+          base: ${{ github.event.merge_group.base_sha || (github.event_name == 'push' && github.event.before) || '' }}
           filters: |
             relevant:
             - 'metadata/**'
@@ -782,7 +799,7 @@ jobs:
               exit 0
               ;;
             skipped)
-              if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ]; } \
+              if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ] || [ "${EVENT_NAME}" = "merge_group" ]; } \
                  && [ "${DETECT_RESULT}" = "success" ] && [ "${DETECT_RELEVANT}" != "true" ]; then
                 echo "PASS: validate legitimately skipped -- detect ran, succeeded, and found no watched path changed"
                 exit 0

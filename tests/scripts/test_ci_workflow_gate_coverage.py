@@ -207,9 +207,10 @@ def test_metadata_validate_summary_is_requireable() -> None:
     assert "failure|cancelled" in run  # detect failed/cancelled -> fail
     # a gate job result other than success/legit-skip falls through to exit 1
     assert re.search(r"\*\)\s+echo \"::error::validate concluded", run)
-    # every gate job's own `if:` must keep running under merge_group
+    # validate re-runs the cross-file parity gates on EVERY queue entry (cheap;
+    # a neighbour's merge can break parity); path filter is PR/push only.
     for name in gate_jobs:
-        assert "merge_group" in jobs[name]["if"]
+        assert "github.event_name == 'merge_group'" in jobs[name]["if"]
 
 
 def test_doc_drift_summary_is_requireable() -> None:
@@ -242,14 +243,149 @@ def test_python_smoke_runs_in_the_merge_queue() -> None:
     jobs = _load("cross-platform-zephyr.yml")["jobs"]
     smoke = jobs["python-smoke"]
     assert "!= 'merge_group'" not in smoke["if"]
-    assert "github.event_name == 'merge_group'" in smoke["if"]
+    assert "needs.detect.outputs.relevant == 'true'" in smoke["if"]
     # The queue leg is capped to ubuntu-latest.
     os_expr = smoke["strategy"]["matrix"]["os"]
     assert "github.event_name == 'merge_group'" in os_expr
     assert 'fromJSON(\'["ubuntu-latest"]\')' in os_expr
     verdict = " ".join(str(st.get("run", "")) for st in jobs["summary"]["steps"])
     skipped_branch = verdict[verdict.index("skipped)"):verdict.index("*)")]
-    # The only legitimate skip is pull_request/push with nothing relevant;
-    # merge_group is not in that condition, so its skip reaches `exit 1`.
-    assert '= "merge_group"' not in skipped_branch
+    # A skip is legitimate only when detect succeeded and found nothing,
+    # on pull_request / push / merge_group; anything else reaches `exit 1`.
+    assert '= "merge_group"' in skipped_branch
+    assert '"${DETECT_RESULT}" = "success"' in skipped_branch
     assert "exit 1" in skipped_branch
+
+
+def _assert_requireable(
+    name: str,
+    ctx: str,
+    *,
+    not_in_needs: frozenset[str] = frozenset(),
+    skip_on_merge_group: frozenset[str] = frozenset(),
+    detect_on_merge_group: bool = True,
+) -> tuple[dict, str]:
+    """Shared #2972 shape check; returns (jobs, concatenated verdict script)."""
+    data = _load(name)
+    triggers = data.get("on", data.get(True))
+    assert "merge_group" in triggers, f"{name}: no merge_group trigger (#1415)"
+    for t in ("pull_request", "push"):
+        if t in triggers:
+            assert "paths" not in (triggers[t] or {}), f"{name}: {t} must be unfiltered"
+    assert data["concurrency"]["group"].endswith("${{ github.ref }}")
+
+    jobs = data["jobs"]
+    summary = jobs["summary"]
+    assert summary["name"] == ctx
+    assert "${{" not in summary["name"], "required context name must be static"
+    assert summary["if"].replace(" ", "") == "always()"
+    gate_jobs = set(jobs) - {"summary", "detect"}
+    assert set(summary["needs"]) == (gate_jobs - not_in_needs) | {"detect"}
+    # detect carries the path list; real jobs run on merge_group.
+    assert any(
+        s.get("uses", "").startswith("dorny/paths-filter@")
+        for s in jobs["detect"]["steps"]
+    )
+    for job in gate_jobs - skip_on_merge_group:
+        cond = jobs[job]["if"]
+        assert "== 'merge_group'" not in cond, f"{name}:{job} must be path-filtered in the queue"
+        assert "needs.detect.outputs.relevant == 'true'" in cond
+    if detect_on_merge_group:
+        assert "merge_group" not in jobs["detect"]["if"].replace("!=", "")
+        assert "merge_group.base_sha" in str(jobs["detect"]["steps"])
+    run = " ".join(str(s.get("run", "")) for s in summary["steps"])
+    assert "exit 1" in run and "failure|cancelled" in run
+    return jobs, run
+
+
+def test_generated_files_summary_is_requireable() -> None:
+    _, run = _assert_requireable("pr-generated-files.yml", "generated-files · all")
+    assert '= "merge_group"' in run and '"${DETECT_RESULT}" = "success"' in run
+
+
+def test_doxygen_summary_is_requireable() -> None:
+    _, run = _assert_requireable("pr-doxygen.yml", "doxygen · all")
+    assert '= "merge_group"' in run and '"${DETECT_RESULT}" = "success"' in run
+
+
+def test_tan_build_summary_is_requireable() -> None:
+    _, run = _assert_requireable("pr-tan-build.yml", "tan-build · all")
+    assert '= "merge_group"' in run and '"${DETECT_RESULT}" = "success"' in run
+
+
+def test_plain_cmake_summary_is_requireable() -> None:
+    jobs, run = _assert_requireable(
+        "pr-plain-cmake.yml",
+        "plain-cmake · all",
+        # abidiff is advisory (docs/ci/README.md) and skipped in the queue.
+        not_in_needs=frozenset({"abidiff"}),
+        skip_on_merge_group=frozenset({"abidiff"}),
+    )
+    # a merge_group skip passes only when detect succeeded and found nothing
+    assert '"merge_group"' in run and 'DETECT_RESULT"] == "success"' in run
+    assert "!= 'merge_group'" in jobs["abidiff"]["if"]
+    # queue cost cap: the add_subdirectory consumer runs only its `none` leg
+    assert "merge_group" in jobs["consumer-add-subdirectory"]["strategy"]["matrix"]["som"]
+
+
+def test_abi_snapshot_summary_is_requireable() -> None:
+    jobs, run = _assert_requireable(
+        "pr-abi-snapshot.yml",
+        "abi-snapshot · all",
+        skip_on_merge_group=frozenset({"snapshot-diff"}),
+        detect_on_merge_group=False,  # PR-to-main diff only; see below
+    )
+    data = _load("pr-abi-snapshot.yml")
+    triggers = data.get("on", data.get(True))
+    # PR trigger keeps its main/release/** branch semantics.
+    assert triggers["pull_request"]["branches"] == ["main", "release/**"]
+    # The diff is PR-only; on merge_group the summary passes explicitly
+    # ("not applicable") rather than hanging or silently skipping.
+    assert "github.event_name == 'pull_request'" in jobs["snapshot-diff"]["if"]
+    assert "not applicable on merge_group" in run
+
+
+def test_every_push_or_queue_detect_checks_out_before_dorny() -> None:
+    """dorny/paths-filter diffs with git on push/merge_group; with no checkout
+    it dies with `not a git repository` (exit 128) and the required summary
+    goes red on every push. Every `detect` that can run on those events must
+    check out (full history) BEFORE the filter step; merge_group must also
+    pass the queue's base_sha."""
+    checked = 0
+    for wf in sorted(_WF.glob("*.yml")):
+        data = yaml.safe_load(wf.read_text(encoding="utf-8"))
+        job = (data.get("jobs") or {}).get("detect")
+        if not job:
+            continue
+        steps = job["steps"]
+        idx = [
+            i for i, s in enumerate(steps)
+            if s.get("uses", "").startswith("dorny/paths-filter@")
+        ]
+        if not idx:
+            continue
+        triggers = data.get("on", data.get(True))
+        cond = str(job.get("if", ""))
+        runs_on_push = "push" in triggers
+        # detect runs on the queue unless its `if:` excludes it (`== 'pull_request'`
+        # only, or `!= 'merge_group'`).
+        runs_on_queue = "merge_group" in triggers and (
+            not cond or ("!=" in cond and "!= 'merge_group'" not in cond)
+        )
+        if not (runs_on_push or runs_on_queue):
+            continue
+        checked += 1
+        co = [
+            s for s in steps[: idx[0]]
+            if s.get("uses", "").startswith("actions/checkout@")
+        ]
+        assert co, f"{wf.name}: detect runs on push/merge_group without a checkout"
+        assert co[0].get("with", {}).get("fetch-depth") == 0, wf.name
+        assert "'pull_request'" not in co[0].get("if", "").replace("!= 'pull_request'", ""), wf.name
+        with_ = steps[idx[0]]["with"]
+        if runs_on_queue:
+            assert "merge_group.base_sha" in str(with_), wf.name
+        if runs_on_push:
+            # an empty base on push diffs the default branch, false-passing main
+            assert "github.event.before" in str(with_.get("base", "")), wf.name
+    assert checked >= 6, "expected the six push/merge_group detect jobs"
