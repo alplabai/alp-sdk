@@ -53,7 +53,7 @@ def cm33_clocks(doc: dict, soc: dict, links: dict, own: dict[str, str]) -> list[
     """CPG clock names to keep on for the CM33: enabled supervisor links +
     CM33-owned assignable instances (a hw_blocked instance is never enabled)."""
     linux_dt = soc.get("linux_dt") or {}
-    by_label = {v["label"]: v for v in linux_dt.values() if v.get("cpg_clocks")}
+    by_label = {v.get("zephyr_label", v["label"]): v for v in linux_dt.values() if v.get("cpg_clocks")}
     clocks: list[str] = []
 
     def add(names: list[str]) -> None:

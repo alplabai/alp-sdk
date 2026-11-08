@@ -985,7 +985,7 @@ def _check_soc_linux_dt(soc_files, *, peripheral_map=None) -> list:
         for name, ent in linux_dt.items():
             if not isinstance(ent, dict):
                 continue
-            label = ent.get("label")
+            label = ent.get("zephyr_label", ent.get("label"))
             if ent.get("pinmux") and label not in labels:
                 msgs.append(f"linux_dt.{name}.label: `{label}` is not a label in peripheral_instances")
             for sig in (ent.get("pinmux") or {}):

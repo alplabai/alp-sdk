@@ -67,6 +67,7 @@
         "required": ["label"],
         "properties": {
           "label": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "zephyr_label": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "The Zephyr SoC dtsi / peripheral_instances label when it differs from the Linux `label` (the SCI nodes: Zephyr `sci0`, Linux cip48 `rsci0`)." },
           "pinmux": { "type": "object", "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }, "additionalProperties": { "type": "integer", "minimum": 0 } },
           "capture": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
           "kconfig": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^CONFIG_[A-Z0-9_]+$" }, "description": "Kernel config symbols that build this instance's driver(s) (a CSI receiver lists the receiver and its capture unit).  Consumed by scripts/gen_camera_dt.py for camera-sensors.cfg." },

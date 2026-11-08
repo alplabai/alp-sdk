@@ -240,8 +240,8 @@ def test_override_flips_cm33_overlay_linux_fragment_and_pad_claims_consistently(
     assert "&sci0 {" in " ".join(project_m33_overlay(own, "m33_sm")[0])
     # Linux side: same decision, plus the clock hold
     lin_own, lin_plain = emit_linux_ownership_dts(own), emit_linux_ownership_dts(plain)
-    assert '&sci0 {\n\tstatus = "disabled";' in lin_own
-    assert '&sci0 {\n\tstatus = "disabled";' not in lin_plain
+    assert '&rsci0 {\n\tstatus = "disabled";' in lin_own
+    assert '&rsci0 {\n\tstatus = "disabled";' not in lin_plain
     clk = own.soc_spec["linux_dt"]["UART0"]["cpg_clocks"]
     assert all(f'"{c}"' in lin_own for c in clk)
     assert not any(f'"{c}"' in lin_plain for c in clk)

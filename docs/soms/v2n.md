@@ -257,7 +257,7 @@ The Linux tree follows the SoM defaults through the generated
 `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi`
 (`scripts/gen_linux_ownership_dt.py`): it enables an a55-owned node only with
 `linux_enable: true` + `linux_evidence`, and none has that today, so no node
-changes (`&sci0` in particular: no tty alias, floating RXD0); `&rspi0` is
+changes (`&rsci0` in particular: no tty alias, floating RXD0); `&rspi0` is
 `hw_blocked`. The same fragment lists the M33-owned module clocks in
 `renesas,cm33-owned-clocks` on the CPG node (RSCI7 for the GD32 link always,
 plus each instance whose SoM default owner is the M33), which

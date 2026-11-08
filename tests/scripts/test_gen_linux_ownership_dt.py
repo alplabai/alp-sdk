@@ -59,7 +59,7 @@ def test_enabled_uart0_gets_pinctrl_from_the_soc_metadata():
 def test_linux_enable_needs_evidence_and_a_pfc_code_is_never_guessed():
     doc = _enabled(DOC, "e1m_uart1")
     text, _ = lo.render(doc, SOC, LINKS)
-    assert "GAP -- no PFC function code" in text and "&sci1 {" not in text
+    assert "GAP -- no PFC function code" in text and "&rsci1 {" not in text
     del doc["assignable"]["e1m_uart1"]["linux_evidence"]
     with pytest.raises(lo.GenError, match="needs linux_evidence"):
         lo.render(doc, SOC, LINKS)
@@ -72,7 +72,7 @@ def test_can_channel_and_m33_owner():
     assert "&canfd {" in text and "channel3 {" in text and "canfd/channel3" in labels
     text, _ = lo.render(_enabled(DOC, "e1m_uart0"), SOC, LINKS, {**resolve_ownership(DOC), "e1m_uart0": "m33"})
     assert "owned by m33; Linux must not claim it" in text
-    assert '&sci0 {\n\tstatus = "disabled";' in text
+    assert '&rsci0 {\n\tstatus = "disabled";' in text
 
 
 def test_hw_blocked_wins_over_linux_enable():
@@ -126,7 +126,7 @@ def test_main_emits_the_cm33_clock_hold_for_an_m33_default(tmp_path):
     sci7 = ", ".join(f'"{c}"' for c in SOC["linux_dt"]["SCI7"]["cpg_clocks"])
     uart0 = ", ".join(f'"{c}"' for c in SOC["linux_dt"]["UART0"]["cpg_clocks"])
     assert f"renesas,cm33-owned-clocks = {sci7}, {uart0};" in text
-    assert '&sci0 {\n\tstatus = "disabled";' in text and 'status = "okay"' not in text
+    assert '&rsci0 {\n\tstatus = "disabled";' in text and 'status = "okay"' not in text
     # the real default holds the GD32 link only
     real = (REPO / g.OUT).read_text(encoding="utf-8")
     assert f"renesas,cm33-owned-clocks = {sci7};" in real

@@ -2,9 +2,15 @@
 
 # meta-alp-sdk
 
-> **Build-validated (partial), 2026-05-26.** The BSP v6.30
-> `bitbake-layers` flow below was exercised on WSL: the carrier DT
-> patches apply to linux-renesas 6.1.141-cip43 and `core-image-minimal`
+> **Kernel pin: ported to 6.1.157-cip48, host build-checked only.** The
+> layer builds `linux-renesas` from `rz-6.1-cip48` (pinned in
+> `linux-renesas_6.1.bbappend`); the board has not booted it and the
+> vendor feature layers still fail `do_patch` against it (see
+> `changelog.d/2640-kernel-cip48.md`).
+>
+> **Build-validated (partial), 2026-05-26, on the older 6.1.141-cip43
+> pin.** The BSP v6.30 `bitbake-layers` flow below was exercised on
+> WSL: the carrier DT patches applied to linux-renesas 6.1.141-cip43 and `core-image-minimal`
 > produces the kernel `Image` + carrier dtb + `.wic.gz`.  A `drpai`-OFF
 > `alp-image-edge` bake has since completed too -- see
 > [`docs/bring-up-drpai-v2n.md`](../docs/bring-up-drpai-v2n.md)'s status
@@ -126,7 +132,7 @@ Tools*).  Mind the two version axes: the **AI SDK platform is 7.1**,
 while the **BSP it rides on is v6.30** (= linux-renesas
 `6.1.141-cip43`) -- v6.30 is the revision this carrier was
 bring-up-tested against.  The layer's kernel pin is now
-`6.1.157-cip48` (`rz-6.1-cip48`, see `linux-renesas_%.bbappend`).
+`6.1.157-cip48` (`rz-6.1-cip48`, see `linux-renesas_6.1.bbappend`).
 
 The AI SDK comes as two downloads -- an apps/binary package and a
 **Source Code** package.  To *build* an image you need the Source

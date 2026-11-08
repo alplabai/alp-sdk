@@ -18,10 +18,10 @@
 /* e1m_spi0 (RSPI0, &rspi0): left disabled -- hardware-blocked on every core:
  * P90-P92 are not 3.3 V tolerant (R01UH1071EJ0120 4.2.3.1.1 Note 1) and the carrier parts on E1M SPI0 are not yet confirmed 1.8 V (audit IO-05 / IO-M2 / CM33-13) */
 
-/* e1m_uart0 (UART0, &sci0): owned by a55; left at the vendor status (no `linux_enable` in
+/* e1m_uart0 (UART0, &rsci0): owned by a55; left at the vendor status (no `linux_enable` in
  * metadata/e1m_modules/v2n/core-ownership.yaml -- Linux enablement is not bench-evidenced). */
 
-/* e1m_uart1 (UART1, &sci1): owned by a55; left at the vendor status (no `linux_enable` in
+/* e1m_uart1 (UART1, &rsci1): owned by a55; left at the vendor status (no `linux_enable` in
  * metadata/e1m_modules/v2n/core-ownership.yaml -- Linux enablement is not bench-evidenced). */
 
 /*
