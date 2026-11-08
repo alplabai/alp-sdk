@@ -135,7 +135,8 @@ pre-provisioned module.
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     path/to/app \
     --sysbuild \
-    -- -DSB_CONF_FILE=/abs/path/to/alp-sdk/zephyr/sysbuild/aen/sysbuild.conf
+    -- -DSB_CONF_FILE=/abs/path/to/alp-sdk/zephyr/sysbuild/aen/sysbuild.conf \
+    -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="/abs/path/to/alp-sdk/keys/mcuboot_shared_dev_ecdsa_p256.pem"
 
 # Produces:
 #   build/<app>/zephyr/zephyr.signed.bin  -- signed application image
@@ -194,6 +195,13 @@ pre-provisioned modules trusts (#2421).  It is public, so it gives no
 security and is never for production.  Your own key comes from
 `bash keys/generate_dev_key.sh`, and only an MCUboot re-provisioned with
 it will accept images signed by it.
+
+The key reaches the build only as the absolute
+`-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE` that the orchestrator (and tan)
+pass. Without it the build does **not** fail: Zephyr's sysbuild signs
+with MCUboot's bundled public `root-ec-p256.pem`, and the factory
+MCUboot rejects that image at boot. A hand-run `west build --sysbuild`
+must pass the -D itself (see the build line above).
 
 For production, regenerate the key from a secure source and
 hand the public half over to the bootloader build via a

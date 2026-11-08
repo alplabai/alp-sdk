@@ -2,92 +2,110 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * libFuzzer harness for the <alp/protocol/cc3501e.h> SPI wire
- * protocol.  Targets the frame parser that the Alif-side host
- * driver (chips/cc3501e/) and the embedded CC3501E firmware
- * (the cc3501e-bridge-firmware repo) both run on inbound bytes.
+ * libFuzzer harness for the CC3501E host driver's reply decoder,
+ * `cc3501e_reply_verdict()` in `chips/cc3501e/cc3501e_core.c`: the function
+ * `cc3501e_request()` runs on every reply read off the SPI wire (status byte,
+ * the proto-4 CRC-16/CCITT-FALSE trailer, the all-zero dead-phase guard).
  *
- * This harness carries an inline reference decoder that mirrors the
- * v1 framing rules.  The embedded firmware now implements the real
- * parser (cc3501e-bridge-firmware:src/protocol.c `protocol_build_reply`);
- * a follow-up can retarget this harness at that symbol directly for
- * coverage of the production code path.
+ * The harness links the real cc3501e_core.c and stubs only the bus, GPIO and
+ * time seams that file references.  Input layout:
  *
- * What it catches:
- *   - Header / payload-length disagreement (overflow into adjacent
- *     buffer if the parser believes payload_len blindly).
- *   - Unknown opcodes (must return NOT_SUPPORTED, not crash).
- *   - Async-event flag set on a master-side frame and vice versa.
- *   - Payload longer than ALP_CC3501E_MAX_PAYLOAD = 512.
+ *   byte[0]    command opcode
+ *   byte[1]    fw_proto_major; bit 7 set = patch a valid CRC trailer onto the
+ *              payload first (a random buffer never carries one, so without
+ *              this the proto-4 path past the CRC check is unreachable)
+ *   byte[2..5] reply header
+ *   byte[6..]  reply payload
  *
  * Build:
  *   cmake -B build-fuzz -DALP_BUILD_FUZZ=ON -DALP_OS=yocto \
  *         -DCMAKE_C_COMPILER=clang
  *   cmake --build build-fuzz --target alp_fuzz_cc3501e
- *
- * Run:
- *   ./build-fuzz/tests/fuzz/alp_fuzz_cc3501e -max_total_time=30 \
- *         tests/fuzz/corpus/cc3501e
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
-#include "alp/protocol/cc3501e.h"
+#include "alp/protocol/crc16.h"
+#include "cc3501e_internal.h"
 
-/* Status codes the inline reference parser emits.  v0.4's real
- * alp_cc3501e_parse_frame uses alp_status_t. */
-typedef enum {
-	REF_OK             = 0,
-	REF_ERR_TOO_SHORT  = 1, /* fewer than 4 header bytes */
-	REF_ERR_TOO_LONG   = 2, /* declared payload_len > MAX_PAYLOAD */
-	REF_ERR_TRUNCATED  = 3, /* declared len > buf - 4 */
-	REF_ERR_BAD_FLAGS  = 4, /* reserved bits set */
-	REF_ERR_BAD_OPCODE = 5  /* opcode in vendor / reserved range */
-} ref_status_t;
-
-/* Reference parser.  Stateless, no allocation, no callbacks --
- * just validates a single inbound frame.  Mirrors the contract in
- * <alp/protocol/cc3501e.h>:
- *
- *   +--------+--------+--------+--------+========+
- *   |  cmd   |  flags | payload_len_lo  | payload (N B)   |
- *   +--------+--------+--------+--------+========+
- */
-static ref_status_t ref_parse_frame(const uint8_t *buf, size_t size)
+/* Seams cc3501e_core.c references but cc3501e_reply_verdict() never reaches. */
+void alp_delay_ms(uint32_t ms)
 {
-	if (size < ALP_CC3501E_HEADER_BYTES) return REF_ERR_TOO_SHORT;
+	(void)ms;
+}
 
-	const uint8_t  cmd         = buf[0];
-	const uint8_t  flags       = buf[1];
-	const uint16_t payload_len = (uint16_t)((uint16_t)buf[2] | ((uint16_t)buf[3] << 8));
+void alp_delay_us(uint32_t us)
+{
+	(void)us;
+}
 
-	if (payload_len > ALP_CC3501E_MAX_PAYLOAD) return REF_ERR_TOO_LONG;
-	if ((size_t)payload_len + ALP_CC3501E_HEADER_BYTES > size) return REF_ERR_TRUNCATED;
+uint64_t alp_uptime_ms(void)
+{
+	return 0u;
+}
 
-	/* Bits 2..7 of flags are reserved in v1; firmware MUST reject. */
-	if ((flags & 0xFCu) != 0u) return REF_ERR_BAD_FLAGS;
+uint64_t alp_uptime_us(void)
+{
+	return 0u;
+}
 
-	/* Opcode ranges 0x80..0xFF are reserved for vendor extensions
-     * (per cc3501e.h doc-comment) -- v1 parser rejects them. */
-	if (cmd >= 0x80u) return REF_ERR_BAD_OPCODE;
+alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
+{
+	(void)pin;
+	(void)level;
+	return ALP_ERR_NOSUPPORT;
+}
 
-	/* Touch each payload byte so ASan / fuzzer coverage detects
-     * the parser actually walks the declared range.  Without this
-     * the OOB-on-truncated-frame bug above hides behind constant
-     * folding in -O2. */
-	volatile uint8_t sink = 0;
-	for (size_t i = 0; i < (size_t)payload_len; ++i) {
-		sink ^= buf[ALP_CC3501E_HEADER_BYTES + i];
-	}
-	(void)sink;
-	(void)cmd;
+alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
+{
+	(void)pin;
+	(void)level;
+	return ALP_ERR_NOSUPPORT;
+}
 
-	return REF_OK;
+alp_status_t alp_spi_transceive(alp_spi_t *spi, const uint8_t *tx, uint8_t *rx, size_t len)
+{
+	(void)spi;
+	(void)tx;
+	(void)rx;
+	(void)len;
+	return ALP_ERR_NOSUPPORT;
+}
+
+alp_status_t cc3501e_ping(cc3501e_t *ctx)
+{
+	(void)ctx;
+	return ALP_ERR_NOSUPPORT;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-	(void)ref_parse_frame(data, size);
+	enum { PREFIX = 2 + ALP_CC3501E_HEADER_BYTES };
+	if (size < PREFIX) return 0;
+
+	const alp_cc3501e_cmd_t cmd   = (alp_cc3501e_cmd_t)data[0];
+	const uint8_t           major = data[1] & 0x7Fu;
+	const uint8_t          *hdr   = data + 2;
+
+	uint8_t payload[1024];
+	size_t  plen = size - PREFIX;
+	if (plen > sizeof(payload)) plen = sizeof(payload);
+	memcpy(payload, data + PREFIX, plen);
+
+	if ((data[1] & 0x80u) != 0u && plen >= ALP_CC3501E_CRC_BYTES) {
+		const size_t covered = plen - ALP_CC3501E_CRC_BYTES;
+		uint16_t     crc     = alp_crc16_ccitt_false(hdr, ALP_CC3501E_HEADER_BYTES);
+		crc                  = alp_crc16_ccitt_false_update(crc, payload, covered);
+		payload[covered]     = (uint8_t)(crc & 0xFFu);
+		payload[covered + 1] = (uint8_t)(crc >> 8);
+	}
+
+	(void)cc3501e_reply_verdict(cmd, major, hdr, payload, (uint16_t)plen);
+	(void)cc3501e_reply_verdict(cmd, major, hdr, NULL, (uint16_t)plen);
+	(void)cc3501e_reply_may_be_all_zero(cmd);
+	(void)cc3501e_fw_major_is_acceptable(major);
 	return 0;
 }

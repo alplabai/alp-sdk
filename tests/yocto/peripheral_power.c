@@ -28,9 +28,19 @@
  */
 
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "test_assert.h"
+
+/* Fake sysfs RTC tree (built in main()): rtc0 has NO wakealarm (the V2N/V2M
+ * RV-3028 shape), rtc1 has one (#3077).  Declared before the include so the
+ * backend's ALP_YOCTO_POWER_RTC_ROOT scan runs against it. */
+static char g_rtc_root[96];
+static char g_wakealarm[128];
+#define ALP_YOCTO_POWER_RTC_ROOT g_rtc_root
 
 #include "../../src/backends/power/yocto_drv.c"
 
@@ -55,7 +65,7 @@ static alp_status_t fake_sysfs_write(const char *path, const char *val)
 		++g_call_count;
 	}
 	if (g_fail_state_write && strcmp(path, ALP_YOCTO_POWER_STATE_PATH) == 0) return ALP_ERR_IO;
-	if (g_fail_wakealarm_write && strcmp(path, ALP_YOCTO_POWER_WAKEALARM_PATH) == 0) {
+	if (g_fail_wakealarm_write && strcmp(path, g_wakealarm) == 0) {
 		return ALP_ERR_IO;
 	}
 	return ALP_OK;
@@ -154,8 +164,8 @@ static void test_wake_after_ms_programs_wakealarm(void)
 	alp_status_t rc = y_request_sleep(&st, ALP_POWER_MODE_SLEEP, 5000u, &info);
 	ALP_ASSERT_EQ_INT(rc, ALP_OK);
 	ALP_ASSERT_EQ_INT(g_call_count, 3);
-	ALP_ASSERT_TRUE(call_at(0, ALP_YOCTO_POWER_WAKEALARM_PATH, "0"));
-	ALP_ASSERT_TRUE(call_at(1, ALP_YOCTO_POWER_WAKEALARM_PATH, "1000000005"));
+	ALP_ASSERT_TRUE(call_at(0, g_wakealarm, "0"));
+	ALP_ASSERT_TRUE(call_at(1, g_wakealarm, "1000000005"));
 	ALP_ASSERT_TRUE(call_at(2, ALP_YOCTO_POWER_STATE_PATH, "freeze"));
 	ALP_ASSERT_EQ_INT((int)info.wake_source, ALP_POWER_WAKE_RTC);
 }
@@ -170,7 +180,7 @@ static void test_wake_after_ms_rounds_up(void)
 
 	alp_status_t rc = y_request_sleep(&st, ALP_POWER_MODE_SLEEP, 1500u, NULL);
 	ALP_ASSERT_EQ_INT(rc, ALP_OK);
-	ALP_ASSERT_TRUE(call_at(1, ALP_YOCTO_POWER_WAKEALARM_PATH, "1000000002"));
+	ALP_ASSERT_TRUE(call_at(1, g_wakealarm, "1000000002"));
 }
 
 /* A failed /sys/power/state write must surface as the mapped
@@ -199,8 +209,57 @@ static void test_wakealarm_failure_aborts_before_state_write(void)
 	ALP_ASSERT_TRUE(!saw_call(ALP_YOCTO_POWER_STATE_PATH, "freeze"));
 }
 
+/* No RTC exposes a wakealarm: a timed sleep must fail with an explicit
+ * error and never write /sys/power/state. */
+static void test_no_wakealarm_rtc_is_an_error(void)
+{
+	reset_fixture();
+	char saved[sizeof(g_rtc_root)];
+	(void)snprintf(saved, sizeof(saved), "%s", g_rtc_root);
+	(void)snprintf(g_rtc_root, sizeof(g_rtc_root), "%.80s/rtc0", saved); /* has no rtcN/ */
+
+	alp_power_backend_state_t st = { 0 };
+	alp_status_t              rc = y_request_sleep(&st, ALP_POWER_MODE_SLEEP, 5000u, NULL);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOSUPPORT);
+	ALP_ASSERT_EQ_INT(g_call_count, 0);
+
+	(void)snprintf(g_rtc_root, sizeof(g_rtc_root), "%s", saved);
+}
+
+/* rtc0 lacks a wakealarm, rtc1 has one: the alarm is armed on rtc1. */
+static void test_wakealarm_picks_rtc_that_has_one(void)
+{
+	reset_fixture();
+	alp_power_backend_state_t st = { 0 };
+
+	alp_status_t rc = y_request_sleep(&st, ALP_POWER_MODE_SLEEP, 5000u, NULL);
+	ALP_ASSERT_EQ_INT(rc, ALP_OK);
+	ALP_ASSERT_TRUE(strstr(g_wakealarm, "/rtc1/wakealarm") != NULL);
+	ALP_ASSERT_TRUE(call_at(0, g_wakealarm, "0"));
+	ALP_ASSERT_TRUE(call_at(1, g_wakealarm, "1000000005"));
+}
+
+static void make_fake_sysfs(void)
+{
+	char  tmpl[] = "/tmp/alp_power_rtc_XXXXXX";
+	char  dir[96];
+	FILE *f;
+
+	ALP_ASSERT_TRUE(mkdtemp(tmpl) != NULL);
+	(void)snprintf(g_rtc_root, sizeof(g_rtc_root), "%s", tmpl);
+	(void)snprintf(dir, sizeof(dir), "%s/rtc0", tmpl);
+	ALP_ASSERT_EQ_INT(mkdir(dir, 0700), 0);
+	(void)snprintf(dir, sizeof(dir), "%s/rtc1", tmpl);
+	ALP_ASSERT_EQ_INT(mkdir(dir, 0700), 0);
+	(void)snprintf(g_wakealarm, sizeof(g_wakealarm), "%s/wakealarm", dir);
+	f = fopen(g_wakealarm, "w");
+	ALP_ASSERT_TRUE(f != NULL);
+	fclose(f);
+}
+
 int main(void)
 {
+	make_fake_sysfs();
 	test_sleep_mode_writes_freeze();
 	test_deep_sleep_writes_standby();
 	test_standby_writes_mem();
@@ -209,6 +268,8 @@ int main(void)
 	test_wake_after_ms_rounds_up();
 	test_state_write_failure_is_not_swallowed();
 	test_wakealarm_failure_aborts_before_state_write();
+	test_wakealarm_picks_rtc_that_has_one();
+	test_no_wakealarm_rtc_is_an_error();
 
 	ALP_TEST_SUMMARY();
 }

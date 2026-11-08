@@ -287,3 +287,46 @@ def test_an_invocation_that_never_ran_apt_says_zero_attempts(tmp_path: Path) -> 
     assert "giving up after 0/3 attempt(s)" in err, (
         f"an invocation that ran no apt-get must say 0, not omit the count:\n{err}"
     )
+
+
+def _apt_leaving_cache_debris(tmp_path: Path) -> Path:
+    """apt-get shim that leaves what a real root apt leaves in the archive dir.
+
+    A real `sudo apt-get install` with `Dir::Cache::archives=$APT_ARCHIVE_DIR`
+    writes the .debs, keeps `partial/` (0700, owned by `_apt`) and a root-owned
+    `lock`. The shim reproduces the files; ownership cannot be faked without
+    root, so the test asserts on presence, which is what tar tripped over.
+    """
+    bindir = _fake_apt(tmp_path, exit_code=0)
+    apt = bindir / "apt-get"
+    apt.write_text(
+        "#!/bin/sh\n"
+        'd="$APT_ARCHIVE_DIR"\n'
+        'mkdir -p "$d/partial" && : > "$d/lock" && : > "$d/pkg_1.0_amd64.deb"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    apt.chmod(0o755)
+    return bindir
+
+
+def test_a_successful_run_leaves_the_archive_dir_cacheable(tmp_path: Path) -> None:
+    """#3063: partial/ and lock made actions/cache/save abort, so no cache ever saved.
+
+    tar runs as the runner user and cannot read apt's root/_apt-owned
+    `partial/` and `lock`; one unreadable entry fails the whole save. After a
+    successful apt run only the .debs may remain.
+    """
+    archives = tmp_path / "apt-archives"
+    env = _env(tmp_path)
+    env["APT_ARCHIVE_DIR"] = str(archives)
+    env["PATH"] = f"{_apt_leaving_cache_debris(tmp_path)}:{env['PATH']}"
+
+    proc = subprocess.run(
+        ["bash", str(_WRAPPER), "install", "-y", "some-package"],
+        env=env, capture_output=True, text=True, encoding="utf-8", timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert (archives / "pkg_1.0_amd64.deb").is_file(), "the cached .debs must stay"
+    assert not (archives / "partial").exists(), "partial/ breaks the cache save"
+    assert not (archives / "lock").exists(), "lock breaks the cache save"

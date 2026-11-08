@@ -220,7 +220,8 @@ SoM preset at `metadata/e1m_modules/<SKU>.yaml` automatically).
    python3 scripts/gen_example_alp_conf.py examples/peripheral-io/gpio-button-led
    west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
        examples/peripheral-io/gpio-button-led \
-       --sysbuild -- -Dgpio-button-led_EXTRA_CONF_FILE=generated/alp.conf -DSB_CONF_FILE=$PWD/zephyr/sysbuild/aen/sysbuild.conf
+       --sysbuild -- -Dgpio-button-led_EXTRA_CONF_FILE=generated/alp.conf -DSB_CONF_FILE=$PWD/zephyr/sysbuild/aen/sysbuild.conf \
+       -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="$PWD/keys/mcuboot_shared_dev_ecdsa_p256.pem"
    west flash    # REFUSES (alp-sdk#2274) -- see docs/aen-provisioning.md §0.5.
    ```
 
@@ -702,7 +703,7 @@ Once §6's runbook passes:
   PHY-reset-release.
 
 More patterns in [`docs/troubleshooting.md`](troubleshooting.md);
-ask on [community.alplab.ai](https://community.alplab.ai/) for
+open a [GitHub issue](https://github.com/alplabai/alp-sdk/issues) for
 anything not covered here.
 
 ## See also

@@ -1699,3 +1699,17 @@ config OSPI_ALIF
 	  ADR 0017 Tier-1.5 (in-tree thin driver over an Apache-2.0 hal_alif HW
 	  library, not a fork-driver copy -- the fork ships no OSPI Zephyr class
 	  driver either, only the DT binding).  See docs/adr/0017.
+
+# hal_alif picks its gen2 layouts with CONFIG_ENSEMBLE_GEN2: the aiPM
+# memory_block_t / *_MASK / EWIC lists (se_services/include/aipm.h) and the
+# OSPI XIP-write control and AES signal-delay helpers (drivers/ospi).
+# Upstream Zephyr's soc/alif does not declare the symbol, so without this
+# every E8/E4 build compiled the gen1 code (alp-sdk#2785).  Alif's own Zephyr
+# fork (soc/alif/ensemble/Kconfig, e8/Kconfig, e4/Kconfig) declares it and
+# selects it from SOC_SERIES_E8 and SOC_SERIES_E4; this mirrors that.
+config ENSEMBLE_GEN2
+	bool
+	default y if SOC_SERIES_E8 || SOC_SERIES_E4
+	help
+	  Alif Ensemble gen2 silicon (E8, E4).  Selects hal_alif's gen2 aiPM
+	  memory-block layout and gen2 OSPI XIP/AES helpers.

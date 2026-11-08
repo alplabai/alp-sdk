@@ -19,23 +19,113 @@ Scope: only the *top-level* ``include/alp/*.h`` files are checked.  The
 explicitly non-portable surfaces.  A narrow ``ALLOWLIST`` covers any root
 header that legitimately re-exports a chip type as a documented
 protocol/extension surface (empty today).
+
+Second check (C++ purity): every header under ``include/alp/`` must also
+parse as C++17 -- a bare ``_Static_assert`` or similar C-only construct
+breaks every C++ consumer (use ``ALP_STATIC_ASSERT`` from
+``<alp/static_assert.h>``).  Each header is compiled with
+``g++ -std=c++17 -fsyntax-only`` (clang-family drivers add
+``-Werror=c11-extensions`` so they reject ``_Static_assert`` like g++ does).  It runs only with ``--cxx`` (the
+default run stays hermetic for the quick profile); CI passes ``--cxx
+--require-cxx`` so a missing compiler fails instead of skipping.
+ALP_BOARD_E1M_EVK is defined so <alp/board.h> resolves.  Headers that
+need more are listed in ``CXX_SKIP``
+with a reason.
 """
 
 from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
-CHIP_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]alp/chips/[^">]+[">]', re.MULTILINE)
+CHIP_INCLUDE_RE = re.compile(
+    r'^\s*#\s*include\s*[<"]alp/chips/[^">]+[">]', re.MULTILINE
+)
 
 # Root headers explicitly permitted to re-export a chip surface, each with a
 # justification.  Keep this list empty unless a documented protocol/extension
 # surface genuinely must live at the root; prefer include/alp/ext/ instead.
 ALLOWLIST: dict[str, str] = {}
+
+
+# Headers excluded from the C++ syntax check, each with a justification.
+CXX_SKIP: dict[str, str] = {}
+
+CXX_COMPILERS = ("g++", "arm-none-eabi-g++", "c++", "clang++")
+
+
+def find_cxx() -> str | None:
+    for cc in CXX_COMPILERS:
+        if shutil.which(cc):
+            return cc
+    return None
+
+
+def _cxx_strict_flags(cxx: str) -> list[str]:
+    """Extra flags that make a clang-family driver reject C-only constructs.
+
+    g++ rejects a bare ``_Static_assert`` in C++ outright, but clang (and
+    Apple clang, which is what ``c++`` is on macOS) accepts it as a C11
+    extension and only warns under ``-Wc11-extensions``.  Promote that one
+    warning to an error so every host enforces the same rule.  The flag is
+    clang-only: g++ errors out on an unknown ``-Werror=`` name.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            [cxx, "--version"], capture_output=True, text=True, encoding="utf-8"
+        ).stdout
+    except OSError:
+        return []
+    return ["-Werror=c11-extensions"] if "clang" in out.lower() else []
+
+
+def check_cxx(root: Path, cxx: str) -> list[str]:
+    """Compile every include/alp header as C++17 (syntax only)."""
+    # Imported here, not at module level: the default (quick-profile) run of
+    # this gate must stay hermetic and never shell out; only --cxx does.
+    import subprocess
+
+    inc = root / "include"
+    strict = _cxx_strict_flags(cxx)
+    offenders: list[str] = []
+    for header in sorted((inc / "alp").rglob("*.h")):
+        rel = header.relative_to(inc).as_posix()
+        if rel in CXX_SKIP:
+            continue
+        with tempfile.TemporaryDirectory() as td:
+            tu = Path(td) / "tu.cpp"
+            tu.write_text("#include <" + rel + ">\n", encoding="utf-8", newline="")
+            proc = subprocess.run(
+                [
+                    cxx,
+                    "-std=c++17",
+                    "-fsyntax-only",
+                    *strict,
+                    "-DALP_BOARD_E1M_EVK",
+                    f"-I{inc}",
+                    str(tu),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+        if proc.returncode != 0:
+            first = next(
+                (ln for ln in proc.stderr.splitlines() if "error" in ln),
+                "compile failed",
+            )
+            offenders.append(
+                f"include/{rel}: does not compile as C++17 ({first.strip()})"
+            )
+    return offenders
 
 
 def check(root: Path) -> list[str]:
@@ -61,13 +151,31 @@ def check(root: Path) -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", type=Path, default=REPO)
+    ap.add_argument(
+        "--require-cxx", action="store_true", help="fail when no C++ compiler is found"
+    )
+    ap.add_argument(
+        "--cxx", action="store_true", help="also compile every header as C++17"
+    )
     args = ap.parse_args()
 
     offenders = check(args.root)
+    if args.cxx:
+        cxx = find_cxx()
+        if cxx is not None:
+            offenders += check_cxx(args.root, cxx)
+        elif args.require_cxx:
+            offenders.append("no C++ compiler found for the C++ purity check")
+        else:
+            print(
+                "check_public_header_purity: no C++ compiler on PATH; C++ check skipped"
+            )
     if not offenders:
         return 0
 
-    print("check_public_header_purity: root public headers must stay chip-neutral:")
+    print(
+        "check_public_header_purity: public headers must stay chip-neutral and C++-clean:"
+    )
     for o in offenders:
         print(f"  {o}")
     return 1

@@ -42,6 +42,11 @@ if(TR_HP_SOUND)
 	# subsystem on.
 	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/volume_he.overlay)
 	list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/volume_he.conf)
+	# GPIO5 is the HP's. The AEN board trees enable &gpio5 (SoM backlight pad), so hand it back
+	# here; the RK055 shield (backlight enable P5_5) keeps it and stays refused by bus2_he.c.
+	if(NOT "e1m_evk_rk055hdmipi4ma0" IN_LIST SHIELD)
+		list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/hp_sound_he.overlay)
+	endif()
 endif()
 
 # Who draws the frame. A32 (default): the Cortex-A32 renderer draws every

@@ -6,7 +6,7 @@
 > benched.
 
 **The "why heterogeneous compute?" flagship.**  The A-cluster
-delegates a 1024-point FFT to its M-class peer over RPMsg and reads
+delegates a 64-point FFT to its M-class peer over RPMsg and reads
 back the magnitude spectrum.  Each core does what it's best at:
 
 | Side                    | Why this core?                                          |
@@ -26,7 +26,7 @@ examples/multicore/heterogeneous-offload/
 │   ├── CMakeLists.txt   + FFT requester via alp_rpc_call)
 │   └── src/main.c
 └── m33_sm/             (m33_sm's Zephyr slice -- the FFT worker)
-    ├── CMakeLists.txt
+    ├── CMakeLists.txt  (builds zephyr/drivers/ipc/resource_table.c)
     ├── prj.conf
     └── src/main.c
 ```
@@ -38,11 +38,40 @@ shared `imu_fft.h`-style declaration inline in each main.c):
 
 | Method | Request                       | Response                       |
 |--------|-------------------------------|--------------------------------|
-| `fft`  | 1024 × `float32` (PCM samples)| 513 × `float32` (magnitudes)   |
+| `fft`  | 64 × `float32` (PCM samples)  | 33 × `float32` (magnitudes)    |
 
 The A55 calls `alp_rpc_call(ch, "fft", samples, sizeof samples, mags,
 &mags_len, /* timeout */ 1000u)` and blocks until the M33-SM has
 returned the magnitude spectrum.
+
+The transform is deliberately 64 points: one RPC frame (method name +
+NUL + payload) must fit a single RPMsg buffer (496 B usable on the V2N
+carve-out; the SDK TX cap `CONFIG_ALP_SDK_RPC_TX_FRAME_MAX` is 1024).
+The request is 256 B and the response 132 B.  A 1024-point FFT (4096 B
+request) cannot go in one frame -- chunk it across several calls.
+
+## Why the M33-SM side is raw OpenAMP, not `<alp/rpc.h>`
+
+The A55 requester goes through `<alp/rpc.h>` (`alp_rpc_call()` ->
+`src/backends/rpc/yocto_uio_drv.c`).  The V2N M33-SM slice does **not**: it
+copies the bench-proven raw OpenAMP bring-up of
+[`rpmsg-v2n`](../rpmsg-v2n/) (`m33_sm/src/main.c`, `resource_table.[ch]`)
+and serves the `fft` method itself, with the same `<method>\0<payload>`
+framing on the fixed endpoint address 1024.  Reasons:
+
+- The generic Zephyr backend (`src/backends/rpc/zephyr_drv.c`) rides on
+  `ipc_service` with its own generated resource table and has no V2N
+  bring-up (resource table in DDR, MHU doorbell).  It also publishes no AMP
+  beacon.
+- `yocto_uio_drv.c` refuses to open a channel until it reads the version-2
+  beacon (`<alp/protocol/amp_beacon.h>`) and completes its attach-epoch
+  handshake, so the M33 image must publish it.  The copied bring-up does.
+
+So the board.yaml `ipc:` carve-out is only a paper entry here, and
+`prj.conf` sets `CONFIG_MBOX`, `CONFIG_OPENAMP` and
+`CONFIG_OPENAMP_RSC_TABLE=n` by hand, as `rpmsg-v2n` does.  Build the M33
+image with the generated `alp.conf` layered on (as `testcase.yaml` does),
+otherwise CMSIS-DSP is missing and the build stops with an `#error`.
 
 ## Memory map
 
@@ -57,8 +86,11 @@ transport (resource table, vrings, shared buffers) sits in the SoC's
 
 ## Boot order
 
-Identical to `rpmsg-v2n`: A55 → systemd → remoteproc loads the M33
-firmware → both sides discover `alp_default_rpmsg`.
+A55 → systemd → remoteproc attaches to the already-running M33 firmware
+(booted by BL22 before Linux).  The M33 publishes the AMP beacon first,
+creates its rpmsg endpoint at the fixed address 1024 once the A55 has
+attached, and the A55's `alp_rpc_open()` dials that address; there is no
+`alp_default_rpmsg` discovery on this link.
 
 ## Build
 
@@ -85,14 +117,22 @@ rebuilds incrementally in seconds. See
 
 After remoteproc brings up the M33 firmware:
 
+M33 console (Zephyr log, timestamps omitted):
+
 ```
-[m33_sm] FFT worker ready; waiting for 'fft' calls
-[a55]    generated 1024-sample @ 440 Hz sine, calling fft...
-[m33_sm] processing 1024-sample frame
-[a55]    fft returned; dominant bin=23 (~430.7 Hz)
-[a55]    generated 1024-sample @ 880 Hz sine, calling fft...
-[m33_sm] processing 1024-sample frame
-[a55]    fft returned; dominant bin=46 (~861.3 Hz)
+heterogeneous-offload/m33_sm: starting
+heterogeneous-offload/m33_sm: bringing up the rpmsg virtio device
+heterogeneous-offload/m33_sm: FFT worker started
+```
+
+A55 requester:
+
+```
+[a55] heterogeneous-offload requester coming up
+[a55]    generated 64-sample @ 400 Hz sine, calling fft...
+[a55]    fft returned; dominant bin=4 (~400.0 Hz)
+[a55]    generated 64-sample @ 800 Hz sine, calling fft...
+[a55]    fft returned; dominant bin=8 (~800.0 Hz)
 [heterogeneous-offload] done
 ```
 
