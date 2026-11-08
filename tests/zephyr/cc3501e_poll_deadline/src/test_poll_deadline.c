@@ -27,8 +27,10 @@
  *     issue #1953 describes -- exactly the cost the old sleep-only budget
  *     never charged.
  *
- * No real time passes, so the test is fast and deterministic: it proves
- * the deadline MATH, not a timing-sensitive race against a real clock.
+ * The deadline math runs on that fake clock, so it is deterministic and
+ * not a race against a real clock.  `alp_delay_ms()` additionally yields
+ * the CPU for 1 ms of real time so the #3103 cancel test can run a second
+ * thread; no assertion depends on that real time.
  */
 
 #include <string.h>
@@ -206,7 +208,7 @@ ZTEST(cc3501e_poll_deadline, test_zero_timeout_still_makes_one_attempt_1953)
 static K_THREAD_STACK_DEFINE(cancel_stack, 16384);
 static struct k_thread cancel_thread;
 static alp_status_t    cancel_rc = ALP_OK;
-static volatile bool   cancel_flag;
+static bool            cancel_flag;
 
 static void cancel_entry(void *a, void *b, void *c)
 {
@@ -220,8 +222,8 @@ static void cancel_entry(void *a, void *b, void *c)
 
 ZTEST(cc3501e_poll_deadline, test_cancel_wakes_blocked_gatt_read_3103)
 {
-	cancel_flag = false;
-	cancel_rc   = ALP_OK;
+	__atomic_store_n(&cancel_flag, false, __ATOMIC_RELAXED);
+	cancel_rc = ALP_OK;
 	k_thread_create(&cancel_thread,
 	                cancel_stack,
 	                K_THREAD_STACK_SIZEOF(cancel_stack),
@@ -234,8 +236,11 @@ ZTEST(cc3501e_poll_deadline, test_cancel_wakes_blocked_gatt_read_3103)
 	                K_NO_WAIT);
 	k_msleep(100);
 	zassert_not_equal(k_thread_join(&cancel_thread, K_NO_WAIT), 0, "read must still be blocked");
-	cancel_flag = true;
-	zassert_equal(k_thread_join(&cancel_thread, K_SECONDS(2)), 0, "cancel must wake the read");
+	__atomic_store_n(&cancel_flag, true, __ATOMIC_RELEASE);
+	if (k_thread_join(&cancel_thread, K_SECONDS(2)) != 0) {
+		k_thread_abort(&cancel_thread);
+		zassert_unreachable("cancel must wake the read");
+	}
 	zassert_equal(cancel_rc, ALP_ERR_NOT_READY, "cancelled read -> NOT_READY (got %d)", cancel_rc);
 }
 

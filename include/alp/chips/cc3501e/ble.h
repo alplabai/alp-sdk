@@ -277,13 +277,13 @@ alp_status_t cc3501e_ble_gatt_notify(cc3501e_t     *ctx,
  * @return ALP_OK with @p out / @p out_len filled; ALP_ERR_INVAL on a NULL
  *         @p out with non-zero @p cap; otherwise the mapped error.
  */
-alp_status_t cc3501e_ble_gatt_read(cc3501e_t           *ctx,
-                                   uint16_t             handle,
-                                   uint8_t             *out,
-                                   size_t               cap,
-                                   size_t              *out_len,
-                                   uint32_t             timeout_ms,
-                                   const volatile bool *cancel);
+alp_status_t cc3501e_ble_gatt_read(cc3501e_t  *ctx,
+                                   uint16_t    handle,
+                                   uint8_t    *out,
+                                   size_t      cap,
+                                   size_t     *out_len,
+                                   uint32_t    timeout_ms,
+                                   const bool *cancel);
 
 /**
  * @brief Write a GATT attribute value (BLE_GATT_WRITE, 0x3B).
@@ -300,12 +300,12 @@ alp_status_t cc3501e_ble_gatt_read(cc3501e_t           *ctx,
  * @return ALP_OK once the write is accepted; ALP_ERR_INVAL on a bad arg /
  *         oversized value; otherwise the mapped error.
  */
-alp_status_t cc3501e_ble_gatt_write(cc3501e_t           *ctx,
-                                    uint16_t             handle,
-                                    const uint8_t       *data,
-                                    size_t               len,
-                                    uint32_t             timeout_ms,
-                                    const volatile bool *cancel);
+alp_status_t cc3501e_ble_gatt_write(cc3501e_t     *ctx,
+                                    uint16_t       handle,
+                                    const uint8_t *data,
+                                    size_t         len,
+                                    uint32_t       timeout_ms,
+                                    const bool    *cancel);
 
 /**
  * @brief Attach the live bridge handle to the portable BLE backend.

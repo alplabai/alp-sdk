@@ -75,15 +75,15 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 /* poll_by_repeat() with a cancel flag: @p cancel (may be NULL) is polled
  * before every attempt, and once *cancel is true the loop returns
  * ALP_ERR_NOT_READY without sending (BLE GATT waits, #3103). */
-alp_status_t poll_by_repeat_cancel(cc3501e_t           *ctx,
-                                   alp_cc3501e_cmd_t    cmd,
-                                   const uint8_t       *tx_payload,
-                                   size_t               tx_len,
-                                   uint8_t             *rx_buf,
-                                   size_t               rx_cap,
-                                   size_t              *rx_len,
-                                   uint32_t             timeout_ms,
-                                   const volatile bool *cancel);
+alp_status_t poll_by_repeat_cancel(cc3501e_t        *ctx,
+                                   alp_cc3501e_cmd_t cmd,
+                                   const uint8_t    *tx_payload,
+                                   size_t            tx_len,
+                                   uint8_t          *rx_buf,
+                                   size_t            rx_cap,
+                                   size_t           *rx_len,
+                                   uint32_t          timeout_ms,
+                                   const bool       *cancel);
 
 /* Same retry loop as poll_by_repeat() above, but the caller supplies the
  * retry seq instead of it being allocated from the shared ctx->req_seq
@@ -110,18 +110,18 @@ alp_status_t poll_by_repeat_cancel(cc3501e_t           *ctx,
  * @p cancel (may be NULL) is polled before every attempt; once *cancel is
  * true the loop returns ALP_ERR_NOT_READY without sending (BLE GATT waits,
  * #3103). */
-alp_status_t poll_by_repeat_seq(cc3501e_t           *ctx,
-                                alp_cc3501e_cmd_t    cmd,
-                                const uint8_t       *tx_payload,
-                                size_t               tx_len,
-                                uint8_t             *rx_buf,
-                                size_t               rx_cap,
-                                size_t              *rx_len,
-                                uint32_t             timeout_ms,
-                                uint8_t              req_seq,
-                                bool                 check_epoch,
-                                uint16_t             handle,
-                                const volatile bool *cancel);
+alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
+                                alp_cc3501e_cmd_t cmd,
+                                const uint8_t    *tx_payload,
+                                size_t            tx_len,
+                                uint8_t          *rx_buf,
+                                size_t            rx_cap,
+                                size_t           *rx_len,
+                                uint32_t          timeout_ms,
+                                uint8_t           req_seq,
+                                bool              check_epoch,
+                                uint16_t          handle,
+                                const bool       *cancel);
 
 /* Same retry loop as poll_by_repeat() above (own ctx->req_seq allocation),
  * but with the per-attempt epoch re-check (see poll_by_repeat_seq()'s

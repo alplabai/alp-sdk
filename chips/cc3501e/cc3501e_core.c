@@ -2805,18 +2805,18 @@ static alp_status_t cc3501e_poll_exit(cc3501e_t *ctx, alp_status_t s, bool no_st
 	return s;
 }
 
-alp_status_t poll_by_repeat_seq(cc3501e_t           *ctx,
-                                alp_cc3501e_cmd_t    cmd,
-                                const uint8_t       *tx_payload,
-                                size_t               tx_len,
-                                uint8_t             *rx_buf,
-                                size_t               rx_cap,
-                                size_t              *rx_len,
-                                uint32_t             timeout_ms,
-                                uint8_t              req_seq,
-                                bool                 check_epoch,
-                                uint16_t             handle,
-                                const volatile bool *cancel)
+alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
+                                alp_cc3501e_cmd_t cmd,
+                                const uint8_t    *tx_payload,
+                                size_t            tx_len,
+                                uint8_t          *rx_buf,
+                                size_t            rx_cap,
+                                size_t           *rx_len,
+                                uint32_t          timeout_ms,
+                                uint8_t           req_seq,
+                                bool              check_epoch,
+                                uint16_t          handle,
+                                const bool       *cancel)
 {
 	/* Same param checks cc3501e_request() runs, done ONCE here (cmd/
 	 * tx_payload/tx_len are fixed across every retry below, unlike the
@@ -2875,7 +2875,7 @@ alp_status_t poll_by_repeat_seq(cc3501e_t           *ctx,
 		/* Checked between polls (and before the first): a caller that set
 		 * *cancel wants out now, not after timeout_ms.  No link recovery --
 		 * nothing has gone wrong on the wire. */
-		if (cancel != NULL && *cancel) return ALP_ERR_NOT_READY;
+		if (cancel != NULL && __atomic_load_n(cancel, __ATOMIC_ACQUIRE)) return ALP_ERR_NOT_READY;
 		/* Sentinel + peek bracketed in the SAME lock hold as the request
 		 * itself (issue #1116 follow-up): both touch the shared
 		 * ctx->rx_scratch[0] this ctx's other callers can also write, so
@@ -3083,15 +3083,15 @@ alp_status_t poll_by_repeat_seq(cc3501e_t           *ctx,
  * invalid ctx falls through with req_seq left at 0, a value
  * poll_by_repeat_seq() never reads because its own check returns before
  * touching it. */
-alp_status_t poll_by_repeat_cancel(cc3501e_t           *ctx,
-                                   alp_cc3501e_cmd_t    cmd,
-                                   const uint8_t       *tx_payload,
-                                   size_t               tx_len,
-                                   uint8_t             *rx_buf,
-                                   size_t               rx_cap,
-                                   size_t              *rx_len,
-                                   uint32_t             timeout_ms,
-                                   const volatile bool *cancel)
+alp_status_t poll_by_repeat_cancel(cc3501e_t        *ctx,
+                                   alp_cc3501e_cmd_t cmd,
+                                   const uint8_t    *tx_payload,
+                                   size_t            tx_len,
+                                   uint8_t          *rx_buf,
+                                   size_t            rx_cap,
+                                   size_t           *rx_len,
+                                   uint32_t          timeout_ms,
+                                   const bool       *cancel)
 {
 	uint8_t req_seq = 0u;
 	if (ctx != NULL && ctx->initialised) {
