@@ -251,37 +251,53 @@ To raise the cap to 1.8 GHz, flip one line in the SoM dtsi
 V2N-family SKUs. Validate your own silicon + thermals before enabling it
 fleet-wide.
 
-## Kernel FIT signing (opt-in scaffolding)
+## Verified kernel boot: signed FIT (opt-in)
+
+> **BENCH-UNVERIFIED.** The U-Boot and the signed kernel FIT build, and the
+> FIT, `bootcmd` and control-dtb key were inspected, but a unit has never
+> booted this way. The failure mode is a **reset loop** (no U-Boot shell, a
+> failed boot resets) that only an external eMMC / FIP reflash recovers: try
+> it on a unit you can reflash from outside.
 
 By default U-Boot loads a **raw** `Image` + dtb from `/boot` and boots them
-with no integrity check. An opt-in builds the kernel instead as a **signed
-`fitImage`** — kernel + dtb in one FIT with an **RSA-2048 / SHA-256**
-signature over the configuration (so the kernel and its dtb are bound
-together). Enable it in `conf/local.conf`:
+with no integrity check. The opt-in builds the kernel as a **signed
+`fitImage`** (kernel + dtb in one FIT, **RSA-2048 / SHA-256** over the
+configuration so the two are bound together) and builds U-Boot to boot and
+verify it. Enable it in `conf/local.conf`:
 
 ```bash
 ALP_FIT_SIGNED = "1"
 require conf/include/alp-fit-signing.inc
 ```
 
-When off (the default) the build is unchanged. When on, the kernel deploys
-`fitImage` signed with a **generated dev key** under `build/alp-fit-keys/`
-(gitignored build dir; dev-only — never ship it).
+When off (the default) the build is unchanged. When on:
 
-> **This is build-side scaffolding only — it is not yet enforced.** Making
-> U-Boot *verify* the FIT before boot (`CONFIG_FIT_SIGNATURE` + the
-> production public key in the FIP's U-Boot dtb + `bootcmd` → `bootm`) means
-> rebuilding and reflashing the bootloader, and choosing the production key
-> custody — a separate, brick-class step tracked in `alp-sdk-internal`. The
-> dev-key fitImage here lets you exercise the signed-image build path now.
->
-> **Caveat — not bootable as-is.** With the flag on the kernel deploys
-> **only** the signed `fitImage` (the raw `Image` is no longer produced), and
-> the current (phase-1) bootloader still `ext4load`s `/boot/Image` + `booti`s
-> it — it does **not** `bootm` a FIT. So the flag validates the signed-*build*
-> path, not a bootable board, and the §4 "Fast dev iteration" copy-`Image`
-> recipe does not apply while it is on. Booting the FIT comes with the
-> phase-2 U-Boot work.
+- the kernel deploys `/boot/fitImage` signed with a **generated dev key**
+  under `build/alp-fit-keys/` (gitignored build dir; never ship it);
+- U-Boot (patch `0018`, `fit-signed.cfg`) loads `/boot/fitImage` from the
+  eMMC and runs `bootm` on the configuration node of the board dtb. The
+  public key is embedded in the control dtb of the U-Boot in the FIP as a
+  `required = "conf"` key, so a FIT that is unsigned or fails verification
+  is not booted, and U-Boot halts at start-up if that key is missing;
+- there is no fallback: no `/boot/Image`, no microSD, no
+  `booti`/`bootz`/`go`/`bootelf`/EFI/network/serial-download/`source`
+  commands, no legacy image format, and no way to interrupt autoboot
+  (`CONFIG_BOOTDELAY=-2`). A boot that fails ends in `reset`;
+- the OpenCV accelerator and codec firmware blobs (`OpenCV_Bin.bin`,
+  `Codec_Bin.bin`) are **not** preloaded, because they would be loaded
+  without a signature check.
+
+The **bootloader (FIP) must be rebuilt and reflashed together with the
+image**: a FIP from a default build still `booti`s `/boot/Image` and finds
+none. With no U-Boot shell, an image that does not verify boot-loops; reflash
+the eMMC from outside the unit.
+
+> **Not a complete secure-boot chain.** The key is a dev key (anyone who can
+> build can sign), TF-A does not verify the FIP, and there is no
+> anti-rollback: an older, validly signed FIT still boots. TF-A trusted boot,
+> the production key custody and anti-rollback are separate, owner-decided
+> steps tracked in `alp-sdk-internal`. The §4 "Fast dev iteration" copy-`Image`
+> recipe does not apply while the flag is on.
 
 ## Dev-kit package feed (opkg)
 
