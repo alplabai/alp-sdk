@@ -11,6 +11,14 @@
 #
 # Sourced under `if ALP_SDK` from zephyr/Kconfig once the loader hook
 # is consumed downstream.  This file just declares the symbols.
+#
+# CAUTION (#2985): most per-library accelerator knobs below (ALP_TFLM_*,
+# ALP_CMSIS_DSP_*, ALP_LITTLEFS_*_DMA, ALP_LVGL_*, ALP_MBEDTLS_*, ...) are
+# DECLARATIVE markers -- no source or CMake file consumes them yet, and their
+# `depends on` is SoC-wide, not per-core.  Setting one records the loader's
+# selection in .config; it does NOT by itself compile an accelerated path.
+# Only the knobs that name a real consumer in their help text (for example
+# ALP_SDK_U8G2_VENDORED_CORE, ALP_SDK_AHRS, ALP_SDK_PID) gate build behaviour.
 
 # v0.5 §D.lib.loader -- per-library HW-accelerator Kconfig knobs.
 

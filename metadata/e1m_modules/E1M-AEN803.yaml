@@ -165,7 +165,7 @@ inference:
   ethos_u_variant:      u85                    # primary.
 
 capabilities:
-  optiga_trust_m:       true
+  optiga_trust_m:       false      # DNP=1 (assembled: false in i2c_devices); capability tracks population.
 
 topology:
   a32_cluster:
@@ -215,7 +215,7 @@ topology:
 #   he_slot0   0x010000    2688 KiB  0x80010000    m55_he   (unchanged)
 #   hp_slot0   0x2b0000    2688 KiB  0x802b0000    m55_hp   (was slot1/OTA)
 #   reserved   0x550000    64 KiB    0x80550000    m55_he, m55_hp  (ex-scratch)
-#   storage    0x560000    96 KiB    0x80560000    m55_he, m55_hp
+#   storage    0x560000    96 KiB    0x80560000    m55_he (HP image: node disabled, #2984)
 #   atoc       0x578000    32 KiB    0x80578000    m55_he, m55_hp  (SE-owned)
 #   64 + 2688 + 2688 + 64 + 96 + 32 = 5632 KiB == the full 5.5 MiB App MRAM.
 #
@@ -231,9 +231,23 @@ memory_map:
   - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true, carveout: false, write_authority: customer_image }
   - { name: hp_slot0,  base: 0x802b0000, size_kib: 2688, accessible_from: [m55_hp],          cacheable: true, carveout: false, write_authority: customer_image }
   - { name: reserved,  base: 0x80550000, size_kib: 64,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: none }
-  - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: customer_runtime }
+  - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he],                           carveout: false, write_authority: customer_runtime }
   - { name: atoc,      base: 0x80578000, size_kib: 32,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: secure_enclave }
   - { name: mram_main, base: 0x80000000, size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true, write_authority: composite }
+  # Cross-core IPC carve-out candidate: 64 KiB of global SRAM0 (DFP
+  # AE822FA0E5597 soc_features.h SOC_FEAT_BULK_SRAM0_BASE 0x02000000 /
+  # SIZE 0x00400000), the same address from both M55 cores.  The band
+  # 0x023E0000-0x023EFFFF was picked because no in-tree user claims it:
+  # the other SRAM0 users sit lower (bench beacons 0x0200_xxxx; aen-cc3501e-*
+  # HE overlays' sram0_sys 0x02010000 + 512 KiB; display shields growing
+  # the SRAM0 linker region to 2 MiB from 0x02000000; ETH/JPEG/video DMA
+  # buffers, which the linker fills from the bottom) or above it (the
+  # aen-dma-regcheck PL330 microcode at 0x023FE000).  The vring windows of
+  # aen-rpc-pingpong / aen-alp-rpc (0x02010000) are NOT used here for that
+  # reason.  An overlay that shrinks/relocates SRAM0 past 0x023E0000 must
+  # not be combined with an m55 `ipc:` entry.  Non-cacheable: raw_shmem has
+  # no cache-maintenance layer.
+  - { name: sram_ipc,  base: 0x023e0000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: false, write_authority: customer_runtime }
 
   # Neither external OSPI0 memory gets a `memory_map:` row (#2053, #2069),
   # for two independent reasons -- one about the pair of them together,

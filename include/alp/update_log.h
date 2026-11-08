@@ -20,6 +20,9 @@
  *      software tier stores the log and its monotonic counter in Zephyr
  *      NVS, so entries survive reboot and firmware update. Without the
  *      partition it falls back to RAM (entries vanish on reboot).
+ *      With the partition, a failed NVS mount is reported (@c ALP_ERR_NOT_READY
+ *      from open and the log calls, retried on the next call), never
+ *      absorbed by the RAM store.
  *      Persistence does NOT change the assurance level: the software tier
  *      is tamper-EVIDENT, not tamper-proof -- @ref alp_update_log_verify
  *      detects out-of-band mutation, truncation, rollback, and reorder,
@@ -135,8 +138,10 @@ alp_update_log_t *alp_update_log_open(void);
  * @brief Append one entry. @c seq is assigned by the engine.
  * @param log   The update log handle (from @ref alp_update_log_open).
  * @param entry Entry to append; every field except @c seq is caller-filled.
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT /
- *         ALP_ERR_NOT_READY (NULL or closed @p log);
+ * @return ALP_OK; ALP_ERR_INVAL (NULL @p log or @p entry, an over-long
+ *         @c fw_version, or a @c status outside @ref alp_update_status_t);
+ *         ALP_ERR_NOT_READY (closed @p log); ALP_ERR_IO / ALP_ERR_NOSUPPORT;
+ *         ALP_ERR_NOT_IMPLEMENTED (the backend has no append op);
  *         ALP_ERR_NOMEM when the store is full (the log never wraps --
  *         existing entries stay intact and verifiable).
  */
@@ -163,8 +168,9 @@ alp_status_t alp_update_log_entry_from_boot_metadata(alp_update_log_entry_t *ent
  * @brief Append one entry sourced from authenticated boot metadata. [ABI-EXPERIMENTAL]
  * @param log       The update log handle (from @ref alp_update_log_open).
  * @param timestamp Best-effort epoch to store in the entry; 0 = unset.
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT /
- *         ALP_ERR_NOT_READY (NULL or closed @p log);
+ * @return ALP_OK; ALP_ERR_INVAL (NULL @p log); ALP_ERR_NOT_READY (closed
+ *         @p log); ALP_ERR_IO / ALP_ERR_NOSUPPORT;
+ *         ALP_ERR_NOT_IMPLEMENTED (the backend has no append op);
  *         ALP_ERR_NOMEM when the store is full.
  *
  * This is the preferred update-audit path once a board wires a real

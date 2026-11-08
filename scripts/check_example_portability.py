@@ -224,6 +224,13 @@ _ZEPHYR_DRIVER_INCLUDE_ALLOWLIST: dict[str, dict[str, str]] = {
             "surface fits yet (same gap as multicore/rpmsg-v2n)."
         ),
     },
+    "multicore/heterogeneous-offload": {
+        "mbox": (
+            "m33_sm/src/main.c, the raw OpenAMP/MHU mailbox transport "
+            "copied from multicore/rpmsg-v2n; the generic Zephyr "
+            "<alp/rpc.h> backend cannot run on the V2N M33 yet (#3067)."
+        ),
+    },
     "peripheral-io/alp-console": {
         "pwm": (
             "RGB status LED -- pre-existing gap predating #520 and out "

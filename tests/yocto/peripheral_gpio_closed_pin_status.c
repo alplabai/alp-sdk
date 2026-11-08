@@ -87,6 +87,7 @@ static void test_read_with_null_out_on_open_pin_still_returns_inval(void)
 {
 	struct alp_gpio *h = pool_acquire();
 	ALP_ASSERT_TRUE(h != NULL);
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	alp_status_t rc = alp_gpio_read(h, NULL);
 	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
 	pool_release(h);

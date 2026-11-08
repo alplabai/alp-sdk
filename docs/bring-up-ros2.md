@@ -98,11 +98,11 @@ MACHINE=e1m-v2m103-a55 bitbake alp-image-edge
 MACHINE=e1m-v2n101-a55 bitbake alp-image-edge -c populate_sdk   # colcon SDK
 ```
 
-The `alp-ros2-temperature` node recipe is **not** in `packagegroup-alp-ros`
-yet: it fetches `branch=main` at `${AUTOREV}` and the example is not on `main`
-until dev is promoted (otherwise `do_configure` fails with a missing source
-dir). Build it explicitly with `bitbake alp-ros2-temperature` once the example
-is on `main`, and add it to the packagegroup then.
+The `alp-ros2-temperature` node recipe is **not** in `packagegroup-alp-ros`:
+it is bench-unverified. It fetches the pinned release commit of `branch=main`
+(`SRCREV` in `recipes-core/alp-sdk/alp-sdk-version.inc`), which carries the
+example. Build it explicitly with `bitbake alp-ros2-temperature`, and add it
+to the packagegroup once it has been run on the bench.
 
 ### Out-of-image build (colcon in the Yocto SDK)
 

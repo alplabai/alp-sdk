@@ -19,6 +19,7 @@ target_sources(app PRIVATE
     src/spi_target.c
     src/gpio.c
     src/uart.c
+    src/lsr_uart.c
     src/pwm.c
     src/adc.c
     src/dac.c

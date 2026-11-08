@@ -5,17 +5,20 @@
  * `alp gpio` -- read / configure / write a portable GPIO by pin_id
  * (the E1M_* / BOARD_* indices from <alp/e1m_pinout.h>).
  *
- * `read` is always available; `write` is gated on
+ * `read` never reconfigures the pin: it samples pins that are already
+ * inputs and refuses the rest (#2933).  `read` is always available; `write` is gated on
  * CONFIG_ALP_SDK_CONSOLE_UNSAFE because it can drive live hardware
  * signals without any safeguard.
  */
 #include <errno.h>
 
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/shell/shell.h>
 
 #include <alp/peripheral.h>
 
 #include "alp_console.h"
+#include "../../backends/gpio/gpio_resolve.h"
 
 #if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_GPIO)
 
@@ -36,7 +39,23 @@ static int cmd_gpio_read(const struct shell *sh, size_t argc, char **argv)
 		return -EIO;
 	}
 
-	(void)alp_gpio_configure(g, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
+#if IS_ENABLED(CONFIG_GPIO_GET_CONFIG)
+	/* The console opens a fresh handle, so the handle's cached direction is
+	 * only the open default.  Ask the controller what the pin really is and
+	 * refuse anything that is not an input: forcing it to a floating input
+	 * would silently kill an output (#2933).  A controller without
+	 * pin_get_config (-ENOSYS) leaves the direction unknown; the read below
+	 * is still side-effect free, so it proceeds. */
+	struct gpio_dt_spec spec;
+	gpio_flags_t        flags;
+
+	if (alp_z_gpio_resolve((uint32_t)pin, &spec) && gpio_pin_get_config_dt(&spec, &flags) == 0 &&
+	    (flags & GPIO_INPUT) == 0) {
+		alp_gpio_close(g);
+		shell_error(sh, "pin %lu is not configured as an input; refusing to reconfigure it", pin);
+		return -EPERM;
+	}
+#endif
 
 	bool         level = false;
 	alp_status_t s     = alp_gpio_read(g, &level);

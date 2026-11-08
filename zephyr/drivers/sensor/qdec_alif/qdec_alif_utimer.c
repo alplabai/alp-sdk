@@ -293,7 +293,7 @@ static int qdec_alif_utimer_channel_get(const struct device *dev, enum sensor_ch
 	return 0;
 }
 
-static const struct sensor_driver_api qdec_alif_utimer_driver_api = {
+static DEVICE_API(sensor, qdec_alif_utimer_driver_api) = {
 	.sample_fetch = qdec_alif_utimer_sample_fetch,
 	.channel_get = qdec_alif_utimer_channel_get
 };

@@ -237,12 +237,26 @@ static alp_status_t try_init_locked(void)
 		return g_v2n.init_status;
 	}
 
+	const bool attn_on = attn_setup();
+	/* gd32_swd_session_notify() sets swd_session BEFORE it disables the ATTN
+	 * IRQ, without taking g_v2n.lock.  If attn_setup() re-armed the IRQ after
+	 * that disable, this re-check sees the flag: disarm and give up, so the
+	 * pad is never an armed rising-edge input while SWD drives it as SWCLK. */
+	if (atomic_get(&g_v2n.swd_session) != 0) {
+		if (g_v2n.attn_pin != NULL) (void)alp_gpio_irq_disable(g_v2n.attn_pin);
+		alp_spi_close(g_v2n.spi);
+		g_v2n.spi = NULL;
+		return ALP_ERR_BUSY;
+	}
+
 	const alp_status_t s = gd32g553_init_ex(&g_v2n.ctx,
 	                                        g_v2n.spi,
 	                                        NULL,
 	                                        GD32G553_BRIDGE_DEFAULT_I2C_ADDR,
-	                                        attn_setup() ? &g_attn_hook : NULL);
+	                                        attn_on ? &g_attn_hook : NULL);
 	if (s != ALP_OK) {
+		/* No handshake, no ATTN consumer: do not leave the IRQ armed. */
+		if (g_v2n.attn_pin != NULL) (void)alp_gpio_irq_disable(g_v2n.attn_pin);
 		/* Tear the bus handle back down -- a failed handshake means
          * we won't issue further bridge calls, and leaving the bus
          * open would pin a pool slot other code could use.  Don't

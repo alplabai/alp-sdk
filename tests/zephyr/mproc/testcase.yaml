@@ -48,3 +48,19 @@ tests:
       - alp-sdk
       - mproc
       - shmem
+
+  # Mock MBOX controllers: doorbell-only (mtu 0) payload-in-shmem path,
+  # oversize refusal for mtu > 0, and the alp-mbox-rxN alias + fallback.
+  alp_sdk.mproc.doorbell:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_doorbell.conf"
+      - "DTC_OVERLAY_FILE=boards/native_sim_native_64.overlay;doorbell.overlay"
+      - "ALP_MPROC_TEST_DOORBELL=ON"
+    tags:
+      - alp-sdk
+      - mproc

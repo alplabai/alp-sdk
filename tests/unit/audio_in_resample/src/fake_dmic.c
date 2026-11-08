@@ -70,11 +70,19 @@ static int fake_dmic_read(const struct device *dev,
 	return 0;
 }
 
+#ifdef _dmic_ops
+static DEVICE_API(dmic, fake_dmic_api) = {
+	.configure = fake_dmic_configure,
+	.trigger   = fake_dmic_trigger,
+	.read      = fake_dmic_read,
+};
+#else
 static const struct _dmic_ops fake_dmic_api = {
 	.configure = fake_dmic_configure,
 	.trigger   = fake_dmic_trigger,
 	.read      = fake_dmic_read,
 };
+#endif
 
 static int fake_dmic_init(const struct device *dev)
 {
