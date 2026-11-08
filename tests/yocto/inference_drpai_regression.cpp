@@ -435,6 +435,16 @@ void test_invoke_reports_driver_job_status()
 	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_ERR_IO);
 	drpai_test::g_status_open_errno = 0;
 
+	/* No runtime fd: our open would be the driver's first (init + resets),
+	 * so nothing is opened or queried and even a bad status reads ALP_OK. */
+	drpai_test::g_runtime_fd_held = false;
+	drpai_test::g_status_err      = -1;
+	const int opens_before        = drpai_test::g_status_opens;
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_OK);
+	ALP_ASSERT_EQ_INT(drpai_test::g_status_opens, opens_before);
+	drpai_test::g_runtime_fd_held = true;
+	drpai_test::g_status_err      = 0;
+
 	ALP_ASSERT_EQ_INT(alp_inference_drpai_invoke(&a), ALP_OK);
 
 	alp_inference_drpai_close(&a);

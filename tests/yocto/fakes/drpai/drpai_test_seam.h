@@ -57,5 +57,8 @@ inline uint32_t g_status_state       = 1; /* DRPAI_STATUS_IDLE */
 inline int32_t  g_status_err         = 0; /* DRPAI_ERRINFO_SUCCESS */
 inline int      g_status_ioctl_errno = 0; /* nonzero: ioctl fails with it */
 inline int      g_status_open_errno  = 0; /* nonzero: open fails with it */
+/* Whether the runtime holds /dev/drpai0 open; if false, no status query. */
+inline bool g_runtime_fd_held = true;
+inline int  g_status_opens    = 0; /* opens made by the status query */
 
 } /* namespace drpai_test */

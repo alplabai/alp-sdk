@@ -54,6 +54,7 @@ typedef struct drpai_status {
 inline int alp_fake_drpai_open(const char *path, int flags)
 {
 	(void)path;
+	++drpai_test::g_status_opens;
 	if (!drpai_test::g_device_present) {
 		errno = ENOENT;
 		return -1;
@@ -88,5 +89,6 @@ inline int alp_fake_drpai_ioctl(int fd, unsigned long req, void *arg)
 	return 0;
 }
 
-#define open(path, flags) alp_fake_drpai_open((path), (flags))
-#define ioctl(fd, req, a) alp_fake_drpai_ioctl((fd), (req), (a))
+#define ALP_DRPAI_TEST_FD_HELD (drpai_test::g_runtime_fd_held)
+#define open(path, flags)      alp_fake_drpai_open((path), (flags))
+#define ioctl(fd, req, a)      alp_fake_drpai_ioctl((fd), (req), (a))
