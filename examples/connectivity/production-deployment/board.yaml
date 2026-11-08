@@ -199,8 +199,9 @@ security:
 # see [STATUS] above.  Sizes below sum to ~2.4 MiB (1024 + 1024 + 64 +
 # 64 + 256 KiB), but on E1M-AEN801 there is no remainder to place them
 # in: the SoM's own `memory_map:` regions already occupy the full 5632
-# KiB App MRAM window (metadata/e1m_modules/E1M-AEN801.yaml), so every
-# entry below emits `status: blocked` in the generated
+# KiB App MRAM window (metadata/e1m_modules/E1M-AEN801.yaml), so there is
+# no room past them: every entry below, pinned at its `offset_kib:`,
+# overruns `mram_main` and emits `status: blocked` in the generated
 # `dts-partitions.dtsi` for that reason alone.  `mram_main` would ALSO
 # not be a working `flash_device:` target even with free room: no AEN
 # preset declares a `dt_label:` override for it, so it resolves to a
