@@ -82,7 +82,8 @@ extern "C" {
  *  - Ethos-U55 on every Alif Ensemble SKU (two per SoC).
  *  Customers don't have to know which variant the silicon carries;
  *  Vela picks at model-compile time and the runtime dispatches via
- *  the matching driver shim emitted by `scripts/alp_project.py`. */
+ *  the matching driver shim, picked from the SoM's capabilities
+ *  (`CONFIG_ALP_SDK_INFERENCE_*`). */
 typedef enum {
 	ALP_INFERENCE_BACKEND_AUTO    = 0, /**< Whichever backend loads cfg->format on this SoM
 					 *   (a DRP-AI model goes to DRP-AI, a DXNN model to

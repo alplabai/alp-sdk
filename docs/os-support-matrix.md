@@ -281,8 +281,8 @@ instruction set extensions:
 | E1M-X V2N      | Cortex-A55 + DRP-AI3     | n/a (A) | n/a (NEON)   | All scalar paths; NEON used where available.    |
 | E1M-X V2N-M1   | Cortex-A55 + DRP-AI3 + M1| n/a (A) | n/a (NEON)   | Same as V2N (M1 is an external NPU).            |
 
-Helium-accelerated paths are only enabled when the build sets
-`-DALP_CMSIS_DSP_HELIUM=ON` and the toolchain confirms `__ARM_FEATURE_MVE`.
+Helium-accelerated paths are only enabled when the toolchain confirms
+`__ARM_FEATURE_MVE`.
 
 ---
 
