@@ -94,9 +94,11 @@ typedef struct {
 	                   *   settled rate is read back with
 	                   *   alp_camera_get_fps() (issue #2279). If this field
 	                   *   is NONZERO and the terminal sensor device has no
-	                   *   frame-rate control at all, @ref alp_camera_open
-	                   *   fails loudly with ALP_ERR_NOSUPPORT rather than
-	                   *   silently ignoring the request -- but if it is left
+	                   *   frame-rate control at all, the Zephyr backends'
+	                   *   @ref alp_camera_open fails loudly with
+	                   *   ALP_ERR_NOSUPPORT rather than silently ignoring
+	                   *   the request (the Linux backend instead keeps the
+	                   *   sensor's own rate and logs to stderr) -- but if it is left
 	                   *   at 0 and only a BACKEND's own internal default
 	                   *   rate fails to apply (e.g. a transient sensor I/O
 	                   *   error), that failure is not surfaced at all: it
