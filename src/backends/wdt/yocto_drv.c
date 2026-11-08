@@ -104,7 +104,7 @@ static int _wdt_disarm_setoptions(int fd, int flags)
  * that only closes the descriptor would abandon an armed timer the
  * caller has no handle to feed.  Never used by y_close(): a successfully
  * opened handle's close must not disarm (#2981).  The magic 'V' is never
- * written anywhere -- without it the kernel keeps the timer running.
+ * written anywhere.
  */
 static void _disarm_and_close(int fd)
 {
@@ -231,8 +231,9 @@ static alp_status_t y_disable(alp_wdt_backend_state_t *st)
  * @brief Release the handle: close the chardev WITHOUT disarming.
  *
  * Matches the portable alp_wdt_close contract (#2981): neither
- * WDIOS_DISABLECARD nor the magic 'V' is issued, so the kernel watchdog
- * keeps running and resets the board if nobody else feeds it.
+ * WDIOS_DISABLECARD nor the magic 'V' is issued.  Whether the kernel then
+ * keeps the timer running is the driver's call (WDIOF_MAGICCLOSE or
+ * CONFIG_WATCHDOG_NOWAYOUT); see alp_wdt_close in wdt.h.
  */
 static void y_close(alp_wdt_backend_state_t *st)
 {

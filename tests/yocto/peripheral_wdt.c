@@ -72,7 +72,7 @@ static void observe_settimeout(int timeout_s)
 }
 
 /* Hands back a real, open pipe write-end -- a valid fd the ioctl()s in
- * y_open() can operate on (SETTIMEOUT/GETSUPPORT fail ENOTTY on a
+ * y_open() can operate on (SETTIMEOUT fails ENOTTY on a
  * pipe, which the backend already tolerates as "no such capability").
  * The read end is closed immediately so the fd is never left readable.
  */
