@@ -204,14 +204,20 @@ void alp_audio_in_close(alp_audio_in_t *in)
 	if (in == NULL) {
 		return;
 	}
-	/* Sleep-poll drain (issue #629): this pool counts alp_audio_in_read(),
-	 * which can block up to its caller's timeout_ms, so
-	 * alp_handle_begin_close_blocking() sleeps between polls instead of
-	 * busy-spinning -- see src/common/alp_slot_claim.c/.h. Idempotent: a
-	 * second/never-opened close no-ops. */
-	if (!alp_handle_begin_close_blocking(&in->lifecycle, &in->active_ops)) {
+	/* Cancel, then sleep-poll drain (issue #629): this pool counts
+	 * alp_audio_in_read(), which can block up to its caller's timeout_ms.
+	 * Mark the handle closing, wake the blocked read (it returns
+	 * ALP_ERR_NOT_READY), then wait for it to leave -- the drain sleeps
+	 * between polls instead of busy-spinning, see
+	 * src/common/alp_slot_claim.c/.h. Idempotent: a second/never-opened
+	 * close no-ops. */
+	if (!alp_handle_mark_closing(&in->lifecycle, &in->state.closing)) {
 		return;
 	}
+	if (in->state.ops != NULL && in->state.ops->in_cancel != NULL) {
+		in->state.ops->in_cancel(&in->state);
+	}
+	alp_handle_drain_blocking(&in->active_ops);
 	if (in->state.ops != NULL && in->state.ops->in_close != NULL) {
 		in->state.ops->in_close(&in->state);
 	}
@@ -332,14 +338,16 @@ void alp_audio_out_close(alp_audio_out_t *out)
 	if (out == NULL) {
 		return;
 	}
-	/* Sleep-poll drain (issue #629): this pool counts alp_audio_out_write(),
-	 * which can block up to its caller's timeout_ms, so
-	 * alp_handle_begin_close_blocking() sleeps between polls instead of
-	 * busy-spinning -- see src/common/alp_slot_claim.c/.h. Idempotent: a
-	 * second/never-opened close no-ops. */
-	if (!alp_handle_begin_close_blocking(&out->lifecycle, &out->active_ops)) {
+	/* Cancel, then sleep-poll drain (issue #629): see
+	 * alp_audio_in_close() -- same sequence for the blocked
+	 * alp_audio_out_write(). */
+	if (!alp_handle_mark_closing(&out->lifecycle, &out->state.closing)) {
 		return;
 	}
+	if (out->state.ops != NULL && out->state.ops->out_cancel != NULL) {
+		out->state.ops->out_cancel(&out->state);
+	}
+	alp_handle_drain_blocking(&out->active_ops);
 	if (out->state.ops != NULL && out->state.ops->out_close != NULL) {
 		out->state.ops->out_close(&out->state);
 	}

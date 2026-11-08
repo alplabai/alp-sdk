@@ -46,6 +46,9 @@ typedef struct alp_audio_in_backend_state {
 	alp_audio_config_t     cfg;
 	void                  *be_data;
 	const alp_audio_ops_t *ops;
+	/** Set by the dispatcher when close() starts (alp_handle_mark_closing());
+	 *  a blocked in_read() must observe it and return ALP_ERR_NOT_READY. */
+	bool closing;
 } alp_audio_in_backend_state_t;
 
 typedef struct alp_audio_out_backend_state {
@@ -53,6 +56,8 @@ typedef struct alp_audio_out_backend_state {
 	uint8_t                volume; /* current 0..255 linear scale */
 	void                  *be_data;
 	const alp_audio_ops_t *ops;
+	/** As alp_audio_in_backend_state_t::closing, for out_write(). */
+	bool closing;
 } alp_audio_out_backend_state_t;
 
 /* ------------------------------------------------------------------ */
@@ -71,6 +76,12 @@ struct alp_audio_ops {
 	                        size_t                        frames,
 	                        size_t                       *out_frames,
 	                        uint32_t                      timeout_ms);
+	/** Wake an in_read() blocked in the backend.  Called by close() after
+	 *  @c state->closing is set and before the in-flight ops are drained;
+	 *  it only wakes waiters (the woken read returns ALP_ERR_NOT_READY).
+	 *  May be NULL when the backend re-checks @c closing between short
+	 *  waits instead. */
+	void (*in_cancel)(alp_audio_in_backend_state_t *state);
 	void (*in_close)(alp_audio_in_backend_state_t *state);
 
 	/* ---- Output (speaker) ---- */
@@ -85,6 +96,8 @@ struct alp_audio_ops {
 	                          size_t                        *out_frames,
 	                          uint32_t                       timeout_ms);
 	alp_status_t (*out_set_volume)(alp_audio_out_backend_state_t *state, uint8_t vol);
+	/** As in_cancel, for an out_write() blocked in the backend. */
+	void (*out_cancel)(alp_audio_out_backend_state_t *state);
 	void (*out_close)(alp_audio_out_backend_state_t *state);
 };
 

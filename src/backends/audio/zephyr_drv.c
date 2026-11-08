@@ -58,6 +58,7 @@
 
 #include "alp_errno.h"
 #include "alp_slot_claim.h"
+#include "alp_sliced_wait.h"
 #include "audio_ops.h"
 #include "audio_volume_guard.h"
 
@@ -109,7 +110,7 @@ struct hw_in_be {
 	 * means native, no decimator. */
 	uint32_t            ratio;
 	alp_dsp_decimator_t dec;
-	bool    in_use;
+	bool                in_use;
 };
 
 static struct hw_in_be g_in_be_pool[CONFIG_ALP_SDK_MAX_AUDIO_IN_HANDLES];
@@ -410,9 +411,21 @@ static alp_status_t z_in_read(alp_audio_in_backend_state_t *state,
 	struct hw_in_be *be = (struct hw_in_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
 
-	void  *block = NULL;
-	size_t got   = 0;
-	int    err   = dmic_read(be->dev, 0, &block, &got, (int32_t)timeout_ms);
+	void    *block = NULL;
+	size_t   got   = 0;
+	int      err   = 0;
+	uint32_t slice;
+	/* dmic_read() has no cancel API: wait in slices and re-check the
+	 * closing flag between them (see alp_sliced_wait.h).  -ENOMSG is
+	 * dmic's "nothing queued" for a zero-length slice. */
+	if (ALP_SLICED_WAIT(&state->closing,
+	                    timeout_ms,
+	                    slice,
+	                    err,
+	                    dmic_read(be->dev, 0, &block, &got, (int32_t)slice),
+	                    err == -EAGAIN || err == -ENOMSG)) {
+		return ALP_ERR_NOT_READY;
+	}
 	if (err != 0) return errno_to_alp(err);
 
 	size_t bf       = bytes_per_frame(&state->cfg);
@@ -588,6 +601,31 @@ static alp_status_t z_out_stop(alp_audio_out_backend_state_t *state)
 #endif
 }
 
+#if defined(CONFIG_ALP_SDK_AUDIO_OUT)
+/* alp_i2s_write() has no cancel API: retry it in slices and re-check the
+ * closing flag between them (see alp_sliced_wait.h).  A write that times
+ * out never leaves a block queued (src/backends/i2s/zephyr_drv.c DROPs
+ * it), so re-issuing the same block is safe. */
+static alp_status_t z_i2s_write_cancelable(alp_audio_out_backend_state_t *state,
+                                           struct hw_out_be              *be,
+                                           const void                    *block,
+                                           size_t                         bytes,
+                                           uint32_t                       timeout_ms)
+{
+	alp_status_t s = ALP_OK;
+	uint32_t     slice;
+	if (ALP_SLICED_WAIT(&state->closing,
+	                    timeout_ms,
+	                    slice,
+	                    s,
+	                    alp_i2s_write(be->i2s, block, bytes, slice),
+	                    s == ALP_ERR_TIMEOUT)) {
+		return ALP_ERR_NOT_READY;
+	}
+	return s;
+}
+#endif
+
 static alp_status_t z_out_write(alp_audio_out_backend_state_t *state,
                                 const void                    *buf,
                                 size_t                         frames,
@@ -627,8 +665,8 @@ static alp_status_t z_out_write(alp_audio_out_backend_state_t *state,
 				if (scaled < INT16_MIN) scaled = INT16_MIN;
 				chunk[i] = (int16_t)scaled;
 			}
-			alp_status_t s =
-			    alp_i2s_write(be->i2s, chunk, n * bytes_per_frame(&state->cfg), timeout_ms);
+			alp_status_t s = z_i2s_write_cancelable(
+			    state, be, chunk, n * bytes_per_frame(&state->cfg), timeout_ms);
 			if (s != ALP_OK) {
 				/* issue #2132: an alp_i2s_write() failure -- including a
 				 * still-pending start() retry that failed -- never
@@ -646,7 +684,7 @@ static alp_status_t z_out_write(alp_audio_out_backend_state_t *state,
 		return ALP_OK;
 	}
 
-	alp_status_t s = alp_i2s_write(be->i2s, buf, bytes, timeout_ms);
+	alp_status_t s = z_i2s_write_cancelable(state, be, buf, bytes, timeout_ms);
 	if (s == ALP_OK && out_frames != NULL) *out_frames = frames;
 	return s;
 #else

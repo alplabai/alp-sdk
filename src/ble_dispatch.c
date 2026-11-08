@@ -612,9 +612,15 @@ alp_status_t alp_ble_disconnect(alp_ble_conn_t *c)
 	 * sleeps between polls instead of busy-spinning (same rationale as
 	 * rpc_dispatch.c's _rpc_drain(), GHSA-xhm8) -- gatt_notify from the
 	 * radio side also counts on conn->active_ops (see that op), so this
-	 * drain waits on it too.  A lost CAS (already disconnecting/
-	 * disconnected) matches the old !in_use -> NOT_READY contract. */
-	if (!alp_handle_begin_close_blocking(&c->lifecycle, &c->active_ops)) return ALP_ERR_NOT_READY;
+	 * drain waits on it too.  Blocked GATT ops are woken first (they
+	 * return ALP_ERR_NOT_READY) so the drain does not wait out their
+	 * timeout_ms.  A lost CAS (already disconnecting/disconnected)
+	 * matches the old !in_use -> NOT_READY contract. */
+	if (!alp_handle_mark_closing(&c->lifecycle, &c->state.closing)) return ALP_ERR_NOT_READY;
+	if (c->state.ops != NULL && c->state.ops->conn_cancel != NULL) {
+		c->state.ops->conn_cancel(&c->state);
+	}
+	alp_handle_drain_blocking(&c->active_ops);
 	alp_status_t rc = ALP_OK;
 	if (c->state.ops != NULL && c->state.ops->disconnect != NULL) {
 		rc = c->state.ops->disconnect(&c->state);

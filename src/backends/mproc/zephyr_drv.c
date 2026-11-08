@@ -57,6 +57,7 @@
 
 #include "alp_errno.h"
 #include "alp_slot_claim.h"
+#include "alp_sliced_wait.h"
 #include "mproc_ops.h"
 
 #if defined(CONFIG_ALP_SDK_MPROC)
@@ -96,13 +97,13 @@ struct alp_mbox_db_slot {
 #define ALP_MBOX_DB_PAYLOAD_MAX (sizeof(((struct alp_mbox_db_slot *)0)->data))
 
 struct mbox_be {
-	const struct device *dev;
+	const struct device     *dev;
 	int                      mtu;     /* mbox_mtu_get(dev); 0 = doorbell-only, <0 = unknown */
 	struct alp_mbox_db_slot *db_slot; /* non-NULL only for a doorbell-only controller */
 	const struct device     *rx_dev;  /* == dev unless an alp-mbox-rxN alias splits TX/RX */
-	uint32_t             channel;
-	alp_mbox_msg_cb_t    cb;
-	void                *cb_user;
+	uint32_t                 channel;
+	alp_mbox_msg_cb_t        cb;
+	void                    *cb_user;
 #if defined(CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING)
 	uint32_t tx_sequence; /* monotonic outbound counter */
 	uint8_t  tx_scratch[CONFIG_ALP_SDK_MPROC_FRAME_MAX_BYTES];
@@ -623,8 +624,19 @@ static alp_status_t z_hwsem_lock(alp_hwsem_backend_state_t *state, uint32_t time
 #if defined(CONFIG_ALP_SDK_MPROC)
 	struct hwsem_be *be = (struct hwsem_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
-	k_timeout_t to = (timeout_ms == UINT32_MAX) ? K_FOREVER : K_MSEC(timeout_ms);
-	int         rc = k_sem_take(&alp_hwsem_kobjs[be->hwsem_id], to);
+	/* The k_sem is shared by every handle on this id, so giving it to
+	 * wake one waiter would hand it the lock: wait in slices and re-check
+	 * the closing flag instead (see alp_sliced_wait.h). */
+	int      rc = 0;
+	uint32_t slice;
+	if (ALP_SLICED_WAIT(&state->closing,
+	                    timeout_ms,
+	                    slice,
+	                    rc,
+	                    k_sem_take(&alp_hwsem_kobjs[be->hwsem_id], K_MSEC(slice)),
+	                    rc == -EAGAIN)) {
+		return ALP_ERR_NOT_READY;
+	}
 	if (rc == -EAGAIN) return ALP_ERR_TIMEOUT;
 	if (rc != 0) return errno_to_alp(rc);
 	be->held = true;

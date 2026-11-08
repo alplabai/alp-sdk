@@ -1,0 +1,17 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake DMIC controller used only by the audio_in_close_cancel ztest.
+# native_sim ships no DMIC emulation, so this test supplies its own minimal
+# `struct device` behind the standard Zephyr dmic_* driver API -- enough
+# for src/backends/audio/zephyr_drv.c's z_in_open()/z_in_read() to run for
+# real instead of falling back to sw_fallback.c.
+
+description: |
+  Fake DMIC controller for the alp-sdk audio_in_close_cancel unit test.
+  configure() and trigger() always succeed; read() sleeps for its timeout
+  and returns -EAGAIN (nothing queued).
+
+compatible: "alp,test-dmic"
+
+include: base.yaml
