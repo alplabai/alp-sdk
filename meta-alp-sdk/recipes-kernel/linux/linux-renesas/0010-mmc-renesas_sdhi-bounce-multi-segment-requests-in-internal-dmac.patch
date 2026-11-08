@@ -61,7 +61,7 @@ diff -ru a/drivers/mmc/host/renesas_sdhi_internal_dmac.c b/drivers/mmc/host/rene
  /*
   * Workaround for avoiding to use RX DMAC by multiple channels.
   * On R-Car H3 ES1.* and M3-W ES1.0, when multiple SDHI channels use
-@@ -373,8 +383,23 @@
+@@ -373,8 +383,30 @@
  						 (data->host_cookie == cookie);
  
  	if (unmap) {
@@ -75,7 +75,14 @@ diff -ru a/drivers/mmc/host/renesas_sdhi_internal_dmac.c b/drivers/mmc/host/rene
 +		 * owns the buffer may copy from or release it.
 +		 */
 +		if (dma_priv->bounce_data == data) {
-+			if (data->flags & MMC_DATA_READ)
++			/*
++			 * Copy back only after the DMA ran to completion without
++			 * error (the complete path, COOKIE_MAPPED). A failed read
++			 * or the force-PIO fallback must not hand the caller
++			 * whatever an earlier request left in the buffer.
++			 */
++			if ((data->flags & MMC_DATA_READ) &&
++			    cookie == COOKIE_MAPPED && !data->error)
 +				sg_copy_from_buffer(data->sg, data->sg_len,
 +						    dma_priv->bounce_buf,
 +						    data->blksz * data->blocks);
