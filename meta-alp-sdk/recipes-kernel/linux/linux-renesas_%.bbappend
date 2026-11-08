@@ -29,24 +29,27 @@
 # instead of the stock renesas/r9a09g056n48-rzv2n-evk.dtb.
 #
 # STATUS: UNVALIDATED through dtc/bitbake -- first structured port from
-# the RZ/V2N EVK reference dts (kernel SHA 6717c06, BSP v6.30). Build
+# the RZ/V2N EVK reference dts (kernel SHA 6717c06, BSP v6.30; since ported to cip48, see below). Build
 # `bitbake virtual/kernel` per MACHINE and fix any dtc errors; the dts
 # files carry inline VERIFY notes (memory size per SKU, DEEPX bench
 # checks).
 #
-# KERNEL-VERSION SCOPE: these board dts/dtsi were generated against the
-# linux-renesas tree at kernel SHA 6717c06 (Renesas RZ/V SDK platform 7.1
-# / BSP v6.30, linux 6.1.x). They #include the SoC dtsi r9a09g056.dtsi and
-# use BSP-specific bindings (renesas,mmngr, RZV2N_PORT_PINMUX, etc.), so
-# they are NOT portable across linux-renesas major versions. This append
-# uses the `%` wildcard, which would also match a future incompatible
-# linux-renesas PV.
-# FLAG / TODO: scope this filename to the exact kernel PV (rename to
-# linux-renesas_6.1.%.bbappend) once the linux-renesas recipe PV provided
-# by the meta-renesas release in bblayers.conf is confirmed. Not renamed
-# here because the exact PV string is not asserted in this layer; pinning
-# the SRCREV the series was generated against (6717c06) and adding a
-# COMPATIBLE check is the interim guard.
+# KERNEL-VERSION SCOPE: the patch series and the board dts/dtsi are ported to
+# the linux-renesas tree rz-6.1-cip48 (6.1.157-cip48, the kernel meta-renesas
+# BSP-4.0.2 ships) and pinned below.  They #include the SoC dtsi
+# r9a09g056.dtsi and use BSP-specific bindings (renesas,mmngr,
+# RZV2N_PORT_PINMUX, etc.), so they are NOT portable across linux-renesas
+# versions: the pin below overrides the meta-renesas recipe's own
+# LINUX_VERSION / KERNEL_BRANCH / KERNEL_REV so the layer builds the kernel
+# the series was ported against whatever BSP release is in bblayers.conf.
+# Port notes (what changed against 6.1.141-cip43): docs/build-yocto-v2n.md.
+LINUX_VERSION = "6.1.157-cip48"
+KERNEL_BRANCH = "rz-6.1-cip48"
+KERNEL_REV = "1cac8c7e4cdb2d8194f5249e309493dadd9015c3"
+
+# meta-renesas' rz-dmac "Protect the driver specific lists" patch is already in
+# cip48 (commit 9b40d6ca106f); applying it again fails do_patch.
+SRC_URI:remove = "file://0001-dmaengine-sh-rz-dmac-Protect-the-driver-specific-lis.patch"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 

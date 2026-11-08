@@ -121,8 +121,22 @@ not the distro.
 
 > **Kernel version pin:** the VLP-v5 `local.conf` template defaults to
 > `PREFERRED_VERSION_linux-renesas = "6.12%"` — you **must** override this
-> to `"6.1%"` (linux-renesas 6.1.141-cip43) for BSP v6.30.  Leaving it at
+> to `"6.1%"` (linux-renesas) for BSP v6.30.  Leaving it at
 > the template default causes a recipe mismatch and build failure.
+>
+> **Kernel pin (cip48):** `linux-renesas_%.bbappend` overrides the BSP
+> recipe's `LINUX_VERSION` / `KERNEL_BRANCH` / `KERNEL_REV` to
+> `6.1.157-cip48` / `rz-6.1-cip48` / `1cac8c7e4cdb2d8194f5249e309493dadd9015c3`
+> (the kernel `meta-renesas` `BSP-4.0.2` ships), so the ALP patch series
+> builds against cip48 whatever BSP release the layer sits on top of.  The
+> series was ported from `6.1.141-cip43` (`6717c06c72df`): 0001 (the
+> `renesas,cm33-owned-clocks` code moved into `rzv2h_cpg_enable_clock_mstop()`),
+> 0011 (ICU error masks, rewritten against the new `rzv2h_icu_setup_irqs()`),
+> 0017 (`vclk_rec_rate` is gone), 0020 (enum/context shift), 0021 (dtsi
+> context) and 0033 (`rzv2h_wdt_refresh()`) were refreshed by hand; no patch was
+> dropped.  Host `bitbake linux-renesas -c compile` for the A55 MACHINEs is the
+> only check done so far; the board is not yet booted on cip48
+> (changelog fragment `2640-kernel-cip48.md` lists the open items).
 
 > **Core ownership (kernel `do_configure`):** the linux-renesas bbappend needs
 > to know which cores own the assignable peripherals. For a project build it

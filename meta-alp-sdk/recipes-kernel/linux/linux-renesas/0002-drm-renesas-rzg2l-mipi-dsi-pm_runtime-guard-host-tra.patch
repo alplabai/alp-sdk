@@ -1,4 +1,4 @@
-From 1e8e2e941c9593a900bffe5ee67f256263ce9960 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Thu, 11 Jun 2026 22:08:12 +0200
 Subject: [PATCH] drm: renesas: rzg2l-mipi-dsi: pm_runtime-guard host transfer
@@ -25,10 +25,10 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
  1 file changed, 15 insertions(+)
 
 diff --git a/drivers/gpu/drm/renesas/rz-du/rzg2l_mipi_dsi.c b/drivers/gpu/drm/renesas/rz-du/rzg2l_mipi_dsi.c
-index 3062088d8913..b00376119eed 100644
+index 9a150a767fcc..1762dafac50e 100644
 --- a/drivers/gpu/drm/renesas/rz-du/rzg2l_mipi_dsi.c
 +++ b/drivers/gpu/drm/renesas/rz-du/rzg2l_mipi_dsi.c
-@@ -1196,6 +1196,19 @@ static ssize_t rzg2l_mipi_dsi_host_transfer(struct mipi_dsi_host *host,
+@@ -1351,6 +1351,19 @@ static ssize_t rzg2l_mipi_dsi_host_transfer(struct mipi_dsi_host *host,
  		value |= SQCH0DSC0AR_FMT_SHORT;
  	}
  
@@ -48,7 +48,7 @@ index 3062088d8913..b00376119eed 100644
  	rzg2l_mipi_dsi_link_write(dsi, SQCH0DSC0AR, value);
  
  	/*
-@@ -1236,6 +1249,8 @@ static ssize_t rzg2l_mipi_dsi_host_transfer(struct mipi_dsi_host *host,
+@@ -1391,6 +1404,8 @@ static ssize_t rzg2l_mipi_dsi_host_transfer(struct mipi_dsi_host *host,
  			ret = packet.payload_length;
  	}
  
@@ -58,5 +58,5 @@ index 3062088d8913..b00376119eed 100644
  }
  
 -- 
-2.34.1
+2.43.0
 

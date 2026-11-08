@@ -1,4 +1,4 @@
-From db4040fb70beeb356d87e293645cbeba7ad4ad3c Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Tue, 6 Oct 2026 16:00:00 +0000
 Subject: [PATCH] gpio: gd32-bridge: add a PWM provider over CMD_PWM_SET/GET
@@ -40,7 +40,7 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
  1 file changed, 212 insertions(+)
 
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
-index 436549f..97e13ce 100644
+index 436549f4174d..97e13ce5d512 100644
 --- a/drivers/gpio/gpio-gd32-bridge.c
 +++ b/drivers/gpio/gpio-gd32-bridge.c
 @@ -99,6 +99,11 @@
@@ -291,5 +291,5 @@ index 436549f..97e13ce 100644
  }
  
 -- 
-2.38.1.windows.1
+2.43.0
 

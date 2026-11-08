@@ -1,3 +1,4 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Thu, 4 Jun 2026 15:47:10 +0200
 Subject: [PATCH] input: goodix - fall back to polling when no IRQ is wired
@@ -133,3 +134,6 @@ index 6de64b3f900f..3db0f0eaac81 100644
  		return 0;
  	}
  
+-- 
+2.43.0
+

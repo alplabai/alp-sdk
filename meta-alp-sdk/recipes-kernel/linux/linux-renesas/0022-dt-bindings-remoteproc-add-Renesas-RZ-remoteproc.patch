@@ -1,16 +1,21 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Tu Duong <tu.duong.zy@renesas.com>
 Date: Sat, 3 Oct 2026 10:00:00 +0200
-Subject: [PATCH] dt-bindings: remoteproc: Add bindings for RZ remoteproc driver
+Subject: [PATCH] dt-bindings: remoteproc: Add bindings for RZ remoteproc
+ driver
 
 Imported unmodified from the Renesas RZ Multi-OS Package v4.2.0
 (r01an8260ej0420), meta-rz-features/meta-rz-multi-os/meta-rzv/meta-rzv2n/recipes-kernel/linux/linux-renesas/0004-Add-bindings-for-RZ-remoteproc-driver.patch.
 The binding file is SPDX (GPL-2.0 OR BSD-2-Clause); Renesas Electronics
 authorship is kept.  Alp changes to it are in 0021.
 ---
+ .../bindings/remoteproc/renesas,rz-rproc.yaml | 113 ++++++++++++++++++
+ 1 file changed, 113 insertions(+)
+ create mode 100644 Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml
+
 diff --git a/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml b/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml
 new file mode 100644
-index 000000000000..d64c64b312c6
+index 000000000000..37505908c83d
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml
 @@ -0,0 +1,113 @@
@@ -130,3 +135,4 @@ index 000000000000..d64c64b312c6
 \ No newline at end of file
 -- 
 2.43.0
+

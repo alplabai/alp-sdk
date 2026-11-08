@@ -15,17 +15,18 @@ Opt-in: only applied with ALP_V2N_REMOTEPROC = "1" (linux-renesas bbappend).
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/arch/arm64/boot/dts/renesas/r9a09g056.dtsi b/arch/arm64/boot/dts/renesas/r9a09g056.dtsi
-index e50831b..efe8bae 100644
+index cb53f4754b5e..0e040d288432 100644
 --- a/arch/arm64/boot/dts/renesas/r9a09g056.dtsi
 +++ b/arch/arm64/boot/dts/renesas/r9a09g056.dtsi
-@@ -315,7 +315,7 @@
+@@ -307,7 +307,7 @@ pinctrl: pinctrl@10410000 {
  		};
  
  		cpg: clock-controller@10420000 {
 -			compatible = "renesas,r9a09g056-cpg";
 +			compatible = "renesas,r9a09g056-cpg", "syscon";
  			reg = <0 0x10420000 0 0x10000>;
- 			clocks = <&audio_extal_clk>, <&audio_clka>,
- 				 <&audio_clkb>, <&audio_clkc>,
+ 			clocks = <&audio_extal_clk>, <&audio_clkb>, <&audio_clkc>,
+ 				 <&rtxin_clk>, <&qextal_clk>;
 -- 
 2.43.0
+

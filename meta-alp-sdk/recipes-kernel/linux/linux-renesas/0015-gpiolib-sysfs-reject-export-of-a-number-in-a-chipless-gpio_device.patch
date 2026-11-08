@@ -1,4 +1,6 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
+Date: Sun, 8 Nov 2026 20:11:25 +0000
 Subject: [PATCH] gpiolib: sysfs: reject export of a number in a chipless
  gpio_device
 
@@ -37,8 +39,11 @@ Upstream-Status: Inappropriate [local guard; upstream reworked gdev->chip under 
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
+ drivers/gpio/gpiolib-sysfs.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
 diff --git a/drivers/gpio/gpiolib-sysfs.c b/drivers/gpio/gpiolib-sysfs.c
-index a646486..0c75cc2 100644
+index a64648682c72..0c75cc2173fa 100644
 --- a/drivers/gpio/gpiolib-sysfs.c
 +++ b/drivers/gpio/gpiolib-sysfs.c
 @@ -447,6 +447,9 @@ static ssize_t export_store(struct class *class,
@@ -51,3 +56,6 @@ index a646486..0c75cc2 100644
  	offset = gpio_chip_hwgpio(desc);
  	if (!gpiochip_line_is_valid(gc, offset)) {
  		pr_warn("%s: GPIO %ld masked\n", __func__, gpio);
+-- 
+2.43.0
+

@@ -1,4 +1,4 @@
-From 9d9ce61ab66a2b90dad9ad15b4a068850f89fc34 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <dev@alplab.ai>
 Date: Sun, 11 Oct 2026 12:36:32 +0000
 Subject: [PATCH] gpio: gd32-bridge: gate IO15/IO26 on protocol minor 16
@@ -50,5 +50,5 @@ index 97e13ce5d512..2dc5a63b28f7 100644
  		return gd32_bridge_resolve_io_ext(gd32);
  
 -- 
-2.53.0
+2.43.0
 

@@ -1,3 +1,4 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Sat, 3 Oct 2026 12:00:00 +0200
 Subject: [PATCH] clk: renesas: rzv2h-cpg: keep clocks listed in
@@ -60,12 +61,12 @@ upstream binding would need agreement on the property name and semantics]
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- .../bindings/clock/renesas,rzv2h-cpg.yaml          | 9 +++++++++
- drivers/clk/renesas/rzv2h-cpg.c                    | 60 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++---
- 2 files changed, 66 insertions(+), 3 deletions(-)
+ .../bindings/clock/renesas,rzv2h-cpg.yaml     |  9 +++
+ drivers/clk/renesas/rzv2h-cpg.c               | 61 ++++++++++++++++++-
+ 2 files changed, 67 insertions(+), 3 deletions(-)
 
 diff --git a/Documentation/devicetree/bindings/clock/renesas,rzv2h-cpg.yaml b/Documentation/devicetree/bindings/clock/renesas,rzv2h-cpg.yaml
-index a3e0faf..1b98d64 100644
+index f261445bf341..bbfe4ab23019 100644
 --- a/Documentation/devicetree/bindings/clock/renesas,rzv2h-cpg.yaml
 +++ b/Documentation/devicetree/bindings/clock/renesas,rzv2h-cpg.yaml
 @@ -49,6 +49,15 @@ properties:
@@ -85,10 +86,10 @@ index a3e0faf..1b98d64 100644
      const: 0
  
 diff --git a/drivers/clk/renesas/rzv2h-cpg.c b/drivers/clk/renesas/rzv2h-cpg.c
-index 3bd4edb..a89556d 100644
+index 111ab6d148e5..6ff952acddf1 100644
 --- a/drivers/clk/renesas/rzv2h-cpg.c
 +++ b/drivers/clk/renesas/rzv2h-cpg.c
-@@ -1047,10 +1047,60 @@ static const struct clk_ops rzv2h_mod_clock_ops = {
+@@ -1443,10 +1443,59 @@ static const struct clk_ops rzv2h_mod_clock_ops = {
  	.is_enabled = rzv2h_mod_clock_is_enabled,
  };
  
@@ -100,7 +101,7 @@ index 3bd4edb..a89556d 100644
 + * coupled MSTOP bits under the remote core.  Such a clock is registered
 + * exactly like a DEF_MOD_CRITICAL one.
 + */
-+static bool __init rzv2h_cpg_cm33_owned(const struct rzv2h_cpg_priv *priv,
++static bool rzv2h_cpg_cm33_owned(const struct rzv2h_cpg_priv *priv,
 +					const char *name)
 +{
 +	return of_property_match_string(priv->dev->of_node,
@@ -140,7 +141,27 @@ index 3bd4edb..a89556d 100644
 +	}
 +}
 +
- static void __init
+ static void rzv2h_cpg_enable_clock_mstop(const struct rzv2h_mod_clk *mod,
+                                         struct mod_clock *clock)
+ {
+ 	struct rzv2h_cpg_priv *priv = clock->priv;
++	bool critical = mod->critical || rzv2h_cpg_cm33_owned(priv, mod->name);
+        /*
+         * Ensure the module clocks and MSTOP bits are synchronized when they are
+         * turned ON by the bootloader. Enable MSTOP bits for module clocks that were
+@@ -1454,9 +1503,9 @@ static void rzv2h_cpg_enable_clock_mstop(const struct rzv2h_mod_clk *mod,
+         */
+ 
+ 	if (clock->mstop_data != BUS_MSTOP_NONE &&
+-	    !mod->critical && rzv2h_mod_clock_is_enabled(&clock->hw)) {
++	    !critical && rzv2h_mod_clock_is_enabled(&clock->hw)) {
+ 		rzv2h_mod_clock_mstop_enable(priv, clock->mstop_data);
+-	} else if (clock->mstop_data != BUS_MSTOP_NONE && mod->critical) {
++	} else if (clock->mstop_data != BUS_MSTOP_NONE && critical) {
+ 		unsigned long mstop_mask = FIELD_GET(BUS_MSTOP_BITS_MASK, clock->mstop_data);
+ 		u16 mstop_index = FIELD_GET(BUS_MSTOP_IDX_MASK, clock->mstop_data);
+ 		atomic_t *mstop = &priv->mstop_count[mstop_index * 16];
+@@ -1487,6 +1536,8 @@ static void __init
  rzv2h_cpg_register_mod_clk(const struct rzv2h_mod_clk *mod,
  			   struct rzv2h_cpg_priv *priv)
  {
@@ -149,7 +170,7 @@ index 3bd4edb..a89556d 100644
  	struct mod_clock *clock = NULL;
  	struct device *dev = priv->dev;
  	struct clk_init_data init;
-@@ -1079,8 +1129,10 @@ rzv2h_cpg_register_mod_clk(const struct rzv2h_mod_clk *mod,
+@@ -1515,8 +1566,10 @@ rzv2h_cpg_register_mod_clk(const struct rzv2h_mod_clk *mod,
  	init.name = mod->name;
  	init.ops = &rzv2h_mod_clock_ops;
  	init.flags = CLK_SET_RATE_PARENT;
@@ -161,19 +182,7 @@ index 3bd4edb..a89556d 100644
  
  	parent_name = __clk_get_name(parent);
  	init.parent_names = &parent_name;
-@@ -1110,9 +1162,9 @@ rzv2h_cpg_register_mod_clk(const struct rzv2h_mod_clk *mod,
- 	 * turned ON in an earlier boot stage.
- 	 */
- 	if (clock->mstop_data != BUS_MSTOP_NONE &&
--	    !mod->critical && rzv2h_mod_clock_is_enabled(&clock->hw)) {
-+	    !critical && rzv2h_mod_clock_is_enabled(&clock->hw)) {
- 		rzv2h_mod_clock_mstop_enable(priv, clock->mstop_data);
--	} else if (clock->mstop_data != BUS_MSTOP_NONE && mod->critical) {
-+	} else if (clock->mstop_data != BUS_MSTOP_NONE && critical) {
- 		unsigned long mstop_mask = FIELD_GET(BUS_MSTOP_BITS_MASK, clock->mstop_data);
- 		u16 mstop_index = FIELD_GET(BUS_MSTOP_IDX_MASK, clock->mstop_data);
- 		atomic_t *mstop = &priv->mstop_count[mstop_index * 16];
-@@ -1439,6 +1491,8 @@ static int __init rzv2h_cpg_probe(struct platform_device *pdev)
+@@ -1842,6 +1895,8 @@ static int __init rzv2h_cpg_probe(struct platform_device *pdev)
  	for (i = 0; i < info->num_mod_clks; i++)
  		rzv2h_cpg_register_mod_clk(&info->mod_clks[i], priv);
  
@@ -182,5 +191,6 @@ index 3bd4edb..a89556d 100644
  	error = of_clk_add_provider(np, rzv2h_cpg_clk_src_twocell_get, priv);
  	if (error)
  		return error;
---
+-- 
 2.43.0
+

@@ -1,4 +1,4 @@
-From f7897b7a3933f9b0795d1c2c5097d4e9c7a3cd0f Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 12 Jun 2026 12:25:36 +0200
 Subject: [PATCH] usb: ohci-platform: add "spurious-oc" DT property (mirrors
@@ -30,7 +30,7 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
  4 files changed, 18 insertions(+)
 
 diff --git a/Documentation/devicetree/bindings/usb/generic-ohci.yaml b/Documentation/devicetree/bindings/usb/generic-ohci.yaml
-index f838f78..04ddcd3 100644
+index f838f78d6164..04ddcd334bf8 100644
 --- a/Documentation/devicetree/bindings/usb/generic-ohci.yaml
 +++ b/Documentation/devicetree/bindings/usb/generic-ohci.yaml
 @@ -88,6 +88,12 @@ properties:
@@ -47,10 +47,10 @@ index f838f78..04ddcd3 100644
      $ref: /schemas/types.yaml#/definitions/flag
      description:
 diff --git a/drivers/usb/host/ohci-hcd.c b/drivers/usb/host/ohci-hcd.c
-index ab175e1..5da79a0 100644
+index ab175e181e55..5da79a0daaf4 100644
 --- a/drivers/usb/host/ohci-hcd.c
 +++ b/drivers/usb/host/ohci-hcd.c
-@@ -687,6 +687,14 @@ retry:
+@@ -687,6 +687,14 @@ static int ohci_run (struct ohci_hcd *ohci)
  		 */
  		val |= RH_A_NPS;
  	}
@@ -66,10 +66,10 @@ index ab175e1..5da79a0 100644
  
  	ohci_writel (ohci, RH_HS_LPSC, &ohci->regs->roothub.status);
 diff --git a/drivers/usb/host/ohci-platform.c b/drivers/usb/host/ohci-platform.c
-index fa27bbd..8714c57 100644
+index 30917081f0c6..450b37737ee3 100644
 --- a/drivers/usb/host/ohci-platform.c
 +++ b/drivers/usb/host/ohci-platform.c
-@@ -136,6 +136,9 @@ static int ohci_platform_probe(struct platform_device *dev)
+@@ -135,6 +135,9 @@ static int ohci_platform_probe(struct platform_device *dev)
  		if (of_property_read_bool(dev->dev.of_node, "no-big-frame-no"))
  			ohci->flags |= OHCI_QUIRK_FRAME_NO;
  
@@ -80,7 +80,7 @@ index fa27bbd..8714c57 100644
  					  "remote-wakeup-connected"))
  			ohci->hc_control = OHCI_CTRL_RWC;
 diff --git a/drivers/usb/host/ohci.h b/drivers/usb/host/ohci.h
-index aac6285..026e995 100644
+index aac6285b37f8..026e9951139b 100644
 --- a/drivers/usb/host/ohci.h
 +++ b/drivers/usb/host/ohci.h
 @@ -422,6 +422,7 @@ struct ohci_hcd {
@@ -92,5 +92,5 @@ index aac6285..026e995 100644
  	// there are also chip quirks/bugs in init logic
  
 -- 
-2.34.1
+2.43.0
 

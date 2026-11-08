@@ -29,7 +29,7 @@ Upstream-Status: Pending
  1 file changed, 40 insertions(+), 8 deletions(-)
 
 diff --git a/drivers/watchdog/rzv2h_wdt.c b/drivers/watchdog/rzv2h_wdt.c
-index 9cdefb7..4a9811d 100644
+index 12043c3cece1..06b32e9a1845 100644
 --- a/drivers/watchdog/rzv2h_wdt.c
 +++ b/drivers/watchdog/rzv2h_wdt.c
 @@ -16,6 +16,7 @@
@@ -40,10 +40,10 @@ index 9cdefb7..4a9811d 100644
  #include <linux/units.h>
  #include <linux/watchdog.h>
  
-@@ -61,18 +62,35 @@ struct rzv2h_wdt_priv {
- 	struct clk *oscclk;
+@@ -73,18 +74,35 @@ struct rzv2h_wdt_priv {
  	struct reset_control *rstc;
  	struct watchdog_device wdev;
+ 	const struct rzv2h_of_data *of_data;
 +	/*
 +	 * Serialises the keep-alive ping against rzv2h_wdt_suspend().  The
 +	 * hardware timeout is only ~175 ms (16384 x 256 / 24 MHz), so the
@@ -79,15 +79,15 @@ index 9cdefb7..4a9811d 100644
  
  	return 0;
  }
-@@ -94,6 +112,7 @@ static void rzv2h_wdt_setup(struct watchdog_device *wdev, u16 wdtcr)
- static int rzv2h_wdt_start(struct watchdog_device *wdev)
+@@ -107,6 +125,7 @@ static int rzv2h_wdt_start(struct watchdog_device *wdev)
  {
  	struct rzv2h_wdt_priv *priv = watchdog_get_drvdata(wdev);
+ 	const struct rzv2h_of_data *of_data = priv->of_data;
 +	unsigned long flags;
  	int ret;
  
  	ret = pm_runtime_resume_and_get(wdev->parent);
-@@ -121,9 +140,14 @@ static int rzv2h_wdt_start(struct watchdog_device *wdev)
+@@ -134,9 +153,14 @@ static int rzv2h_wdt_start(struct watchdog_device *wdev)
  
  	/*
  	 * Down counting starts after writing the sequence 00h -> FFh to the
@@ -104,8 +104,8 @@ index 9cdefb7..4a9811d 100644
  
  	return 0;
  }
-@@ -197,7 +221,7 @@ static int rzv2h_wdt_restart(struct watchdog_device *wdev,
- 	rzv2h_wdt_setup(wdev, WDTCR_CKS_CLK_1 | WDTCR_RPSS_25 |
+@@ -210,7 +234,7 @@ static int rzv2h_wdt_restart(struct watchdog_device *wdev,
+ 	rzv2h_wdt_setup(wdev, priv->of_data->cks_min | WDTCR_RPSS_25 |
  			WDTCR_RPES_75 | WDTCR_TOPS_1024);
  
 -	rzv2h_wdt_ping(wdev);
@@ -113,7 +113,7 @@ index 9cdefb7..4a9811d 100644
  
  	/* wait for underflow to trigger... */
  	udelay(5);
-@@ -296,6 +320,7 @@ static int rzv2h_wdt_probe(struct platform_device *pdev)
+@@ -323,6 +347,7 @@ static int rzv2h_wdt_probe(struct platform_device *pdev)
  	priv->wdev.info = &rzv2h_wdt_ident;
  	priv->wdev.ops = &rzv2h_wdt_ops;
  	priv->wdev.parent = dev;
@@ -121,7 +121,7 @@ index 9cdefb7..4a9811d 100644
  	priv->wdev.bootstatus = bootstatus;
  	watchdog_set_drvdata(&priv->wdev, priv);
  	dev_set_drvdata(dev, priv);
-@@ -312,9 +337,15 @@ static int rzv2h_wdt_probe(struct platform_device *pdev)
+@@ -348,9 +373,15 @@ static const struct rzv2h_of_data rzv2h_wdt_of_data = {
  static int __maybe_unused rzv2h_wdt_suspend(struct device *dev)
  {
  	struct rzv2h_wdt_priv *priv = dev_get_drvdata(dev);
@@ -138,7 +138,7 @@ index 9cdefb7..4a9811d 100644
  
  	return 0;
  }
-@@ -335,7 +366,8 @@ static int __maybe_unused rzv2h_wdt_resume(struct device *dev)
+@@ -371,7 +402,8 @@ static int __maybe_unused rzv2h_wdt_resume(struct device *dev)
  		if (ret)
  			return ret;
  
@@ -148,3 +148,6 @@ index 9cdefb7..4a9811d 100644
  	}
  
  	return 0;
+-- 
+2.43.0
+

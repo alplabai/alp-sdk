@@ -11,6 +11,12 @@ driver supports attaching to a CM33 that TF-A already started (state
 DETACHED at probe, rz_rproc_attach is a no-op) and stop/start/reload of it.
 Alp changes to it are in 0021.
 ---
+ drivers/remoteproc/Kconfig    |   7 +
+ drivers/remoteproc/Makefile   |   1 +
+ drivers/remoteproc/rz_rproc.c | 479 ++++++++++++++++++++++++++++++++++
+ 3 files changed, 487 insertions(+)
+ create mode 100644 drivers/remoteproc/rz_rproc.c
+
 diff --git a/drivers/remoteproc/Kconfig b/drivers/remoteproc/Kconfig
 index d93113b6ffaa..8cb396a3a107 100644
 --- a/drivers/remoteproc/Kconfig
@@ -40,7 +46,7 @@ index 5478c7cb9e07..535478314f7b 100644
 +obj-$(CONFIG_RZ_REMOTEPROC)		+= rz_rproc.o
 diff --git a/drivers/remoteproc/rz_rproc.c b/drivers/remoteproc/rz_rproc.c
 new file mode 100644
-index 000000000000..d5182b1ebca0
+index 000000000000..05967b179e9c
 --- /dev/null
 +++ b/drivers/remoteproc/rz_rproc.c
 @@ -0,0 +1,479 @@
@@ -525,3 +531,4 @@ index 000000000000..d5182b1ebca0
 +
 -- 
 2.43.0
+

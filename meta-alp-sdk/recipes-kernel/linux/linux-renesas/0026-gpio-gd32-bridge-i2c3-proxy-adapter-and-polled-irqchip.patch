@@ -1,4 +1,4 @@
-From 797be4e5f8883413b0a9a33aeaaf48bc88821e9c Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Tue, 6 Oct 2026 13:10:30 +0000
 Subject: [PATCH] gpio: gd32-bridge: add the I2C3 proxy adapter and a polled
@@ -50,7 +50,7 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
  2 files changed, 635 insertions(+), 13 deletions(-)
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
-index 426eb1e..459d480 100644
+index eefc447b2148..c886d5f863f8 100644
 --- a/drivers/gpio/Kconfig
 +++ b/drivers/gpio/Kconfig
 @@ -1013,6 +1013,7 @@ config GPIO_GD32_BRIDGE
@@ -62,7 +62,7 @@ index 426eb1e..459d480 100644
  	  GPIO support for E1M IO pads routed through the GD32G553
  	  supervisor MCU on Alp Lab V2N-family SoMs, accessed over the
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
-index cde6d5a..436549f 100644
+index cde6d5a93c53..436549f4174d 100644
 --- a/drivers/gpio/gpio-gd32-bridge.c
 +++ b/drivers/gpio/gpio-gd32-bridge.c
 @@ -92,6 +92,17 @@
@@ -837,5 +837,5 @@ index cde6d5a..436549f 100644
  }
  
 -- 
-2.38.1.windows.1
+2.43.0
 

@@ -45,7 +45,9 @@ this is fiddly.
 | The MERA2 runtime closure: headers + **nine** staged libraries (the backend does not link `meta-rz-drpai`'s `libtvm_runtime.so`; `libdrp_tvm_rt.so` carries the `tvm::runtime` symbols) | `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`, staged/compiled from a builder-supplied **`RUHMI_DRPAI_TVM_DIR`** checkout | The recipe vendors nothing — see §4. Note its `LICENSE = "CLOSED"`: the `rzv_drp-ai_tvm` **sources** are Apache-2.0, but the prebuilt MERA2 libraries staged alongside them are account-gated, so the package as a whole is not redistributable. Tracked as a licence-manifest gap. |
 
 Baseline this was worked against: **AI SDK platform 7.1 on BSP v6.30**
-(`RTK0EF0189F06300SJ`, linux-renesas `6.1.141-cip43`).
+(`RTK0EF0189F06300SJ`, linux-renesas `6.1.141-cip43`; the layer's kernel
+pin is now `6.1.157-cip48`, so the vendor DRP-AI patches in this feature
+layer are not yet checked against it).
 
 ### The account-gated piece
 

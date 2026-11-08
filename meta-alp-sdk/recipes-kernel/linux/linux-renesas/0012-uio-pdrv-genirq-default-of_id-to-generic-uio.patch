@@ -15,6 +15,7 @@ parameter still overrides it.
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/drivers/uio/uio_pdrv_genirq.c b/drivers/uio/uio_pdrv_genirq.c
+index 63258b6accc4..8085c6a47de5 100644
 --- a/drivers/uio/uio_pdrv_genirq.c
 +++ b/drivers/uio/uio_pdrv_genirq.c
 @@ -276,7 +276,7 @@ static const struct dev_pm_ops uio_pdrv_genirq_dev_pm_ops = {

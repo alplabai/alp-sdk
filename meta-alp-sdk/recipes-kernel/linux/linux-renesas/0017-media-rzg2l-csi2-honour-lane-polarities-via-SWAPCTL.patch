@@ -1,4 +1,4 @@
-From e441fe222a5e88de90e411fdce59faf34b19169a Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 2 Oct 2026 09:00:00 +0000
 Subject: [PATCH] media: rzg2l-csi2: honour lane-polarities via SWAPCTL
@@ -33,7 +33,7 @@ Upstream-Status: Pending [generic driver fix; no SoM-specific code]
  1 file changed, 37 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c
-index fd5eaeb4a301..dcc4a13eb7a8 100644
+index 746db39425c3..a8dacdf7d41a 100644
 --- a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c
 +++ b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c
 @@ -94,6 +94,8 @@
@@ -45,7 +45,7 @@ index fd5eaeb4a301..dcc4a13eb7a8 100644
  
  #define VSRSTS_RETRIES			20
  
-@@ -131,6 +133,9 @@ struct rzg2l_csi2 {
+@@ -124,6 +126,9 @@ struct rzg2l_csi2 {
  	unsigned short lanes;
  	unsigned long hsfreq;
  
@@ -55,15 +55,15 @@ index fd5eaeb4a301..dcc4a13eb7a8 100644
  	bool dphy_enabled;
  };
  
-@@ -138,6 +143,7 @@ struct rzg2l_csi2_info {
+@@ -131,6 +136,7 @@ struct rzg2l_csi2_info {
  	int (*dphy_enable)(struct rzg2l_csi2 *csi2);
  	int (*dphy_disable)(struct rzg2l_csi2 *csi2);
  	bool has_system_clk;
 +	bool has_swapctl;
- 	unsigned long vclk_rec_rate;
  	const struct rzg2l_csi2_format *format;
  	unsigned int num_formats;
-@@ -655,7 +661,10 @@ static int rzv2h_csi2_dphy_enable(struct rzg2l_csi2 *csi2)
+ 	unsigned int min_width;
+@@ -662,7 +668,10 @@ static int rzv2h_csi2_dphy_enable(struct rzg2l_csi2 *csi2)
  	if (i == ARRAY_SIZE(rzv2h_s_hssettlectl))
  		return -EINVAL;
  
@@ -75,7 +75,7 @@ index fd5eaeb4a301..dcc4a13eb7a8 100644
  
  	hssettle = rzv2h_s_hssettlectl[i].s_hssettlectl;
  	rzg2l_csi2_write(csi2, CRUm_S_TIMCTL,
-@@ -674,6 +683,7 @@ static int rzv2h_csi2_dphy_enable(struct rzg2l_csi2 *csi2)
+@@ -681,6 +690,7 @@ static int rzv2h_csi2_dphy_enable(struct rzg2l_csi2 *csi2)
  }
  
  static const struct rzg2l_csi2_info rzv2h_csi2_info = {
@@ -83,7 +83,7 @@ index fd5eaeb4a301..dcc4a13eb7a8 100644
  	.dphy_enable = rzv2h_csi2_dphy_enable,
  	.dphy_disable = rzv2h_csi2_dphy_disable,
  	.has_system_clk = false,
-@@ -932,12 +942,38 @@ static const struct v4l2_async_notifier_operations rzg2l_csi2_notify_ops = {
+@@ -961,12 +971,38 @@ static const struct v4l2_async_notifier_operations rzg2l_csi2_notify_ops = {
  static int rzg2l_csi2_parse_v4l2(struct rzg2l_csi2 *csi2,
  				 struct v4l2_fwnode_endpoint *vep)
  {

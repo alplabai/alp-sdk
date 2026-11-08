@@ -1,4 +1,4 @@
-From 3f7ee5e684e711048c07e8ef18b5691a9ab6202f Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 5 Jun 2026 21:28:50 +0200
 Subject: [PATCH] drm/panel: add himax-hx8394 with rocktech,rk055hdmipi4ma0
@@ -644,3 +644,6 @@ index 000000000000..154223bc3d65
 +MODULE_AUTHOR("Kamil Trzciński <ayufan@ayufan.eu>");
 +MODULE_DESCRIPTION("DRM driver for Himax HX8394 based MIPI DSI panels");
 +MODULE_LICENSE("GPL");
+-- 
+2.43.0
+

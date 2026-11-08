@@ -1,7 +1,10 @@
-From: Alp Lab AB
-Subject: [PATCH] irqchip/renesas-rzv2h: mask the ICU error sources the handler cannot acknowledge
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Sun, 8 Nov 2026 20:11:24 +0000
+Subject: [PATCH] irqchip/renesas-rzv2h: mask the ICU error sources the handler
+ cannot acknowledge
 
-gpt_irq_handler() services only the GPT overflow bits of error groups
+rzv2h_icu_error_irq() services only the GPT overflow bits of error groups
 1 and 2 on the shared CA55 error line, but probe left group 0 (which
 resets fully unmasked) and every other bit of group 1 unmasked. Once a
 non-GPT error source asserts -- on an E1M-V2M103 group 0 bit 0 is set
@@ -15,7 +18,7 @@ everything else in groups 0-3, warning once about any error status
 already pending at probe. The mask is written BEFORE the line is
 requested: requesting enables it, and a source already asserted at
 probe storms it ('irq 14: nobody cared' inside
-devm_request_irq(), then genirq disables the line) if the mask comes
+devm_request_irq() in rzv2h_icu_setup_irqs(), then genirq disables the line) if the mask comes
 after. The mask is also saved and restored across suspend/resume
 (ERINTMSK was not part of the register cache), so the storm cannot return
 after an ICU state loss.
@@ -35,20 +38,25 @@ can miss it.
 Upstream-Status: Pending
 Signed-off-by: Alp Lab AB
 ---
+ drivers/irqchip/irq-renesas-rzv2h.c | 48 +++++++++++++++++++++++++++++
+ 1 file changed, 48 insertions(+)
+
+diff --git a/drivers/irqchip/irq-renesas-rzv2h.c b/drivers/irqchip/irq-renesas-rzv2h.c
+index b4984db25655..78e91d2ecd43 100644
 --- a/drivers/irqchip/irq-renesas-rzv2h.c
 +++ b/drivers/irqchip/irq-renesas-rzv2h.c
-@@ -103,6 +103,10 @@
- #define ERROR_INTSTAT_OFFSET(x)			(0x338 + 0x4 * (x))
- #define ERROR_INTCLR_OFFSET(x)			(0x348 + 0x4 * (x))
- #define ERROR_ERINTMSK_OFFSET(x)		(0x358 + 0x4 * (x))
+@@ -65,6 +65,10 @@
+ #define ICU_ERINTA55CTL(k)			(0x338 + (k) * 4)
+ #define ICU_ERINTA55CRL(k)			(0x348 + (k) * 4)
+ #define ICU_ERINTA55MSK(k)			(0x358 + (k) * 4)
 +/* Bus-error factor status / clear, ICU_BEISRk / ICU_BECLRk (k = 0..3). */
-+#define ERROR_BEISR_OFFSET(x)			(0x70 + 0x4 * (x))
-+#define ERROR_BECLR_OFFSET(x)			(0x80 + 0x4 * (x))
-+#define ERROR_GR0_MCPU_LOCKUP			BIT(25)
- 
- /**
-  * struct rzv2h_hw_info - Interrupt Control Unit controller hardware info structure.
-@@ -199,6 +203,7 @@
++#define ICU_BEISR(k)				(0x70 + (k) * 4)
++#define ICU_BECLR(k)				(0x80 + (k) * 4)
++#define ICU_ERR_GR0_MCPU_LOCKUP			BIT(25)
+ #define ICU_IPTSR				0x60
+ #define ICU_DMkSELy(k, y)			(0x420 + (k) * 0x20 + (y) * 4)
+ #define ICU_DMACKSELk(k)			(0x500 + (k) * 4)
+@@ -214,6 +218,7 @@ static struct rzv2h_irqc_reg_cache {
  	u32		iptsr;
  	u32		titsr[2];
  	u32		tssr[16];
@@ -56,96 +64,70 @@ Signed-off-by: Alp Lab AB
  } *rzv2h_irqc_reg_cache_data;
  
  static inline struct rzv2h_icu_priv *irq_data_to_priv(struct irq_data *data)
-@@ -481,6 +486,9 @@
+@@ -507,6 +512,9 @@ static int rzv2h_irqc_irq_suspend(void)
  	for (u8 i = 0; i < 16; i++)
  		rzv2h_irqc_reg_cache_data->tssr[i] = readl_relaxed(base + ICU_TSSR(i));
  
 +	for (u8 i = 0; i < 4; i++)
-+		rzv2h_irqc_reg_cache_data->erintmsk[i] = readl_relaxed(base + ERROR_ERINTMSK_OFFSET(i));
++		rzv2h_irqc_reg_cache_data->erintmsk[i] = readl_relaxed(base + ICU_ERINTA55MSK(i));
 +
  	return 0;
  }
  
-@@ -502,6 +510,10 @@
+@@ -528,6 +536,10 @@ static void rzv2h_irqc_irq_resume(void)
  	writel_relaxed(rzv2h_irqc_reg_cache_data->nitsr, base + ICU_NITSR);
  	writel_relaxed(rzv2h_irqc_reg_cache_data->iitsr, base + ICU_IITSR);
  	writel_relaxed(rzv2h_irqc_reg_cache_data->iptsr, base + ICU_IPTSR);
 +
 +	/* Keep the non-GPT error sources masked (see rzv2h_icu_init_common()). */
 +	for (u8 i = 0; i < 4; i++)
-+		writel_relaxed(rzv2h_irqc_reg_cache_data->erintmsk[i], base + ERROR_ERINTMSK_OFFSET(i));
++		writel_relaxed(rzv2h_irqc_reg_cache_data->erintmsk[i], base + ICU_ERINTA55MSK(i));
  }
  
  static struct syscore_ops rzv2h_irqc_syscore_ops = {
-@@ -743,6 +755,42 @@
- 		return gpt_irq;
+@@ -736,6 +748,42 @@ static int rzv2h_icu_setup_irqs(struct platform_device *pdev, struct irq_domain
+ 				     icu_err);
  	}
  
 +	/*
 +	 * The CA55 error line is shared by every ICU error source, but
-+	 * gpt_irq_handler() only services the GPT overflow bits (groups 1
-+	 * and 2). Any other source left unmasked -- group 0 resets fully
-+	 * unmasked -- can never be acknowledged, so it storms the line until
-+	 * genirq disables it, and the GPT overflow interrupts go with it.
-+	 * Unmask the GPT overflow bits only; report anything already pending.
-+	 * This must run before the request below: requesting the line
-+	 * enables it, and a source already asserted at probe (group 0 on an
-+	 * E1M-V2M103) would storm it before the mask is written.
++	 * rzv2h_icu_error_irq() only services the GPT overflow bits (banks
++	 * GPT_BANK(0) and GPT_BANK(1)). Any other source left unmasked --
++	 * group 0 resets fully unmasked -- can never be acknowledged, so it
++	 * storms the line until genirq disables it, and the GPT overflow
++	 * interrupts go with it. Unmask the GPT overflow bits only; report
++	 * anything already pending. This must run before the request below:
++	 * requesting the line enables it, and a source already asserted at
++	 * probe (group 0 on an E1M-V2M103) would storm it before the mask is
++	 * written.
 +	 */
 +	for (u8 grp = 0; grp <= 3; grp++) {
-+		u32 be = readl(rzv2h_icu_data->base + ERROR_BEISR_OFFSET(grp));
++		u32 be = readl(priv->base + ICU_BEISR(grp));
 +
 +		/* Name the bus-error master/slave, then clear the bundled factor. */
 +		if (be) {
-+			dev_warn(&pdev->dev, "bus error factor ICU_BEISR%u 0x%08x at probe, cleared\n",
++			dev_warn(dev, "bus error factor ICU_BEISR%u 0x%08x at probe, cleared\n",
 +				 grp, be);
-+			writel(be, rzv2h_icu_data->base + ERROR_BECLR_OFFSET(grp));
++			writel(be, priv->base + ICU_BECLR(grp));
 +		}
 +	}
 +
 +	for (u8 grp = 0; grp <= 3; grp++) {
-+		u32 stat = readl(rzv2h_icu_data->base + ERROR_INTSTAT_OFFSET(grp));
-+		u32 keep = grp == 1 ? GPT_OVF_MASK(0) :
-+			   grp == 2 ? GPT_OVF_MASK(1) : 0;
++		u32 stat = readl(priv->base + ICU_ERINTA55CTL(grp));
++		u32 keep = grp == GPT_BANK(0) ? GPT_OVF_MASK(0) :
++			   grp == GPT_BANK(1) ? GPT_OVF_MASK(1) : 0;
 +
 +		if (stat & ~keep)
-+			dev_warn(&pdev->dev,
-+				 "error group %u status 0x%08x pending at probe, masked\n",
++			dev_warn(dev, "error group %u status 0x%08x pending at probe, masked\n",
 +				 grp, stat & ~keep);
-+		if (!grp && (stat & ERROR_GR0_MCPU_LOCKUP))
-+			dev_warn(&pdev->dev, "Cortex-M33 is in lockup (MCPU_LOCKUP) at probe\n");
-+		writel(~keep, rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(grp));
++		if (!grp && (stat & ICU_ERR_GR0_MCPU_LOCKUP))
++			dev_warn(dev, "Cortex-M33 is in lockup (MCPU_LOCKUP) at probe\n");
++		writel(~keep, priv->base + ICU_ERINTA55MSK(grp));
 +	}
 +
- 	ret = devm_request_irq(&pdev->dev, gpt_irq, gpt_irq_handler,
- 					irq_flags, dev_name(&pdev->dev), rzv2h_icu_data);
- 	if (ret < 0) {
-@@ -750,28 +798,6 @@
- 		return -ENOENT;
- 	}
- 
--	/* mask gpt overflow interrupt. */
--	for (u8 ch = 0; ch <= 1; ch++) {
--		int err_flag = readl(rzv2h_icu_data->base +
--			((!ch) ? ERROR_ERINTMSK_OFFSET(1) : ERROR_ERINTMSK_OFFSET(2)));
--
--		/* Unmask gpt overflow interrupt. */
--		writel(~GPT_CLR_ERINT_MASK(ch) & err_flag,
--			rzv2h_icu_data->base +
--			((!ch) ? ERROR_ERINTMSK_OFFSET(1) : ERROR_ERINTMSK_OFFSET(2)));
--
--		/* Mask gpt deadtime interrupt. */
--		err_flag = readl(rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(2));
--		if (ch) {
--			writel(GPT1_2_ERINTMSK_DEI_MASK | err_flag,
--				 rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(2));
--			writel(GPT1_3_ERINTMSK_DEI_MASK,
--				 rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(3));
--		} else
--			writel(GPT0_ERINTMSK_DEI_MASK | err_flag,
--				 rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(2));
--	}
--
- 	/*
- 	 * coccicheck complains about a missing put_device call before returning, but it's a false
- 	 * positive. We still need &pdev->dev after successfully returning from this function.
+ 	ret = devm_request_irq(dev, virq, rzv2h_icu_error_irq, 0, dev_name(dev), priv);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "Failed to request %s IRQ\n", icu_err);
+-- 
+2.43.0
+

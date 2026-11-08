@@ -1,8 +1,8 @@
-From 82ab28e84a4de238b04fab20ef7e46c98fa9a68c Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 2 Oct 2026 05:42:52 +0000
-Subject: [PATCH 2/3] media: i2c: imx335: add 2-lane support and a 10-bit
- binned mode
+Subject: [PATCH] media: i2c: imx335: add 2-lane support and a 10-bit binned
+ mode
 
 The 6.1 driver only accepts four CSI-2 data lanes and one mode,
 2592x1940 SRGGB12_1X12. The InnoMaker IMX335 module routes two lanes.

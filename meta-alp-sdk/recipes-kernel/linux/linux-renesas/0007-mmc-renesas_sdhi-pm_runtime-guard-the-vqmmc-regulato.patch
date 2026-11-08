@@ -1,4 +1,4 @@
-From 68408d9aea6676e78a91f1fbe569fa97e9d0e22d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 25 Sep 2026 11:11:42 +0200
 Subject: [PATCH] mmc: renesas_sdhi: pm_runtime-guard the vqmmc regulator's
@@ -45,22 +45,14 @@ Upstream-Status: Pending
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- drivers/mmc/host/renesas_sdhi_core.c | 52 ++++++++++++++++++++++++++++
- 1 file changed, 52 insertions(+)
+ drivers/mmc/host/renesas_sdhi_core.c | 51 ++++++++++++++++++++++++++++
+ 1 file changed, 51 insertions(+)
 
 diff --git a/drivers/mmc/host/renesas_sdhi_core.c b/drivers/mmc/host/renesas_sdhi_core.c
-index d787e8ba5..83f1d4c78 100644
+index 55ac1a895b21..83103a2471ad 100644
 --- a/drivers/mmc/host/renesas_sdhi_core.c
 +++ b/drivers/mmc/host/renesas_sdhi_core.c
-@@ -31,6 +31,7 @@
- #include <linux/pinctrl/pinctrl-state.h>
- #include <linux/platform_device.h>
- #include <linux/pm_domain.h>
-+#include <linux/pm_runtime.h>
- #include <linux/regulator/consumer.h>
- #include <linux/regulator/driver.h>
- #include <linux/regulator/of_regulator.h>
-@@ -950,23 +951,74 @@ static int renesas_sdhi_regulator_enable(struct regulator_dev *rdev)
+@@ -955,23 +955,74 @@ static int renesas_sdhi_regulator_enable(struct regulator_dev *rdev)
  	return 0;
  }
  
@@ -136,5 +128,5 @@ index d787e8ba5..83f1d4c78 100644
  }
  
 -- 
-2.55.0
+2.43.0
 

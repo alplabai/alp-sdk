@@ -125,7 +125,8 @@ page](https://www.renesas.com/en/products/rz-v2n) under *Software &
 Tools*).  Mind the two version axes: the **AI SDK platform is 7.1**,
 while the **BSP it rides on is v6.30** (= linux-renesas
 `6.1.141-cip43`) -- v6.30 is the revision this carrier was
-bring-up-tested against.
+bring-up-tested against.  The layer's kernel pin is now
+`6.1.157-cip48` (`rz-6.1-cip48`, see `linux-renesas_%.bbappend`).
 
 The AI SDK comes as two downloads -- an apps/binary package and a
 **Source Code** package.  To *build* an image you need the Source

@@ -102,7 +102,7 @@ has a concrete worked example, and so the SoM column in
 
 The V2N + V2N-M1 Yocto build rides on the **Renesas RZ/V2N AI SDK
 (platform 7.1) on BSP v6.30** (`RTK0EF0189F06300SJ`, linux-renesas
-6.1.141-cip43) -- obtained from Renesas under your own account and
+6.1.141-cip43; the layer itself pins 6.1.157-cip48) -- obtained from Renesas under your own account and
 licence; alp-sdk does not redistribute it.  The full build flow
 (extract the Source Code package, `bitbake-layers add-layer` the
 canonical set, build against the carrier MACHINE) lives in

@@ -1,4 +1,4 @@
-From 87038a6bbd33f4d48e7e25a7a8fa34fa1e6c1f4f Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Sat, 3 Oct 2026 10:00:00 +0200
 Subject: [PATCH] remoteproc: rz: let userspace own the vrings
@@ -193,5 +193,5 @@ index 05967b179e9c..5501fdbb4e08 100644
  	
  	platform_set_drvdata(pdev, rproc);
 -- 
-2.53.0
+2.43.0
 

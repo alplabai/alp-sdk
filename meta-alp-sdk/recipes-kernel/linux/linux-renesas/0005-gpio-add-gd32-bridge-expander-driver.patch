@@ -1,4 +1,4 @@
-From 2823bc96eff4423a8b07b71ce4369447b4a3b50d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 25 Sep 2026 11:08:37 +0200
 Subject: [PATCH] gpio: add Alp Lab GD32 bridge expander driver
@@ -103,14 +103,14 @@ Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- drivers/gpio/Kconfig            |   9 +
- drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 1258 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ drivers/gpio/Kconfig            |    9 +
+ drivers/gpio/Makefile           |    1 +
+ drivers/gpio/gpio-gd32-bridge.c | 1258 +++++++++++++++++++++++++++++++
  3 files changed, 1268 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
-index 74d8b949c..eefc447b2 100644
+index 74d8b949ce36..eefc447b2148 100644
 --- a/drivers/gpio/Kconfig
 +++ b/drivers/gpio/Kconfig
 @@ -1009,6 +1009,15 @@ config GPIO_ADNP
@@ -130,7 +130,7 @@ index 74d8b949c..eefc447b2 100644
  	tristate "Gateworks PLD GPIO Expander"
  	depends on OF_GPIO
 diff --git a/drivers/gpio/Makefile b/drivers/gpio/Makefile
-index e331e951e..3ba5cc2f2 100644
+index e331e951ef2e..3ba5cc2f2193 100644
 --- a/drivers/gpio/Makefile
 +++ b/drivers/gpio/Makefile
 @@ -59,6 +59,7 @@ obj-$(CONFIG_GPIO_EP93XX)		+= gpio-ep93xx.o
@@ -143,7 +143,7 @@ index e331e951e..3ba5cc2f2 100644
  obj-$(CONFIG_GPIO_GRGPIO)		+= gpio-grgpio.o
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
 new file mode 100644
-index 000000000..0d3b6690f
+index 000000000000..0ee0eb018b6f
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
 @@ -0,0 +1,1258 @@
@@ -1406,4 +1406,5 @@ index 000000000..0d3b6690f
 +MODULE_DESCRIPTION("GPIO driver for the Alp Lab GD32 IO-MCU bridge");
 +MODULE_LICENSE("GPL");
 -- 
-2.55.0
+2.43.0
+

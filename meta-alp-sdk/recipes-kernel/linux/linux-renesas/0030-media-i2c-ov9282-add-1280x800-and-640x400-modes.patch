@@ -1,8 +1,8 @@
-From c74daf3245e31989ea3a78f02065ec7199b370c1 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 2 Oct 2026 05:57:12 +0000
-Subject: [PATCH 3/3] media: i2c: ov9282: add 1280x800 and 640x400 modes, Y8
- output (backport from v6.6)
+Subject: [PATCH] media: i2c: ov9282: add 1280x800 and 640x400 modes, Y8 output
+ (backport from v6.6)
 
 Backport drivers/media/i2c/ov9282.c from mainline v6.6. The 6.1 driver
 has a single 1280x720 Y10_1X10 mode; the v6.6 driver adds:

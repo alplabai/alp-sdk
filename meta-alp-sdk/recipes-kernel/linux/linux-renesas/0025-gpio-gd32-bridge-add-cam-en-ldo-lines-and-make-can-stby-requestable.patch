@@ -1,4 +1,4 @@
-From a4a33233877208690cdb5403689d6b07ea0e579e Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Tue, 6 Oct 2026 13:07:01 +0000
 Subject: [PATCH] gpio: gd32-bridge: add CAM_EN_LDO0..3 lines and make CAN_STBY
@@ -31,7 +31,7 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
  1 file changed, 123 insertions(+), 34 deletions(-)
 
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
-index 0ee0eb0..cde6d5a 100644
+index 0ee0eb018b6f..cde6d5a93c53 100644
 --- a/drivers/gpio/gpio-gd32-bridge.c
 +++ b/drivers/gpio/gpio-gd32-bridge.c
 @@ -105,6 +105,7 @@
@@ -323,5 +323,5 @@ index 0ee0eb0..cde6d5a 100644
  
  	gd32->chip.ngpio	  = GD32_NGPIO_TOTAL;
 -- 
-2.38.1.windows.1
+2.43.0
 
