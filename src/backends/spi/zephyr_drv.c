@@ -21,6 +21,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/spi.h>
+#include <zephyr/drivers/spi/alp_spi_compat.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 
@@ -96,7 +97,7 @@ static void _free_side(alp_z_spi_side_t *s)
 static uint16_t _to_spi_op(const alp_spi_config_t *cfg)
 {
 	uint16_t op = SPI_WORD_SET(cfg->bits_per_word ? cfg->bits_per_word : 8);
-	op |= SPI_OP_MODE_MASTER;
+	op |= SPI_OP_MODE_CONTROLLER;
 	op |= SPI_TRANSFER_MSB;
 	if (cfg->mode & 0x2u) op |= SPI_MODE_CPOL;
 	if (cfg->mode & 0x1u) op |= SPI_MODE_CPHA;
@@ -128,7 +129,6 @@ z_open(const alp_spi_config_t *cfg, alp_spi_backend_state_t *st, alp_capabilitie
 
 	s->zspi_cfg.frequency = cfg->freq_hz ? cfg->freq_hz : 1000000u;
 	s->zspi_cfg.operation = _to_spi_op(cfg);
-	s->zspi_cfg.slave     = 0;
 
 	if (cfg->cs_pin_id != ALP_SPI_NO_CS && alp_z_gpio_resolve(cfg->cs_pin_id, &s->cs_spec)) {
 		if (!device_is_ready(s->cs_spec.port)) {
@@ -226,7 +226,7 @@ static alp_z_spi_target_side_t *_alloc_target_side(void)
 static uint16_t _to_spi_target_op(const alp_spi_target_config_t *cfg)
 {
 	uint16_t op = SPI_WORD_SET(cfg->bits_per_word ? cfg->bits_per_word : 8);
-	op |= SPI_OP_MODE_SLAVE;
+	op |= SPI_OP_MODE_PERIPHERAL;
 	op |= SPI_TRANSFER_MSB;
 	if (cfg->mode & 0x2u) op |= SPI_MODE_CPOL;
 	if (cfg->mode & 0x1u) op |= SPI_MODE_CPHA;
@@ -265,7 +265,6 @@ static alp_status_t z_target_open(const alp_spi_target_config_t *cfg, alp_spi_ba
 
 	s->zspi_cfg.frequency = 0u; /* clock is owned by the external controller */
 	s->zspi_cfg.operation = _to_spi_target_op(cfg);
-	s->zspi_cfg.slave     = 0;
 	/* No CS resolution: the external controller drives /CS. */
 
 	/* Frame -> byte conversion factor.  Zephyr drivers pack one
