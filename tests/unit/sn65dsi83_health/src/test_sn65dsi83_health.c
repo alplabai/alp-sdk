@@ -170,7 +170,7 @@ static int fake_transfer(const struct device *dev, struct i2c_msg *msgs, uint8_t
 	return 0;
 }
 
-static const struct i2c_driver_api fake_api = { .transfer = fake_transfer };
+static DEVICE_API(i2c, fake_api) = { .transfer = fake_transfer };
 DEVICE_DEFINE(fake_i2c, "fake_i2c", NULL, NULL, NULL, NULL, POST_KERNEL, 99, &fake_api);
 
 static const struct i2c_dt_spec bus = { .bus = DEVICE_GET(fake_i2c), .addr = 0x2c };

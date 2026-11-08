@@ -38,7 +38,7 @@ ssh_command: |-
   elif grep -q ALP_ERR_NOSUPPORT /tmp/alp_som_temp.log; then
     echo HIL_ROS2_SOM_TEMP_NOSUPPORT
   fi
-  kill $pid 2>/dev/null
+  kill $pid 2>/dev/null || true
 
 serial:
   duration_s: 25

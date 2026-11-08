@@ -198,13 +198,15 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 	 * for its life: a BEGIN2 stream answers only READ2. */
 	const bool                  use_stream2 = (ctx->granted & GD32G553_LINK_FEAT_ADC_STREAM2) != 0u;
 	gd32g553_adc_stream2_info_t info        = { 0 };
+	bool                        unscaled    = false;
 	if (use_stream2) {
 		s = gd32g553_adc_stream_begin2(
 		    ctx, (uint8_t)slot, (uint8_t)cfg->channel_id, cfg->sample_rate_hz, 0u, &info);
 		if (s == ALP_OK && info.full_scale == 0u) {
-			/* A reply with no scaling cannot be converted to millivolts. */
-			(void)gd32g553_adc_stream_end(ctx, (uint8_t)slot);
-			s = ALP_ERR_IO;
+			/* A reply with no scaling cannot be converted to millivolts.
+			 * The GD32 stream is live: roll it back below, after the
+			 * supervisor is released, through the guarded path. */
+			unscaled = true;
 		}
 	} else {
 		s = gd32g553_adc_stream_begin(
@@ -212,6 +214,13 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 	}
 	alp_z_v2n_supervisor_release();
 
+	if (unscaled) {
+		/* Free the slot only if the GD32 confirms the stream stopped; an
+		 * unconfirmed END keeps it reserved (see bridge_stream_end_and_free). */
+		(void)bridge_stream_end_and_free((uint8_t)slot);
+		alp_z_set_last_error(ALP_ERR_IO);
+		return NULL;
+	}
 	if (s != ALP_OK) {
 		bridge_stream_free_slot((uint8_t)slot);
 		alp_z_set_last_error(s);
@@ -762,7 +771,13 @@ adc_spectrum_read_bins_body(alp_adc_spectrum_t *spec, float *bins, size_t cap, s
 		uint16_t     raw[GD32G553_BRIDGE_ADC_STREAM_READ_MAX];
 		size_t       got_raw = 0u;
 		alp_status_t s       = alp_adc_stream_read_mv(spec->stream, raw, want, &got_raw);
-		if (s != ALP_OK) return s;
+		if (s != ALP_OK) {
+			/* ALP_ERR_BUSY from the stream read is a discontinuity of unknown
+			 * length: the samples already accumulated and the next ones are
+			 * not one contiguous block, so drop the partial block. */
+			if (s == ALP_ERR_BUSY) spec->accumulated = 0u;
+			return s;
+		}
 		if (got_raw == 0u) {
 			/* Backend ring was empty; caller should poll again
              * later.  Not an error -- partial accumulation persists

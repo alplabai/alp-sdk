@@ -143,9 +143,10 @@ SRC_URI:append:rzv2n-family = "${@' file://0003-rzv2n-dev-ALP-E1M-4gb-memory-tie
 # either order today -- the ordering here is enforced ahead of any such
 # overlap, not reacting to one.
 SRC_URI:append:rzv2n-family = " file://0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch"
+# One line, keyed on e1m-v2m101-a55: the V2M102/V2M103 MACHINEs carry that name
+# in MACHINEOVERRIDES (their .conf lists it), so per-SKU lines would list the
+# file twice in SRC_URI there.
 SRC_URI:append:e1m-v2m101-a55 = " file://deepx-rail.cfg"
-SRC_URI:append:e1m-v2m102-a55 = " file://deepx-rail.cfg"
-SRC_URI:append:e1m-v2m103-a55 = " file://deepx-rail.cfg"
 
 # 0005 (RIIC combined-read fix + busy-bus recovery): the vendor rzg2l_riic
 # driver's riic_xfer() ran the two struct i2c_msg's a dm_i2c_read()
@@ -433,6 +434,22 @@ SRC_URI:append:rzv2n-family = "     file://0016-rzv2n-dev-ALP-E1M-persistent-env
 # phy reg when the PHY is not where the DT says.
 SRC_URI:append:rzv2n-family = " file://0017-rzv2n-dev-ALP-E1M-gbeth-phy-address-fixup.patch"
 
+# 0018 (alp-sdk#2960, #2964): CONFIG_BOOTCOMMAND is split into a rootfs-select
+# block and a kernel-load block; two opt-in Kconfig symbols swap them and the
+# default command stays byte for byte what 0016 left.
+#  - mender-boot.cfg (CONFIG_ALP_E1M_MENDER) is added only when Mender's U-Boot
+#    integration is on (MENDER_FEATURES has mender-uboot): the slot comes from
+#    mender_boot_part / mender_boot_part_hex, and bootcount / bootlimit /
+#    altbootcmd give the rollback.  meta-mender-core's own bootcmd patch
+#    (0003-Disable-CONFIG_BOOTCOMMAND..., MENDER_UBOOT_AUTO_CONFIGURE) is
+#    switched off in mender.inc, because it would replace this bootcmd.
+#  - fit-signed.cfg (CONFIG_ALP_E1M_FIT) is added only for ALP_FIT_SIGNED=1
+#    (conf/include/alp-fit-signing.inc): bootm on boot/fitImage, with the
+#    signing key put into the control dtb by uboot-sign.bbclass.
+SRC_URI:append:rzv2n-family = " file://0018-rzv2n-dev-ALP-E1M-mender-ab-and-signed-fit-boot.patch"
+SRC_URI:append:rzv2n-family = "${@bb.utils.contains('MENDER_FEATURES', 'mender-uboot', ' file://mender-boot.cfg', '', d)}"
+SRC_URI:append:rzv2n-family = "${@' file://fit-signed.cfg' if d.getVar('ALP_FIT_SIGNED') == '1' else ''}"
+
 # Fallback dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  The dtb basename is
 # now derived at boot (0014); CONFIG_ALP_E1M_FDTFILE (patch 0002) is only
 # the fallback for a missing/invalid manifest, an unknown family, or a
@@ -441,14 +458,13 @@ SRC_URI:append:rzv2n-family = " file://0017-rzv2n-dev-ALP-E1M-gbeth-phy-address-
 # (u-boot-configure.inc's find_cfgs() + merge_config.sh pick up any *.cfg in
 # SRC_URI), so a V2M build with a blank EEPROM still boots its own image.
 #
-# Scoped by MACHINE, not by rzv2n-family: the family override covers the
-# V2N SKUs too, and applying the V2M name there would invert the fallback.
-# Any new V2M MACHINE needs a line here -- there is no wildcard that is
-# safe, because "which dtb does this image contain" is a per-MACHINE fact
-# (KERNEL_DEVICETREE), not a family one.
+# Scoped by the V2M override, not by rzv2n-family: the family override covers
+# the V2N SKUs too, and applying the V2M name there would invert the fallback.
+# One line keyed on e1m-v2m101-a55 is enough: every V2M MACHINE (101/102/103)
+# carries that name in MACHINEOVERRIDES, so per-SKU lines would add the file
+# twice (and break do_patch if it ever became a .patch).  A new V2M MACHINE
+# must list e1m-v2m101-a55 in its MACHINEOVERRIDES to pick this up.
 SRC_URI:append:e1m-v2m101-a55 = " file://fdtfile-v2m.cfg"
-SRC_URI:append:e1m-v2m102-a55 = " file://fdtfile-v2m.cfg"
-SRC_URI:append:e1m-v2m103-a55 = " file://fdtfile-v2m.cfg"
 
 # Build U-Boot with the rzv2n-dev config, not the machine's stock rzv2n-evk.
 # The DEEPX bring-up patched above lives in board/renesas/rzv2n-dev/rzv2n-dev.c,

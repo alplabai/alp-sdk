@@ -2,33 +2,22 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * libFuzzer harness for the SWD packet-header + 32-bit data parity
- * checks used by `chips/gd32_swd/`.
+ * libFuzzer harness for the production SWD host driver in
+ * `chips/gd32_swd/gd32_swd.c`.
  *
- * The host-side bit-bang controller composes 8-bit request headers
- * + 32-bit data words with their parity bits per Arm ADIv5; the
- * receiver-side validation logic must reject malformed sequences
- * gracefully rather than tripping a UBSan bit-shift overflow or
- * indexing past a fixed buffer.
+ * The harness links the real driver and fakes only its two seams: the
+ * platform pad opener (`gd32_swd_platform()`, a weak symbol in the driver)
+ * and the portable GPIO calls it makes (`alp_gpio_*`).  SWDIO reads return
+ * the fuzz bytes as a bit stream (LSB first), so the target's side of the
+ * wire -- ACK, 32-bit data word, parity bit -- is attacker-controlled and
+ * the driver's own parity / ACK / retry / halt-poll logic runs unmodified
+ * through gd32_swd_init / connect / halt / flash_write / reset_and_run.
  *
- * Status: inline reference parser, not yet wired to production.
- * The host driver in `chips/gd32_swd/gd32_swd.c` composes + checks
- * parity inline inside `swd_xfer` (no separately-callable validator
- * to link).  Extracting `swd_compute_header_parity` /
- * `swd_compute_data_parity` as standalone non-static helpers is
- * tracked as a follow-up; once that lands the harness will replace
- * the impls below with calls to the production symbols + a CRC-style
- * cross-check against a second reference impl, matching the pattern
- * `gd32_bridge_frame_fuzz.c` already uses for the bridge CRC.
+ *   byte[0]    bit 0 = level SWDIO reads once the stream is exhausted
+ *   byte[1..]  the SWDIO read bit stream
  *
- * Driven input is interpreted as:
- *   byte[0]   = candidate request header
- *   byte[1..4] = candidate 32-bit data (little-endian)
- *   byte[5]   = candidate parity (low bit only)
- *
- * Validation mirrors what gd32_swd's swd_xfer would do after the
- * bus phase: header parity must match the XOR of the request bits,
- * data parity must match XOR-reduce of the 32 data bits.
+ * Every loop in the driver is bounded, so a hang is a driver bug and
+ * libFuzzer's -timeout reports it.
  *
  * Build:
  *   cmake -B build-fuzz -DALP_BUILD_FUZZ=ON -DALP_OS=baremetal \
@@ -36,57 +25,107 @@
  *   cmake --build build-fuzz --target alp_fuzz_swd_packet
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-/* Pull a single bit out of `byte`. */
-static int bit(uint8_t byte, unsigned i)
+#include "alp/chips/gd32g553.h"
+#include "alp/chips/gd32_swd.h"
+#include "alp/peripheral.h"
+#include "gd32_swd_platform.h"
+
+/* Fuzz-fed SWDIO bit stream. */
+static const uint8_t *g_bits;
+static size_t         g_nbits;
+static size_t         g_pos;
+static bool           g_tail_level;
+
+/* Pads are opaque to the driver; three distinct tokens are enough. */
+static int g_pad[3];
+
+static alp_gpio_t *fake_open_pad(uint32_t pad_id)
 {
-	return (byte >> i) & 1u;
+	switch (pad_id) {
+	case GD32G553_PAD_ID_SWDIO:
+		return (alp_gpio_t *)&g_pad[0];
+	case GD32G553_PAD_ID_SWCLK:
+		return (alp_gpio_t *)&g_pad[1];
+	case GD32G553_PAD_ID_NRST:
+		return (alp_gpio_t *)&g_pad[2];
+	default:
+		return NULL;
+	}
 }
 
-/* Header layout, Arm DDI 0316C §5.3:
- *   bit 0   start (must be 1)
- *   bit 1   APnDP
- *   bit 2   RnW
- *   bit 3   A2
- *   bit 4   A3
- *   bit 5   parity = XOR(APnDP, RnW, A2, A3)
- *   bit 6   stop  (must be 0)
- *   bit 7   park  (must be 1)
- */
-static int validate_header(uint8_t hdr)
+static alp_status_t fake_output_low(alp_gpio_t *pad)
 {
-	if (bit(hdr, 0) != 1) return -1; /* start */
-	if (bit(hdr, 6) != 0) return -2; /* stop */
-	if (bit(hdr, 7) != 1) return -3; /* park */
-	const int parity = bit(hdr, 1) ^ bit(hdr, 2) ^ bit(hdr, 3) ^ bit(hdr, 4);
-	if (bit(hdr, 5) != parity) return -4;
-	return 0;
+	(void)pad;
+	return ALP_OK;
 }
 
-static int validate_data_parity(uint32_t data, uint8_t parity)
+static void fake_close_pad(alp_gpio_t *pad)
 {
-	uint32_t v = data;
-	v ^= v >> 16;
-	v ^= v >> 8;
-	v ^= v >> 4;
-	v ^= v >> 2;
-	v ^= v >> 1;
-	const int computed = (int)(v & 1u);
-	if ((parity & 1u) != computed) return -1;
-	return 0;
+	(void)pad;
+}
+
+static const gd32_swd_platform_t g_plat = {
+	.open_pad             = fake_open_pad,
+	.configure_output_low = fake_output_low,
+	.close_pad            = fake_close_pad,
+};
+
+/* Overrides the driver's weak default. */
+const gd32_swd_platform_t *gd32_swd_platform(void)
+{
+	return &g_plat;
+}
+
+alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pull_t pull)
+{
+	(void)pin;
+	(void)dir;
+	(void)pull;
+	return ALP_OK;
+}
+
+alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
+{
+	(void)pin;
+	(void)level;
+	return ALP_OK;
+}
+
+alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
+{
+	(void)pin;
+	if (g_pos < g_nbits) {
+		*level = ((g_bits[g_pos >> 3] >> (g_pos & 7u)) & 1u) != 0u;
+		g_pos++;
+	} else {
+		*level = g_tail_level;
+	}
+	return ALP_OK;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-	if (size < 6u) return 0;
-	const uint8_t  hdr = data[0];
-	const uint32_t d   = (uint32_t)data[1] | ((uint32_t)data[2] << 8) | ((uint32_t)data[3] << 16) |
-	                     ((uint32_t)data[4] << 24);
-	const uint8_t  parity = data[5];
+	if (size < 2u) return 0;
+	g_tail_level = (data[0] & 1u) != 0u;
+	g_bits       = data + 1;
+	g_nbits      = (size - 1u) * 8u;
+	g_pos        = 0u;
 
-	(void)validate_header(hdr);
-	(void)validate_data_parity(d, parity);
+	gd32_swd_t ctx;
+	if (gd32_swd_init(&ctx) != ALP_OK) __builtin_trap();
+	(void)gd32_swd_set_clock_delay(&ctx, 0u);
+
+	if (gd32_swd_connect(&ctx) == ALP_OK) {
+		static const uint8_t blob[16] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+		(void)gd32_swd_halt(&ctx);
+		(void)gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE, blob, sizeof(blob));
+		(void)gd32_swd_flash_verify(&ctx, GD32_SWD_FMC_FLASH_BASE, blob, sizeof(blob));
+		(void)gd32_swd_reset_and_run(&ctx);
+	}
+	gd32_swd_deinit(&ctx);
 	return 0;
 }

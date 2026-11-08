@@ -27,13 +27,13 @@ production stance the SDK recommends for shipping product.
 ```yaml
 boot:
   method: mcuboot
-  signing:
-    algorithm: ecdsa_p256
-    key_file:  keys/mcuboot_shared_dev_ecdsa_p256.pem
 ```
 
-Drives sysbuild's MCUboot child image. ECDSA-P256 matches the
-production signing-key flow in `iot-fleet-ota` (on a SKU with the
+Drives sysbuild's MCUboot child image. `signing:` is intentionally
+omitted, so the SDK-anchored default dev key
+`keys/mcuboot_shared_dev_ecdsa_p256.pem` (ECDSA-P256) is passed to
+sysbuild; set `signing.key_file:` to use your own key. This matches the
+signing-key flow in `iot-fleet-ota` (on a SKU with the
 OPTIGA Trust M fitted, that key can live in the secure element; it is
 DNP on E1M-AEN801). `swap_algorithm:`
 is intentionally omitted: E1M-AEN801's disjoint-slot0 `memory_map:`
@@ -93,9 +93,9 @@ to on-die MRAM: E1M-AEN801 has no OSPI flash fitted (`ospi0`/
 root is TF-M's internal secure storage: E1M-AEN801 lists the OPTIGA
 Trust M under `on_module:` but the part is not fitted (`assembled:
 false`), and the loader refuses `attestation_root: optiga_trust_m` on a
-SKU that does not carry it (#2316). On a SKU with OPTIGA fitted
-(E1M-AEN501/601/701), `optiga_trust_m` gives a hardware trust root
-shared with boot + OTA.
+SKU that does not carry it (#2316). Every E1M-AEN SKU shares one SoM
+PCB on which the OPTIGA is DNP (#2958), so `tfm_internal` is the
+attestation root on all of them.
 
 ### `storage:` -- explicit partition table
 
