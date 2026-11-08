@@ -235,13 +235,14 @@ def _validate_consistency(project: "BoardProject") -> None:
     # ---- OTA + storage: every partition pins its offset (#2988) --
     # Unpinned partitions are allocated in name order, so adding or
     # renaming one MOVES later ones -- fatal for a shipped OTA layout.
-    if provider:
+    if provider and provider != "none":
         unpinned = [e.name for e in project.storage if e.offset_kib is None]
         if unpinned:
             raise OrchestratorError(
-                "ota: is enabled, so every storage[] partition must pin "
+                "ota.provider is set, so every storage[] partition must pin "
                 "`offset_kib:` (unpinned partitions shift when another is "
-                "added or renamed, moving OTA slots); missing on: "
+                "added or renamed, moving OTA slots; SoM memory_map regions "
+                "are not covered by this rule); missing on: "
                 + ", ".join(sorted(unpinned)) + ".")
 
     # ---- Rule 2: boot.signing.algorithm supported by SoM family --

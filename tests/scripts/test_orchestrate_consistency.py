@@ -889,8 +889,14 @@ def test_ota_requires_offset_kib_on_every_partition(tmp_path: Path) -> None:
 
 
 def test_ota_all_partitions_pinned_passes_validation(tmp_path: Path) -> None:
-    body = _OTA_STORAGE_BODY.format(pin_a="offset_kib: 0").replace(
-        "    size_kib: 64\n    flash_device: mram_main\n\"\"\"", "")
-    body = body.rstrip("\n") + "\n    offset_kib: 64\n"
+    body = _OTA_STORAGE_BODY.format(pin_a="offset_kib: 0").rstrip("\n")
+    body += "\n    offset_kib: 64\n"
     project = load_board_yaml(_write_board(tmp_path, body))
     assert all(e.offset_kib is not None for e in project.storage)
+
+
+def test_ota_provider_none_does_not_require_offset_kib(tmp_path: Path) -> None:
+    body = _OTA_STORAGE_BODY.format(pin_a="").replace(
+        "provider: mender", "provider: none")
+    project = load_board_yaml(_write_board(tmp_path, body))
+    assert any(e.offset_kib is None for e in project.storage)

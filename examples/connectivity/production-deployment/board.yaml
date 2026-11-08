@@ -209,6 +209,14 @@ security:
 # docs/board-config-features.md's "Storage partitions (`storage:`)"
 # section).  This block demonstrates the `storage:`
 # declarative shape only, not a working layout, on this SKU.
+#
+# The layout is demo-only and blocked.  Because `ota:` is enabled
+# above, every partition must pin `offset_kib:`; the pins below keep
+# the allocator's name order (app_data, mcuboot_primary,
+# mcuboot_scratch, mcuboot_secondary, settings) packed back to back
+# from the end of the SoM's regions (5632 KiB).  They sit past the end
+# of `mram_main`, so the entries stay `status: blocked` (now as an
+# overrun at the pinned offset).
 storage:
   - name:         mcuboot_primary
     offset_kib:   5888
