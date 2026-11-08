@@ -15,14 +15,14 @@
 #define MBEDTLS_AES_KEY_128 128
 #define MBEDTLS_AES_KEY_256 256
 
-#define SERVICE_CRYPTOCELL_MBEDTLS_SHA             420
+#define SERVICE_CRYPTOCELL_MBEDTLS_SHA              420
 #define SERVICE_CRYPTOCELL_MBEDTLS_CHACHAPOLY_CRYPT 408
-#define SERVICE_CRYPTOCELL_MBEDTLS_CCM_GCM         422
-#define MBEDTLS_HASH_SHA256                        2
-#define MBEDTLS_GCM_ENCRYPT_AND_TAG                4
-#define MBEDTLS_GCM_AUTH_DECRYPT                   6
-#define MBEDTLS_CHACHAPOLY_ENCRYPT_AND_TAG         0
-#define MBEDTLS_CHACHAPOLY_AUTH_DECRYPT            1
+#define SERVICE_CRYPTOCELL_MBEDTLS_CCM_GCM          422
+#define MBEDTLS_HASH_SHA256                         2
+#define MBEDTLS_GCM_ENCRYPT_AND_TAG                 4
+#define MBEDTLS_GCM_AUTH_DECRYPT                    6
+#define MBEDTLS_CHACHAPOLY_ENCRYPT_AND_TAG          0
+#define MBEDTLS_CHACHAPOLY_AUTH_DECRYPT             1
 
 typedef struct {
 	uint16_t hdr_service_id;
