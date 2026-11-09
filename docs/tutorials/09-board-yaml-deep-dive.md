@@ -61,8 +61,8 @@ for production SoMs plus placeholder presets for active bring-up:
 | Family            | MPNs (paste any into `som.sku`)                                               |
 |-------------------|-------------------------------------------------------------------------------|
 | Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`, `AEN803`       |
-| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`, `V2N103`                                             |
-| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`, `V2M103`                                             |
+| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`..`V2N106`                                         |
+| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`..`V2M106`                                         |
 
 `hw_rev` selects an entry from the family's `hw-revisions.yaml` to
 pick up its pad-routing overrides; an unrecognised value refuses the

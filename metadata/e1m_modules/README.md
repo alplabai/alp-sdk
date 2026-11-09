@@ -23,8 +23,8 @@ for E1M-X).  `scripts/check_e1m_pinout.py` cross-checks every non-`TBD`
 | Family | SKUs                          | Silicon                           |
 |--------|-------------------------------|-----------------------------------|
 | AEN    | `E1M-AEN301..803`             | Alif Ensemble E3..E8              |
-| v2n    | `E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103` | Renesas RZ/V2N          |
-| v2n-m1 | `E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103` | Renesas RZ/V2N + DEEPX DX-M1 |
+| v2n    | `E1M-V2N101`..`E1M-V2N103` (N44), `E1M-V2N104`..`E1M-V2N106` (N48) | Renesas RZ/V2N          |
+| v2n-m1 | `E1M-V2M101`..`E1M-V2M103` (N44), `E1M-V2M104`..`E1M-V2M106` (N48) | Renesas RZ/V2N + DEEPX DX-M1 |
 
 ## Schema + validation
 

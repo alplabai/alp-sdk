@@ -13,8 +13,18 @@ deep-link of whatever you're doing.
 | `E1M-V2N101`   | 32 Gbit LPDDR4X + 32 Gbit eMMC        | production |
 | `E1M-V2N102`   | 64 Gbit LPDDR4X + 128 Gbit eMMC       | production |
 | `E1M-V2N103`   | 32 Gbit LPDDR4X + 128 Gbit eMMC       | production |
+| `E1M-V2N104`   | 32 Gbit LPDDR4X + 32 Gbit eMMC, N48   | production |
+| `E1M-V2N105`   | 64 Gbit LPDDR4X + 128 Gbit eMMC, N48  | production |
+| `E1M-V2N106`   | 32 Gbit LPDDR4X + 128 Gbit eMMC, N48  | production |
 
-All three SKUs share the same silicon + PCB.  Pick by memory budget.
+All six SKUs share the same PCB.  101-103 carry the `R9A09G056N44GBG` (GPU +
+ISP, no security option); 104-106 are the same memory tiers on the
+`R9A09G056N48GBG`, which adds the security IP -- the A55 Arm crypto extensions
+(`aes`/`sha`/`pmull` in `/proc/cpuinfo`; N44 reports none, measured on
+E1M-V2N101).  The `e1m-v2n104..106-a55` Yocto MACHINEs add the arm64 CE kernel
+crypto drivers.  Secure boot and the rest of the security IP need the Renesas
+RZ MPU Security Package (NDA) and are a follow-up, not wired yet.  Pick by
+memory budget and whether you need the security option.
 
 ## What's on the module
 

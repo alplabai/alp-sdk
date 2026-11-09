@@ -2,7 +2,7 @@
 
 Board for the **E1M-X** form factor (45 × 65 mm) — hosts
 the Renesas RZ/V2N family (`E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103`,
-`E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103`) and any future E1M-X conformant SoM.
+`E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103`, and the N48 twins `E1M-V2N104`..`E1M-V2N106`, `E1M-V2M104`..`E1M-V2M106`) and any future E1M-X conformant SoM.
 
 > Source: vendor datasheet
 > — Altium project (multi-sheet schematic).  No standalone user
@@ -67,6 +67,8 @@ deltas (verify when the HW config writeup lands):
 | `E1M-V2M101`  | Renesas `R9A09G056N44GBG#AC0` + DEEPX `DX-M1`            | `renesas:rzv2n:n44` (+ `npu: deepx_dxm1`) |
 | `E1M-V2M102`  | Same, alt memory tier                                    | same                      |
 | `E1M-V2M103`  | Same, alt memory tier (4 GB / 16 GB)                     | same                      |
+| `E1M-V2N104` / `V2N105` / `V2N106` | Renesas `R9A09G056N48GBG#AC0` (GPU + ISP + security IP); memory tiers of 101 / 102 / 103 | `renesas:rzv2n:n44` (`silicon_variant: R9A09G056N48GBG`) |
+| `E1M-V2M104` / `V2M105` / `V2M106` | Same N48 silicon + DEEPX `DX-M1`; memory tiers of 101 / 102 / 103 | same (+ `npu: deepx_dxm1`) |
 
 ## What this means for the SDK
 

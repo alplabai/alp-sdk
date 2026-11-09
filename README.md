@@ -174,6 +174,8 @@ examples: [`docs/portability.md`](docs/portability.md).
 | **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M101` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55) · Zephyr (M33 system manager) |
 | **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M102` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
 | **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M103` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
+| **E1M-X V2N** | E1M-X (45×65 mm) | `E1M-V2N104` / `E1M-V2N105` / `E1M-V2N106` | Renesas RZ/V2N N48 (security option) | 4 TOPS | Yocto (A55); Zephyr M33 tree on V2N104 only |
+| **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M104` / `E1M-V2M105` / `E1M-V2M106` | Renesas RZ/V2N N48 + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55); Zephyr M33 tree on V2M104 only |
 
 All modules share the **E1M open-standard form factor** — pinout + mechanical
 spec in [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec) (pinned

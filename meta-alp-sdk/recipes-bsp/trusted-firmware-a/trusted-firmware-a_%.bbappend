@@ -159,7 +159,7 @@ do_compile:prepend:rzv2n-family() {
     # future ALP_TFA_DDR_SRC:e1m-v2n101-a55/:e1m-v2m101-a55 override collision
     # at build time instead of shipping the wrong DDR size silently.
     case "${MACHINE}" in
-        e1m-v2n103-a55|e1m-v2m103-a55)
+        e1m-v2n103-a55|e1m-v2m103-a55|e1m-v2n106-a55|e1m-v2m106-a55)
             if [ "${ALP_TFA_DDR_SRC}" != "ddr_param_def_lpddr4-alp-d8s32.c" ]; then
                 bbfatal "meta-alp-sdk: ALP_TFA_DDR_SRC resolved to '${ALP_TFA_DDR_SRC}' for MACHINE=${MACHINE} -- expected ddr_param_def_lpddr4-alp-d8s32.c. An override-precedence collision (see the comment above ALP_TFA_DDR_SRC) reverted this x103 MACHINE to the wrong DDR param."
             fi

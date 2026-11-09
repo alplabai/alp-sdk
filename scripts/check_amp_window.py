@@ -41,6 +41,8 @@ LINUX_DTSI = "meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi"
 BOARD_DTS = (
     "zephyr/boards/alp/e1m_v2n101_m33_sm/alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts",
     "zephyr/boards/alp/e1m_v2m101_m33_sm/alp_e1m_v2m101_m33_sm_r9a09g056n48gbg_cm33.dts",
+    "zephyr/boards/alp/e1m_v2n104_m33_sm/alp_e1m_v2n104_m33_sm_r9a09g056n48gbg_cm33.dts",
+    "zephyr/boards/alp/e1m_v2m104_m33_sm/alp_e1m_v2m104_m33_sm_r9a09g056n48gbg_cm33.dts",
 )
 # region name (metadata) -> label of its node in the CM33 board .dts
 BOARD_LABEL = {

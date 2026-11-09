@@ -9,6 +9,13 @@
 | `E1M-V2M101`   | 32 Gbit LPDDR4X + 32 Gbit eMMC + DX-M1| production |
 | `E1M-V2M102`   | 64 Gbit LPDDR4X + 128 Gbit eMMC + DX-M1| production |
 | `E1M-V2M103`   | 32 Gbit LPDDR4X + 128 Gbit eMMC + DX-M1| production |
+| `E1M-V2M104`   | 32 Gbit LPDDR4X + 32 Gbit eMMC + DX-M1, N48 | production |
+| `E1M-V2M105`   | 64 Gbit LPDDR4X + 128 Gbit eMMC + DX-M1, N48 | production |
+| `E1M-V2M106`   | 32 Gbit LPDDR4X + 128 Gbit eMMC + DX-M1, N48 | production |
+
+V2M104-106 are the V2M101-103 memory tiers on the `R9A09G056N48GBG` (security
+option: A55 Arm crypto extensions).  See [`v2n.md`](v2n.md#skus) for the N44/N48
+split and the Renesas RZ MPU Security Package (NDA) follow-up.
 
 ## What's different from V2N base
 

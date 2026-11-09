@@ -234,7 +234,9 @@
       "package": "FCBGA840",
       "temperature_grade": "industrial",
       "optional_features": { "gpu_mali_g31": true,  "isp_mali_c55": true,  "security_crypto": true },
-      "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"]
+      "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"],
+      "alp_module_skus": ["E1M-V2N104", "E1M-V2N105", "E1M-V2N106", "E1M-V2M104", "E1M-V2M105", "E1M-V2M106"],
+      "notes": "Backs the E1M-V2N104..106 / E1M-V2M104..106 SoM SKUs: the N44 parts' GPU + ISP plus the security option (A55 Arm crypto extensions aes/sha/pmull, R01DS0466EJ0130 Table 1.3-1; secure-boot IP needs the Renesas RZ MPU Security Package, NDA)."
     }
   ],
   "cm33_boot": {"sram_base": 134217728, "image_pad": 12288, "image_max": 196608, "xspi_offset": 1703936, "mtd_name": "fip",

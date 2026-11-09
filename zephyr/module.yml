@@ -35,8 +35,8 @@ build:
 #
 #   rzv2n_mtd_flash — flash the RZ/V2N CM33 system-manager image with a
 #   single-stage raw write to xSPI mtd1 over SSH (no FIP rebuild). The
-#   E1M-V2N101 / E1M-V2M101 board.cmake files (zephyr/boards/alp/
-#   e1m_v2n101_m33_sm, e1m_v2m101_m33_sm) wire it as the default flasher.
+#   E1M-V2N101/104 / E1M-V2M101/104 board.cmake files (zephyr/boards/alp/
+#   e1m_v2n101_m33_sm, e1m_v2m101_m33_sm, and the 104 twins) wire it as the default flasher.
 runners:
   - file: scripts/west_commands/runners/alif_flash.py
   - file: scripts/west_commands/runners/rzv2n_mtd_flash.py

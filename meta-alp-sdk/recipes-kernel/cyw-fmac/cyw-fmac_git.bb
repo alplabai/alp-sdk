@@ -217,4 +217,4 @@ RDEPENDS:${PN} += " \
 # keeps its default (-${KERNEL_VERSION}) so packages version with the
 # kernel they built against.
 
-COMPATIBLE_MACHINE = "e1m-v2n101-a55|e1m-v2n102-a55|e1m-v2n103-a55|e1m-v2m101-a55|e1m-v2m102-a55|e1m-v2m103-a55"
+COMPATIBLE_MACHINE = "e1m-v2n101-a55|e1m-v2n102-a55|e1m-v2n103-a55|e1m-v2m101-a55|e1m-v2m102-a55|e1m-v2m103-a55|e1m-v2n104-a55|e1m-v2n105-a55|e1m-v2n106-a55|e1m-v2m104-a55|e1m-v2m105-a55|e1m-v2m106-a55"
