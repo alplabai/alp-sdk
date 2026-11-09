@@ -135,7 +135,8 @@ H.264 is capped at 1920x1080 by the silicon, so full-frame IMX568 (2464x2064)
 must be downscaled; 1288x1080 keeps the aspect ratio. OV9281 (1280x800) needs no
 scaling: `alpcamerasrc ! video/x-raw,format=NV12 ! omxh264enc`. vspmfilter
 replaces alpcamerasrc's CPU NV12 fill and adds the downscale in one ISU pass.
-Unverified: that alpcamerasrc buffers are ISU-addressable, and ISU on RAW8.
+alpcamerasrc buffers are ordinary memory today and the ISU cannot use them
+(measured, below); feeding vspmfilter needs MMNGR/dma-buf output (#3117).
 
 (b) Colour Bayer (IMX296/IMX568) without ISP: the ISU does not demosaic. Use
 `alpcamerasrc` (2x2 superpixel, half-size NV12: IMX568 gives 1232x1032, already
@@ -148,6 +149,20 @@ inside the H.264 limit, so no scaling is needed; IMX296 gives 728x544). Add
 at 1920x1080 or less it feeds `omxh264enc` directly; use `vspmfilter` only to
 downscale, or to convert RGB to NV12. The manual's capture example (4.4.1) is
 `v4l2src ! video/x-raw,format=UYVY,width=1920,height=1080 ! vspmfilter dmabuf-use=TRUE ! video/x-raw,format=NV12 ! omxh264enc control-rate=2 target-bitrate=10485760 use-dmabuf=TRUE ! h264parse`.
+
+### Measured on E1M-V2M103 (2026-11-09, stock image plus these packages)
+
+- `gst-inspect-1.0 vspmfilter` lists GRAY8 and GRAY10_LE64 on both pads, so
+  the 10-bit packed input is compiled in on this BSP.
+- Hardware buffers work: `filesrc ! h265parse ! omxh265dec` (2464x2064) `!
+  vspmfilter dmabuf-use=TRUE ! video/x-raw,format=NV12,width=1288,height=1080 !
+  omxh264enc ! h264parse ! filesink` encoded 120 frames in 2.96 s (about 40 fps
+  end to end) with no ISU errors; the output is 1288x1080.
+- Ordinary memory does not: the same chain fed by `videotestsrc` (GRAY8,
+  2464x2064) logs `rgnmm_drv mmngr: MMD CONVERT error -22` for every frame and
+  vspmfilter drops the frame silently. So any source in front of vspmfilter
+  must hand it MMNGR or dma-buf memory; `alpcamerasrc` does not yet (#3117).
+- A scale-up (640x480 to 1280x960) is refused with a stream error.
 
 ### Bench checks on E1M-V2M103
 
