@@ -11,6 +11,13 @@
 #     GPG_PATH = "/path/to/scratch/gnupghome"
 #
 # Signatures are binary (Packages.sig), the name opkg looks for.
+# These per-arch signatures are NOT what is published and nothing reads them:
+# scripts/package_devkit_feed.sh merges the allowlisted stanzas into one index,
+# signs that with its own --gnupghome/--key and verifies it against the committed
+# public key. The release flow does not need this fragment: without it
+# `bitbake package-index` writes unsigned per-arch indexes and the published
+# feed is signed all the same. It remains for a builder that wants signed
+# per-arch indexes in its own deploy dir.
 
 INHERIT += "sign_package_feed"
 # Fingerprint of keys/alp_devkit_feed_signing.pub.asc.
