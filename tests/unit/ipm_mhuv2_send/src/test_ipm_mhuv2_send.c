@@ -7,11 +7,22 @@
  * the word, leave CH_SET and ACCESS_REQUEST alone (the request may be held
  * high for the in-flight word).
  */
+#include <zephyr/ztest.h>
+
+#ifdef ALP_TEST_IPM_POLL_API_MISSING
+/* The driver fills ipm_driver_api.poll_out/poll_in, which only the patched
+ * Zephyr has (zephyr/patches/zephyr/0002-ipm-add-poll-out-poll-in.patch);
+ * a plain upstream tree cannot compile it, so the suite skips there. */
+ZTEST_SUITE(ipm_mhuv2_send, NULL, NULL, NULL, NULL, NULL);
+
+ZTEST(ipm_mhuv2_send, test_needs_patched_ipm_api)
+{
+	ztest_test_skip();
+}
+#else
 /* CONFIG_ARM_MHUV2 is unset, so the ISR/init statics have no DT instance. */
 #pragma GCC diagnostic ignored "-Wunused-function"
 #include "../../../../zephyr/drivers/ipm/ipm_arm_mhuv2.c"
-
-#include <zephyr/ztest.h>
 
 /* The register block marks status fields read-only; the model plays the
  * hardware side, so it writes them through this cast. */
@@ -67,3 +78,4 @@ ZTEST(ipm_mhuv2_send, test_poll_out_busy_when_previous_word_unconsumed)
 	zassert_equal(g_regs.CHANNEL[1].CH_SET, 0x11111111u, "pending word must not be overwritten");
 	zassert_equal(g_regs.ACCESS_REQUEST, MHU_ACC_REQ, "access request untouched on -EBUSY");
 }
+#endif /* ALP_TEST_IPM_POLL_API_MISSING */

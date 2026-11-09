@@ -12,3 +12,11 @@ get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUT
 
 target_include_directories(app PRIVATE ${ALP_SDK_ROOT}/zephyr/drivers/ipm)
 target_sources(app PRIVATE src/test_ipm_mhuv2_send.c)
+
+# The driver needs the IPM poll API from the alp-sdk Zephyr patch; a plain
+# upstream tree (pr-twister) lacks it, so the suite builds as a skip there.
+file(READ ${ZEPHYR_BASE}/include/zephyr/drivers/ipm.h ALP_IPM_H)
+string(FIND "${ALP_IPM_H}" "poll_out" ALP_IPM_HAS_POLL)
+if(ALP_IPM_HAS_POLL EQUAL -1)
+  target_compile_definitions(app PRIVATE ALP_TEST_IPM_POLL_API_MISSING=1)
+endif()
