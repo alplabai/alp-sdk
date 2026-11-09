@@ -237,6 +237,9 @@ static bool _gbm_display(gles_state_t *g)
 	const char *ext = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
 	if (ext == NULL || (strstr(ext, "EGL_KHR_platform_gbm") == NULL &&
 	                    strstr(ext, "EGL_MESA_platform_gbm") == NULL)) {
+		fprintf(stderr,
+		        "[gpu2d/gles] default EGL display unavailable and no GBM platform; "
+		        "using the CPU\n");
 		return false;
 	}
 	typedef EGLDisplay (*get_plat_dpy_fn)(EGLenum, void *, const EGLint *);

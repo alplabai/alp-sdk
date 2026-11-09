@@ -829,8 +829,9 @@ endif()
 # GPU2D over EGL + GLES 3 (Mali-G31 on RZ/V2N).  ADR 0017 Tier-1.5:   #
 # yocto_gles.c uses only standard Khronos headers, so any conformant   #
 # EGL/GLES3 stack builds it.  The registry entry is a wildcard at      #
-# priority 50 above the CPU fallback; open() degrades to the CPU path   #
-# at run time when no GPU context can be created.                      #
+# priority 50 above the CPU fallback.  With libgbm found, a headless   #
+# board retries on a GBM display; open() degrades to the CPU path only #
+# when no GPU context can be created at all.                           #
 # ------------------------------------------------------------------ #
 if(ALP_SDK_USE_GPU2D_GLES)
     find_package(PkgConfig)
