@@ -432,13 +432,14 @@ dependency of the recipe.
 | `e1m-v2m101-a55`     | DRP-AI3 — node on by default with `meta-rz-drpai`; backend (`PACKAGECONFIG[drpai]`) on when `RUHMI_DRPAI_TVM_DIR` is set; BENCH-UNVERIFIED + DEEPX DX-M1 — opt-in (`ALP_ENABLE_DEEPX_DXM1`) | DRP-AI3 as above; `dx-driver`/`dx-rt` via `meta-deepx-m1` (`ALP_ENABLE_DEEPX_DXM1`) |
 | `e1m-v2m102-a55`     | Same as V2M101                       | Same as V2M101 (memory variant)                                       |
 | `e1m-v2m103-a55`     | Same as V2M101                       | Same as V2M101 (memory variant)                                       |
+| `e1m-v2n104-a55` .. `e1m-v2n106-a55` | Same as V2N101..V2N103 (R9A09G056N48GBG twins) | Same as V2N101; adds `include/e1m-n48.inc` (the `e1m-n48` override only) |
+| `e1m-v2m104-a55` .. `e1m-v2m106-a55` | Same as V2M101..V2M103 (R9A09G056N48GBG twins) | Same as V2M101; adds `include/e1m-n48.inc` (the `e1m-n48` override only) |
 
 | `e1m-aen801-a32`     | Ethos-U85 + 2x U55                   | Ethos-U path inside the alp-sdk library                               |
 | `e1m-aen701-a32`     | 2x Ethos-U55                         | Ethos-U path inside the alp-sdk library                               |
 
 The Mali-G31 GPU backend of `<alp/gpu2d.h>` (`PACKAGECONFIG[gles]`) is on for
-the six RZ/V2N machines (`e1m-v2n101-a55`, `e1m-v2n102-a55`, `e1m-v2n103-a55`,
-`e1m-v2m101-a55`, `e1m-v2m102-a55`, `e1m-v2m103-a55`) when the Renesas
+the twelve RZ/V2N machines (`e1m-v2n101..106-a55`, `e1m-v2m101..106-a55`) when the Renesas
 `meta-rz-graphics` layer is in `bblayers.conf`; see
 [`docs/v2n-mali-gpu.md`](../docs/v2n-mali-gpu.md).
 

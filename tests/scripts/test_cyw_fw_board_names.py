@@ -16,7 +16,10 @@ def _dts_boards() -> set[str]:
     """Root compatible of every board dts that a machine conf builds."""
     boards = set()
     for conf in (META / "conf" / "machine").glob("e1m-v2*.conf"):
-        m = re.search(r'^KERNEL_DEVICETREE\s*=\s*"[^"]*?([^/" ]+)\.dtb"', conf.read_text(encoding="utf-8"), re.M)
+        text = conf.read_text(encoding="utf-8")
+        for base in re.findall(r"^require conf/machine/(e1m-[\w-]+\.conf)$", text, re.M):
+            text += conf.with_name(base).read_text(encoding="utf-8")  # N48 twins inherit it
+        m = re.search(r'^KERNEL_DEVICETREE\s*=\s*"[^"]*?([^/" ]+)\.dtb"', text, re.M)
         assert m, f"no KERNEL_DEVICETREE in {conf.name}"
         dts = DTS_DIR / f"{m.group(1)}.dts"
         c = re.search(r'^\s*compatible\s*=\s*"([^"]+)"', dts.read_text(encoding="utf-8"), re.M)

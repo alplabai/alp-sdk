@@ -16,7 +16,10 @@ DTS_DIR = META / "recipes-kernel" / "linux" / "linux-renesas"
 def test_shared_board_dts_model_names_no_sku():
     users = defaultdict(list)
     for conf in (META / "conf" / "machine").glob("e1m-v2*.conf"):
-        m = re.search(r'^KERNEL_DEVICETREE\s*=\s*"[^"]*?([^/" ]+)\.dtb"', conf.read_text(encoding="utf-8"), re.M)
+        text = conf.read_text(encoding="utf-8")
+        for base in re.findall(r"^require conf/machine/(e1m-[\w-]+\.conf)$", text, re.M):
+            text += conf.with_name(base).read_text(encoding="utf-8")  # N48 twins inherit it
+        m = re.search(r'^KERNEL_DEVICETREE\s*=\s*"[^"]*?([^/" ]+)\.dtb"', text, re.M)
         assert m, f"no KERNEL_DEVICETREE in {conf.name}"
         users[m.group(1)].append(conf.name)
     shared = {dts: confs for dts, confs in users.items() if len(confs) > 1}

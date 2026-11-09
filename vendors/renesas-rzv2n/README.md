@@ -10,6 +10,14 @@ Camera variant).
 |--------------------|-------------------------------|-------------------------|-----------------|----------------------------|--------------------------|
 | **E1M-X V2N**      | `E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103` | `R9A09G056N44GBG#AC0` | 32 / 64 Gbit | eMMC 5.1, 32 / 128 Gbit | —                        |
 | **E1M-X V2N-M1**   | `E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103` | `R9A09G056N44GBG#AC0` | 32 / 64 Gbit | eMMC 5.1, 32 / 128 Gbit | DEEPX DX-M1 (25 TOPS)    |
+| **E1M-X V2N (N48)**    | `E1M-V2N104`, `E1M-V2N105`, `E1M-V2N106` | `R9A09G056N48GBG#AC0` | 32 / 64 Gbit | eMMC 5.1, 32 / 128 Gbit | -- (security option: A55 crypto extensions) |
+| **E1M-X V2N-M1 (N48)** | `E1M-V2M104`, `E1M-V2M105`, `E1M-V2M106` | `R9A09G056N48GBG#AC0` | 32 / 64 Gbit | eMMC 5.1, 32 / 128 Gbit | DEEPX DX-M1 (25 TOPS), security option |
+
+The N48 parts add the security IP over the N44 (datasheet R01DS0466EJ0130
+Table 1.2-1 / 1.3-1).  Secure boot and the rest of the security IP need the
+Renesas RZ MPU Security Package (NDA); that integration is a follow-up.  The
+arm64 CE kernel crypto drivers ship on every RZ/V2N image; they bind only on
+N48 (build-unverified, no N48 unit benched).
 
 Authoritative per-SKU detail and the silicon stack live in
 [`e1m-spec` Annex A.2 / A.3](https://github.com/alplabai/e1m-spec/blob/main/STANDARD.md#a2-e1m-x-v2n-family-renesas-rzv2n).

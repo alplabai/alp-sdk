@@ -23,7 +23,7 @@ family: v2n
 display_name: "E1M-X-V2N (Renesas RZ/V2N)"
 
 # Altium board-number datecode (YYWW) shared by every revision of this PCB.  The
-# V2N101/102 and V2M101/102 SKUs are ONE physical board (2625), variant-populated,
+# V2N101..106 and V2M101..106 SKUs are ONE physical board (2625), variant-populated,
 # so the datecode matches v2n-m1.  scripts/program_eeprom.py composes
 # `<board_datecode>-<rev key>` into the manifest's hw_rev field.
 #

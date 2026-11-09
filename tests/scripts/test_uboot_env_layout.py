@@ -21,7 +21,7 @@ META = REPO / "meta-alp-sdk"
 CFG = META / "recipes-bsp/u-boot/u-boot/uboot-env-emmc.cfg"
 FW_ENV = META / "recipes-core/alp-system/files/fw_env.config"
 MENDER = META / "conf/distro/include/mender.inc"
-PRESETS = sorted((REPO / "metadata/e1m_modules").glob("E1M-V2[NM]10[123].yaml"))
+PRESETS = sorted((REPO / "metadata/e1m_modules").glob("E1M-V2[NM]10[1-6].yaml"))
 
 
 def _boot(path: Path) -> dict:
@@ -38,7 +38,7 @@ def _fw_env() -> list[tuple[str, int, int]]:
 
 
 def test_every_v2_preset_carries_the_same_layout():
-    assert len(PRESETS) == 6
+    assert len(PRESETS) == 12
     assert len({yaml.safe_dump(_boot(p), sort_keys=True) for p in PRESETS}) == 1
 
 

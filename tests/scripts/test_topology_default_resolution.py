@@ -82,6 +82,13 @@ SOM_TOPOLOGIES: dict[str, dict[str, str]] = {
     "E1M-V2M101": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
     "E1M-V2M102": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
     "E1M-V2M103": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
+    # N48 twins (GPU + ISP + security IP) of the six SKUs above.
+    "E1M-V2N104": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
+    "E1M-V2N105": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
+    "E1M-V2N106": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
+    "E1M-V2M104": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
+    "E1M-V2M105": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
+    "E1M-V2M106": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
 }
 
 
@@ -102,6 +109,12 @@ _M_CORE_PER_SOM: dict[str, str] = {
     "E1M-V2M101": "m33_sm",
     "E1M-V2M102": "m33_sm",
     "E1M-V2M103": "m33_sm",
+    "E1M-V2N104": "m33_sm",
+    "E1M-V2N105": "m33_sm",
+    "E1M-V2N106": "m33_sm",
+    "E1M-V2M104": "m33_sm",
+    "E1M-V2M105": "m33_sm",
+    "E1M-V2M106": "m33_sm",
 }
 
 

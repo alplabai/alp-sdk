@@ -249,6 +249,8 @@ def test_boot_single_slot_matches_orchestrator_predicate():
         "E1M-V2M101": False, "E1M-V2M102": False,
         "E1M-V2M103": False,
         "E1M-V2N101": False, "E1M-V2N102": False, "E1M-V2N103": False,
+        "E1M-V2M104": False, "E1M-V2M105": False, "E1M-V2M106": False,
+        "E1M-V2N104": False, "E1M-V2N105": False, "E1M-V2N106": False,
     }
     assert set(soms) == set(expected_single_slot), (
         "a SoM was added/removed -- update expected_single_slot")

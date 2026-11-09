@@ -117,7 +117,7 @@ SRC_URI:append:rzv2n-family = "${@' file://prod-boot.cfg' if bb.utils.to_boolean
 # patches (their OWN, separate u-boot bbappends) still land after this one in
 # the full do_patch sequence -- see the patch-fuzz demotion comment below for
 # why those vendor hunks fuzz against ALP's context.
-SRC_URI:append:rzv2n-family = "${@' file://0003-rzv2n-dev-ALP-E1M-4gb-memory-tier.patch' if d.getVar('MACHINE') in ('e1m-v2n103-a55', 'e1m-v2m103-a55') else ''}"
+SRC_URI:append:rzv2n-family = "${@' file://0003-rzv2n-dev-ALP-E1M-4gb-memory-tier.patch' if d.getVar('MACHINE') in ('e1m-v2n103-a55', 'e1m-v2m103-a55', 'e1m-v2n106-a55', 'e1m-v2m106-a55') else ''}"
 
 # 0004 (DEEPX rail bring-up): board_late_init() first drives M1_RESET (PA6)
 # low, then sequences the on-module

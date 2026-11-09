@@ -57,7 +57,8 @@ from the extracted BSP, not a public clone.
 ```bash
 MACHINE=e1m-v2n101-a55 bitbake alp-image-edge
 # (V2N102: MACHINE=e1m-v2n102-a55;  V2N103: e1m-v2n103-a55;
-#  V2N-M1: e1m-v2m101-a55 / e1m-v2m102-a55 / e1m-v2m103-a55)
+#  V2N-M1: e1m-v2m101-a55 / e1m-v2m102-a55 / e1m-v2m103-a55;
+#  N48 (security option) twins: e1m-v2n104..106-a55 / e1m-v2m104..106-a55)
 ```
 
 Each `e1m-*` machine conf defaults `ALP_SDK_SOC ?= "ALP_SOC_..."` (V2N and
@@ -323,8 +324,8 @@ opkg update && opkg upgrade alp-sdk
 unsigned fallback.
 
 **Where it lives.** One feed is built per MACHINE of the image:
-`e1m-v2n101-a55`, `e1m-v2n102-a55`, `e1m-v2n103-a55`, `e1m-v2m101-a55`,
-`e1m-v2m102-a55` and `e1m-v2m103-a55`. The feed of release line `0.17` for machine
+`e1m-v2n101-a55` .. `e1m-v2n103-a55` and `e1m-v2m101-a55` .. `e1m-v2m103-a55`
+(feeds for the N48 machines `e1m-v2n104..106-a55` / `e1m-v2m104..106-a55` are pending). The feed of release line `0.17` for machine
 `e1m-v2n101-a55` is the GitHub Release tagged `feed-v0.17-e1m-v2n101-a55`
 (`feed-v<major.minor>-<MACHINE>`). opkg needs `<base>/Packages.gz` and every
 `<base>/<ipk>` by name under one base URL, and a release's assets are a flat

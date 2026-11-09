@@ -80,7 +80,8 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 # DDR param source file: 8 GB/D16S32 by default, 4 GB/D8S32 for the two x103
-# memory-tier MACHINEs. Keyed on the exact MACHINE name (not on a shared
+# memory-tier MACHINEs (e1m-v2n106-a55 / e1m-v2m106-a55 inherit it through the
+# x103 override their MACHINEOVERRIDES chain carries). Keyed on the exact MACHINE name (not on a shared
 # override like e1m-v2m101-a55/e1m-v2n101-a55) so a plain read of THIS file
 # can't pull the wrong config into any other SKU.
 #
@@ -159,7 +160,7 @@ do_compile:prepend:rzv2n-family() {
     # future ALP_TFA_DDR_SRC:e1m-v2n101-a55/:e1m-v2m101-a55 override collision
     # at build time instead of shipping the wrong DDR size silently.
     case "${MACHINE}" in
-        e1m-v2n103-a55|e1m-v2m103-a55)
+        e1m-v2n103-a55|e1m-v2m103-a55|e1m-v2n106-a55|e1m-v2m106-a55)
             if [ "${ALP_TFA_DDR_SRC}" != "ddr_param_def_lpddr4-alp-d8s32.c" ]; then
                 bbfatal "meta-alp-sdk: ALP_TFA_DDR_SRC resolved to '${ALP_TFA_DDR_SRC}' for MACHINE=${MACHINE} -- expected ddr_param_def_lpddr4-alp-d8s32.c. An override-precedence collision (see the comment above ALP_TFA_DDR_SRC) reverted this x103 MACHINE to the wrong DDR param."
             fi

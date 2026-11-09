@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Shared DEEPX DX-M1 block for the V2M (DEEPX-populated) MACHINEs --
-# e1m-v2m101-a55.conf / e1m-v2m102-a55.conf / e1m-v2m103-a55.conf all
-# `require` this include instead of repeating the block three times.
+# e1m-v2m101..103-a55.conf all `require` this include instead of repeating
+# the block three times; the 104..106 N48 twins inherit it via their twin conf.
 #
 # The DEEPX runtime is consumed from DEEPX's own OFFICIAL, publicly
 # published Yocto layer -- `meta-deepx-m1`

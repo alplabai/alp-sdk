@@ -462,8 +462,8 @@ SRC_URI:append = " \
     file://pcie-ep-trim.cfg \
 "
 
-# On-module RTC (all six V2N-family SKUs carry the same RV-3028-C7 --
-# see rtc_external: in each metadata/e1m_modules/E1M-V2{N,M}10{1,2,3}.yaml).
+# On-module RTC (all twelve V2N-family SKUs carry the same RV-3028-C7 --
+# see rtc_external: in each metadata/e1m_modules/E1M-V2{N,M}10{1..6}.yaml).
 # Unconditional like the two trims above, not per-machine like
 # display.cfg: this is a SoM-level fact, not a carrier one.
 SRC_URI:append = " file://rv3028-rtc.cfg"

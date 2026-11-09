@@ -89,6 +89,8 @@ PARITY_COVERED: dict[str, tuple[str, str]] = {
     # returns, so no separate file list is needed here.
     "e1m_v2n101_m33_sm": ("E1M-V2N101", "m33_sm"),
     "e1m_v2m101_m33_sm": ("E1M-V2M101", "m33_sm"),
+    "e1m_v2n104_m33_sm": ("E1M-V2N104", "m33_sm"),
+    "e1m_v2m104_m33_sm": ("E1M-V2M104", "m33_sm"),
 }
 
 # Board directories that are committed but CANNOT be emitted at all today, with
@@ -233,6 +235,10 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
 
     def test_v2m101_m33_sm_family_agnostic_files(self) -> None:
         self._parity("e1m_v2m101_m33_sm")
+
+    def test_n48_twin_board_trees_match_the_generator(self) -> None:
+        self._parity("e1m_v2n104_m33_sm")
+        self._parity("e1m_v2m104_m33_sm")
 
     def test_every_committed_board_is_accounted_for(self) -> None:
         """No committed board tree may sit outside BOTH lists (#1332).
