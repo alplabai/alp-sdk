@@ -22,3 +22,14 @@ python alp_sec_check_ta_key () {
         bb.fatal("ALP_SEC_TA_SIGN_KEY=%s does not exist" % k)
 }
 do_compile[prefuncs] += "alp_sec_check_ta_key"
+
+# The OP-TEE TA dev kit copies TA_SIGN_KEY (the PRIVATE key) into
+# export-ta_arm64/keys/, and the package ships that dev kit to
+# /usr/include/optee/export-user_ta, i.e. into every TA recipe's sysroot, sstate
+# and the SDK.  Strip it.  TA recipes get the key from ALP_SEC_TA_SIGN_KEY
+# directly (see the optee-*.bbappend files).
+do_install:append () {
+    if [ -n "${ALP_SEC_TA_SIGN_KEY}" ]; then
+        rm -rf ${D}${includedir}/optee/export-user_ta/keys
+    fi
+}
