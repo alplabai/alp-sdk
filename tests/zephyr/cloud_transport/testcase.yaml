@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+
+common:
+  platform_allow:
+    - native_sim
+    - native_sim/native/64
+  integration_platforms:
+    - native_sim/native/64
+  tags:
+    - alp-sdk
+    - cloud
+
+tests:
+  # Plain-TCP loopback: argument checks, lifecycle and the receive contract.
+  # No SDK checkout needed, so this one runs in pr-twister.
+  alp_sdk.cloud_transport.loopback: {}
+
+  # The coreMQTT TransportInterface_t adapter, driven by a real MQTTContext_t.
+  # Skipped unless the extras-cloud AWS checkout exists (see ./Kconfig).
+  alp_sdk.cloud_transport.coremqtt:
+    filter: CONFIG_CLOUD_TRANSPORT_AWS_PRESENT
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_coremqtt.conf"
+
+  # A real TLS handshake over loopback against Zephyr's bundled test PKI:
+  # the peer is verified, a wrong CA or a wrong server name is refused, and
+  # ALPN is negotiated.
+  alp_sdk.cloud_transport.tls:
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_tls.conf"

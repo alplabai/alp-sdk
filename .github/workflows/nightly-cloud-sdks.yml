@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Nightly + on-demand build smoke for the `extras-cloud` Zephyr glue
-# (CONFIG_ALP_AWS_IOT / CONFIG_ALP_AZURE_IOT, tests/zephyr/cloud_sdks).
+# (CONFIG_ALP_AWS_IOT / CONFIG_ALP_AZURE_IOT, tests/zephyr/cloud_sdks) and for
+# the coreMQTT leg of the TLS transport (tests/zephyr/cloud_transport).
 #
 # pr-twister never fetches the `extras-cloud` west group, so the test's
 # CONFIG_CLOUD_SDKS_PRESENT filter skips it there.  This lane clones the two
@@ -123,7 +124,7 @@ jobs:
             done
           done < cloud-pins.txt
 
-      - name: twister · tests/zephyr/cloud_sdks on native_sim/native/64
+      - name: twister · tests/zephyr/cloud_sdks + cloud_transport on native_sim/native/64
         working-directory: ${{ github.workspace }}/zephyrproject
         timeout-minutes: 20
         env:
@@ -134,6 +135,7 @@ jobs:
         run: |
           python3 zephyr/scripts/twister \
             -T "$GITHUB_WORKSPACE/alp-sdk/tests/zephyr/cloud_sdks" \
+            -T "$GITHUB_WORKSPACE/alp-sdk/tests/zephyr/cloud_transport" \
             -p native_sim/native/64 \
             --inline-logs \
             --no-detailed-test-id
@@ -142,6 +144,14 @@ jobs:
           python3 - <<'PY'
           import json, glob
           r = json.load(open(glob.glob("twister-out/twister.json")[0]))
-          st = [t["status"] for s in r["testsuites"] for t in s["testcases"]]
-          assert "passed" in st, f"cloud_sdks test did not run: {st}"
+          # Both SDK-gated scenarios must have RUN, not merely not failed.
+          # Each is pinned to a testcase only that scenario compiles, so a
+          # source file dropping out of the build cannot pass this.
+          for suite, case in (
+              ("alp_sdk.cloud_sdks.build", "test_aws_coremqtt_serializer"),
+              ("alp_sdk.cloud_transport.coremqtt", "test_ping_round_trip"),
+          ):
+              st = [t["status"] for s in r["testsuites"] if s["name"] == suite
+                    for t in s["testcases"] if t["identifier"].endswith(case)]
+              assert st == ["passed"], f"{suite}: {case} did not pass: {st}"
           PY
