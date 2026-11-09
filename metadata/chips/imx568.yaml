@@ -8,9 +8,6 @@ driver_status:    none              # Linux-only part in this tree: no chips/imx
                                      # scripts/check_chip_manifest_parity.py's KNOWN_MANIFEST_NO_DRIVER.
 display_name:     "Sony IMX568 5.1 MP Pregius S global-shutter MIPI CSI-2 sensor (Vision Components module)"
 vendor:           sony
-mpn_population:
-  - "IMX568-AAMR"
-  - "IMX568-AAQR"
 
 datasheet:
   primary:        "Vision Components MIPI CSI-2 camera module documentation (VC MIPI IMX568 / IMX568C)"

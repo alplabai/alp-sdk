@@ -37,16 +37,16 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
  drivers/media/i2c/Kconfig                   |   15 +
  drivers/media/i2c/Makefile                  |    1 +
  drivers/media/i2c/vc_mipi/Makefile          |    3 +
- drivers/media/i2c/vc_mipi/vc_mipi_camera.c  | 1266 ++++++++++
- drivers/media/i2c/vc_mipi/vc_mipi_core.c    | 2391 +++++++++++++++++++
- drivers/media/i2c/vc_mipi/vc_mipi_core.h    |  361 +++
- drivers/media/i2c/vc_mipi/vc_mipi_modules.c |  988 ++++++++
- drivers/media/i2c/vc_mipi/vc_mipi_modules.h |   46 +
- 8 files changed, 5071 insertions(+)
+ drivers/media/i2c/vc_mipi/vc_mipi_camera.c  | 1269 ++++++++++
+ drivers/media/i2c/vc_mipi/vc_mipi_core.c    | 2387 +++++++++++++++++++
+ drivers/media/i2c/vc_mipi/vc_mipi_core.h    |  357 +++
+ drivers/media/i2c/vc_mipi/vc_mipi_modules.c |  984 ++++++++
+ drivers/media/i2c/vc_mipi/vc_mipi_modules.h |   42 +
+ 8 files changed, 5058 insertions(+)
  create mode 100644 drivers/media/i2c/vc_mipi/Makefile
  create mode 100644 drivers/media/i2c/vc_mipi/vc_mipi_camera.c
- create mode 100755 drivers/media/i2c/vc_mipi/vc_mipi_core.c
- create mode 100755 drivers/media/i2c/vc_mipi/vc_mipi_core.h
+ create mode 100644 drivers/media/i2c/vc_mipi/vc_mipi_core.c
+ create mode 100644 drivers/media/i2c/vc_mipi/vc_mipi_core.h
  create mode 100644 drivers/media/i2c/vc_mipi/vc_mipi_modules.c
  create mode 100644 drivers/media/i2c/vc_mipi/vc_mipi_modules.h
 
@@ -102,14 +102,10 @@ new file mode 100644
 index 0000000..f83bae1
 --- /dev/null
 +++ b/drivers/media/i2c/vc_mipi/vc_mipi_camera.c
-@@ -0,0 +1,1266 @@
+@@ -0,0 +1,1269 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Vision Components GmbH VC MIPI CSI-2 camera module driver.
-+ *
-+ * Copyright (C) Vision Components GmbH
-+ * Authors: Florian Schmid, Peter Martienssen, Michael Steinel
-+ *          (see MODULE_AUTHOR in vc_mipi_camera.c)
 + *
 + * Imported from github.com/VC-MIPI-modules/vc_mipi_nxp, commit cf45bf1d4fa1 (v0.6.0)
 + * and adapted to the Linux 6.1 V2N BSP kernel; the licence
@@ -584,6 +580,9 @@ index 0000000..f83bae1
 +        struct vc_cam *cam = &device->cam;
 +        struct device *dev = vc_core_get_sen_device(cam);
 +
++        int ret = 0;
++        __u8 format;
++
 +        mutex_lock(&device->mutex);
 +
 +        switch (ctrl->id) {
@@ -598,16 +597,20 @@ index 0000000..f83bae1
 +                 * pixel_rate * bpp / lanes), so report it as
 +                 * lane rate * lanes / bits per pixel.
 +                 */
++                format = vc_core_mbus_code_to_format(vc_core_get_format(cam));
++                if (format < FORMAT_RAW08 || format > FORMAT_RAW14) {
++                        ret = -EINVAL;
++                        break;
++                }
 +                *ctrl->p_new.p_s64 = div_u64((u64)vc_core_get_lane_datarate(cam) *
 +                                             vc_core_get_num_lanes(cam),
-+                                             8 + 2 * (vc_core_mbus_code_to_format(vc_core_get_format(cam)) -
-+                                                      FORMAT_RAW08));
++                                             8 + 2 * (format - FORMAT_RAW08));
 +                break;
 +        }
 +
 +        mutex_unlock(&device->mutex);
 +
-+        return 0;
++        return ret;
 +}
 +
 +#ifdef ENABLE_VVCAM
@@ -1371,18 +1374,14 @@ index 0000000..f83bae1
 +MODULE_PARM_DESC(debug, "Debug level (0-6)");
 \ No newline at end of file
 diff --git a/drivers/media/i2c/vc_mipi/vc_mipi_core.c b/drivers/media/i2c/vc_mipi/vc_mipi_core.c
-new file mode 100755
+new file mode 100644
 index 0000000..03e43c9
 --- /dev/null
 +++ b/drivers/media/i2c/vc_mipi/vc_mipi_core.c
-@@ -0,0 +1,2391 @@
+@@ -0,0 +1,2387 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Vision Components GmbH VC MIPI CSI-2 camera module driver.
-+ *
-+ * Copyright (C) Vision Components GmbH
-+ * Authors: Florian Schmid, Peter Martienssen, Michael Steinel
-+ *          (see MODULE_AUTHOR in vc_mipi_camera.c)
 + *
 + * Imported from github.com/VC-MIPI-modules/vc_mipi_core, branch nxp/develop, commit b63cdec6bff0
 + * and adapted to the Linux 6.1 V2N BSP kernel; the licence
@@ -3769,18 +3768,14 @@ index 0000000..03e43c9
 +MODULE_LICENSE("GPL v2");
 \ No newline at end of file
 diff --git a/drivers/media/i2c/vc_mipi/vc_mipi_core.h b/drivers/media/i2c/vc_mipi/vc_mipi_core.h
-new file mode 100755
+new file mode 100644
 index 0000000..bb0504a
 --- /dev/null
 +++ b/drivers/media/i2c/vc_mipi/vc_mipi_core.h
-@@ -0,0 +1,361 @@
-+// SPDX-License-Identifier: GPL-2.0-only
+@@ -0,0 +1,357 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
 +/*
 + * Vision Components GmbH VC MIPI CSI-2 camera module driver.
-+ *
-+ * Copyright (C) Vision Components GmbH
-+ * Authors: Florian Schmid, Peter Martienssen, Michael Steinel
-+ *          (see MODULE_AUTHOR in vc_mipi_camera.c)
 + *
 + * Imported from github.com/VC-MIPI-modules/vc_mipi_core, branch nxp/develop, commit b63cdec6bff0
 + * and adapted to the Linux 6.1 V2N BSP kernel; the licence
@@ -4141,14 +4136,10 @@ new file mode 100644
 index 0000000..e6f3c7d
 --- /dev/null
 +++ b/drivers/media/i2c/vc_mipi/vc_mipi_modules.c
-@@ -0,0 +1,988 @@
+@@ -0,0 +1,984 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Vision Components GmbH VC MIPI CSI-2 camera module driver.
-+ *
-+ * Copyright (C) Vision Components GmbH
-+ * Authors: Florian Schmid, Peter Martienssen, Michael Steinel
-+ *          (see MODULE_AUTHOR in vc_mipi_camera.c)
 + *
 + * Imported from github.com/VC-MIPI-modules/vc_mipi_core, branch nxp/develop, commit b63cdec6bff0
 + * and adapted to the Linux 6.1 V2N BSP kernel; the licence
@@ -5136,14 +5127,10 @@ new file mode 100644
 index 0000000..3024981
 --- /dev/null
 +++ b/drivers/media/i2c/vc_mipi/vc_mipi_modules.h
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,42 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Vision Components GmbH VC MIPI CSI-2 camera module driver.
-+ *
-+ * Copyright (C) Vision Components GmbH
-+ * Authors: Florian Schmid, Peter Martienssen, Michael Steinel
-+ *          (see MODULE_AUTHOR in vc_mipi_camera.c)
 + *
 + * Imported from github.com/VC-MIPI-modules/vc_mipi_core, branch nxp/develop, commit b63cdec6bff0
 + * and adapted to the Linux 6.1 V2N BSP kernel; the licence

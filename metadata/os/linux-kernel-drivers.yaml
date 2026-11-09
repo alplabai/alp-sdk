@@ -2,8 +2,7 @@
 # linux-kernel-drivers-v1).  The camera completeness gate checks every camera
 # module's chip `drivers.linux` against this list, and that each named patch
 # file exists.  Native entries were read from the 6.1.141-cip43 tree
-# (drivers/media/i2c).  Patches 0028-0030 and 0036 are PENDING -- their branches are not
-# merged yet, so the files do not exist in meta-alp-sdk until they land.
+# (drivers/media/i2c).
 schema_version: 1
 kernels:
   "6.1.141-cip43":
