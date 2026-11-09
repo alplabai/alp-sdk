@@ -1,0 +1,3 @@
+### Fixed — SE CryptoCell backend maintains the D-cache around SE requests (#2979)
+
+**`se_cryptocell.c` now cleans the buffers the Secure Enclave reads and invalidates the ones it writes.** SHA-256, AES-GCM and ChaCha20-Poly1305 pass caller buffers by global address, so a dirty line could hide the input from the SE and a stale line could hide its output from the CPU. Inputs are cleaned, outputs are cleaned+invalidated before the request and invalidated after it, with the partial edge lines of an output cleaned+invalidated rather than dropped so a neighbour's dirty bytes survive. The new `tests/unit/se_cryptocell_cache` native_sim test checks the call order against the real backend.
