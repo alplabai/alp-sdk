@@ -15,3 +15,8 @@
 # Tune: the stock cortexa55 tune already gives EVERY RZ/V2N machine, N44
 # included, -mcpu=cortex-a55+crypto.  Not changed here; tracked in #3120.
 MACHINEOVERRIDES =. "e1m-n48:"
+
+# Opts the N48 into the Renesas RZ MPU Security Package glue
+# (dynamic-layers/rz-security, docs/v2n-security.md).  Inert unless that layer
+# is in bblayers: without it nothing reads the feature.
+MACHINE_FEATURES:append = " alp-security"

@@ -5,7 +5,7 @@ for RZ/V2N AI SDK** (package v4.2.0.1, targets AI SDK v6.30, our BSP). The
 package is licence-gated and obtained from Renesas under your own account
 (search "RZ MPU Security Package (Linux OS)" on renesas.com); Alp Lab does
 not redistribute it and nothing from it is in this repository. Status:
-**build-verified on a stand-in MACHINE only, never run on silicon.**
+**build-verified on the N48 MACHINEs (TF-A, OP-TEE, signing), never run on silicon.**
 
 ## What it gives you
 
@@ -31,14 +31,15 @@ security features are fused off at manufacture and cannot be enabled.
 The glue therefore:
 
 - applies only to a MACHINE whose `MACHINE_FEATURES` contains
-  **`alp-security`** (the N48 machines set it; no N44 machine does). Without
+  **`alp-security`** (`conf/machine/include/e1m-n48.inc` sets it for every N48 machine; no N44
+  machine does). Without
   the feature the package's recipes and our bbappends are masked, so the
   package layer can sit in `bblayers.conf` of a shared build directory
   without touching an N44 build;
-- refuses (`bb.fatal`) `alp-security` on a MACHINE whose `ALP_SDK_SOC` is an
-  N44 variant, unless `ALP_RZ_SEC_ALLOW_N44_STANDIN = "1"`, which exists to
-  build-check the recipes before N48 hardware does and must never be set for
-  a product.
+- refuses (`bb.fatal`) `alp-security` on a MACHINE that lacks the `e1m-n48`
+  override (`ALP_SDK_SOC` cannot be used: the N48 machines inherit their N44
+  twin's value), with no override; the per-MACHINE wrappers exist only for the
+  six N48 machines, so an N44 machine cannot parse the package anyway.
 
 What an N44 does with a signed/OP-TEE image is not tested (no hardware); the
 design intent is that it must not boot rather than boot unprotected.
@@ -50,9 +51,7 @@ design intent is that it must not boot rather than boot unprotected.
    `bblayers.conf`. The glue checks the package is exactly v4.2.0.1
    (SHA-256 of three of its files) and stops the parse otherwise;
    `ALP_RZ_SEC_ACCEPT_UNKNOWN_PKG = "1"` waives that, at your own risk.
-2. Build an N48 MACHINE (or, for a build check only, an N44 one with
-   `MACHINE_FEATURES:append = " alp-security"` and
-   `ALP_RZ_SEC_ALLOW_N44_STANDIN = "1"`).
+2. Build an N48 MACHINE (`e1m-v2n104..106-a55`, `e1m-v2m104..106-a55`).
 3. Switch on what you want, in `local.conf`. All default to `0`:
 
    ```

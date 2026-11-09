@@ -27,8 +27,6 @@ ALP_RZ_SEC_ACCEPT_UNKNOWN_PKG ?= "0"
 # Configurator) is a separate, IRREVERSIBLE step this layer never performs.
 ALP_SEC_KEY_DIR ?= ""
 ALP_SEC_IMG_AUTH_MODE ?= "encsign"
-# Build-only stand-in on an N44 MACHINE (no security IP).  Never set for a product.
-ALP_RZ_SEC_ALLOW_N44_STANDIN ?= "0"
 
 # The package reads keys from a `keys/` directory inside its own layer (the
 # private half of the root of trust would live in the layer checkout).  Read
@@ -48,11 +46,12 @@ do_compile[file-checksums] += "${@' '.join('%s/%s:True' % (d.getVar('ALP_SEC_KEY
 python () {
     import hashlib, os
     feats = (d.getVar('MACHINE_FEATURES') or '').split()
-    soc = d.getVar('ALP_SDK_SOC') or ''
     if 'alp-security' not in feats:
         bb.fatal("rz-security glue parsed without the alp-security MACHINE_FEATURE (BBMASK in meta-alp-sdk conf/layer.conf should have masked it)")
-    if soc.endswith('_N44') and d.getVar('ALP_RZ_SEC_ALLOW_N44_STANDIN') != '1':
-        bb.fatal("alp-security on %s (%s): the N44 is a Renesas 'normal device' with the security IP bonded out for good. Security features are N48 (security device) only. Set ALP_RZ_SEC_ALLOW_N44_STANDIN = \"1\" for a build-only check, never for a product." % (d.getVar('MACHINE'), soc))
+    # ALP_SDK_SOC still says N44 on the N48 machines (they inherit their N44 twin's),
+    # so key on the e1m-n48 override that conf/machine/include/e1m-n48.inc sets.
+    if 'e1m-n48' not in (d.getVar('OVERRIDES') or '').split(':'):
+        bb.fatal("alp-security on %s, which is not an N48 MACHINE: the N44 is a Renesas 'normal device' with the security IP bonded out for good. Security features are N48 (security device) only." % d.getVar('MACHINE'))
     mode = d.getVar('ALP_SEC_IMG_AUTH_MODE')
     if mode not in ('encsign', 'sign'):
         bb.fatal("ALP_SEC_IMG_AUTH_MODE must be encsign or sign, got '%s'" % mode)
