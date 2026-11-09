@@ -12,7 +12,7 @@
  * the ISP-side nodes and points them at the generated sensor.
  *
  * Every node below is created (status = "disabled") by the Renesas ISP
- * Support Package's SoC dtsi patch (0001-ISP-support-package.patch, kernel
+ * Support Package's SoC dtsi patch (0001-ISP-support-package-v2n.patch, kernel
  * source r9a09g056.dtsi): &input_video_control (IVC), &isp (arm,isp) and the
  * sensor / lens / iq sub-driver nodes.  Their register bases, clocks, resets
  * and interrupts live there and nowhere in this tree -- the labels are the
@@ -25,9 +25,11 @@
  * cru_func (cru_buffer@b4000000), set on &cru0 below exactly as the
  * package's board dts does.  The DDR map is unchanged by the package.
  *
- * Sensor support: the package ships ISP support for one reference sensor
- * only; any other sensor needs its own port (docs/v2n-isp.md).  The init
- * script (alp-isp-init.service) selects the real mode at boot.
+ * Sensor support: the package ships an ISP sensor sub-driver for one
+ * reference sensor only (IMX415); any other sensor needs its own port
+ * (docs/v2n-isp.md).  `sensor-default-preset-mode` is the index into that
+ * sub-driver's mode table, not a V4L2 mode.  The init script
+ * (alp-isp-init.service) selects the real mode at boot.
  */
 
 &input_video_control {

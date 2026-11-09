@@ -1,0 +1,100 @@
+From: Alp Lab AB <contact@alplab.ai>
+Date: Mon, 9 Nov 2026 10:32:52 +0000
+Subject: [PATCH] media: rzg2l-csi2: honour lane-polarities via SWAPCTL (ISP
+ Support Package driver)
+
+The RZ/V-family D-PHY has CRUm_SWAPCTL (CSI-2 base + 0x438) to swap the
+DP/DN pair of the receiver lanes.  The CSI-2 receiver driver of the Renesas
+ISP Support Package writes 0 to it and ignores the standard
+lane-polarities endpoint property, so a carrier whose CSI pairs arrive
+swapped sees no packets (CSI2nRXST stays 0, DLST0/DLST1 read 0x4).
+
+Per the RZ/V2H hardware manual (R01UH1032EJ0130, section 9.2):
+- bit 5 S_DPDN_SWAP_DAT swaps DP/DN of all slave data lanes;
+- bit 4 S_DPDN_SWAP_CLK swaps DP/DN of the slave clock lane;
+- bits 1/0 M_DPDN_SWAP_* must not be changed from 0.
+
+Parse lane-polarities from the receiver endpoint (index 0 is the clock
+lane, 1..N the data lanes) and program bits 5/4 accordingly.  The hardware
+can only swap all data lanes or none, so a mixed data-lane setting fails
+probe with -EINVAL.  The RZ/G2L D-PHY has no SWAPCTL: polarities are
+ignored with a warning if set.
+
+This is the port of meta-alp-sdk patch 0017 (which targets the stock
+driver) onto the ISP Support Package V1.50 driver.
+
+Upstream-Status: Inappropriate [applies to the vendor ISP driver stack]
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ .../platform/renesas/rzg2l-cru/rzg2l-csi2.c   | 34 ++++++++++++++++++-
+ 1 file changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c
+index 32d1d00..d3e3f26 100644
+--- a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c
++++ b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c
+@@ -271,6 +271,9 @@ struct rzg2l_csi2 {
+ 	unsigned long hsfreq;
+ 
+ 	enum mipi_csi2_dphy_type type;
++
++	bool swap_clk;
++	bool swap_dat;
+ };
+ 
+ static inline struct rzg2l_csi2 *sd_to_csi2(struct v4l2_subdev *sd)
+@@ -371,7 +374,10 @@ static int rzg2l_csi2_dphy_setting(struct rzg2l_csi2 *priv, bool on)
+ 		} else {
+ 			u32 i, hssettle;
+ 
+-			rzg2l_csi2_write(priv, DPHY_SWAPCTL, 0);
++			/* Bits 1/0 (M_DPDN_SWAP_*) must stay 0. */
++			rzg2l_csi2_write(priv, DPHY_SWAPCTL,
++					 (priv->swap_dat ? DPHY_SWAPCTL_S_DPDN_SWAP_DAT : 0) |
++					 (priv->swap_clk ? DPHY_SWAPCTL_S_DPDN_SWAP_CLK : 0));
+ 
+ 			for (i = 0; i < ARRAY_SIZE(dphy_s_timctls); i++) {
+ 				if ((priv->hsfreq) <= dphy_s_timctls[i].hsfreq)
+@@ -714,6 +720,9 @@ static const struct v4l2_async_notifier_operations rzg2l_csi2_notify_ops = {
+ static int rzg2l_csi2_parse_v4l2(struct rzg2l_csi2 *priv,
+ 			    struct v4l2_fwnode_endpoint *vep)
+ {
++	unsigned int i, ndat_inv = 0;
++	bool swap_clk;
++
+ 	/* Only port 0 endpoint 0 is valid. */
+ 	if (vep->base.port || vep->base.id)
+ 		return -ENOTCONN;
+@@ -730,6 +739,29 @@ static int rzg2l_csi2_parse_v4l2(struct rzg2l_csi2 *priv,
+ 		return -EINVAL;
+ 	}
+ 
++	/* lane_polarities[0] is the clock lane, [1..N] the data lanes. */
++	swap_clk = vep->bus.mipi_csi2.lane_polarities[0];
++	for (i = 1; i <= priv->lanes; i++) {
++		if (vep->bus.mipi_csi2.lane_polarities[i])
++			ndat_inv++;
++	}
++
++	if (priv->type == MIPI_CSI2_DPHY_RZ_G2L) {
++		if (swap_clk || ndat_inv)
++			dev_warn(priv->dev,
++				 "lane-polarities ignored: no P/N swap on this D-PHY\n");
++		return 0;
++	}
++
++	if (ndat_inv && ndat_inv != priv->lanes) {
++		dev_err(priv->dev,
++			"lane-polarities: the D-PHY can only invert all data lanes or none\n");
++		return -EINVAL;
++	}
++
++	priv->swap_clk = swap_clk;
++	priv->swap_dat = ndat_inv;
++
+ 	return 0;
+ }
+ 
+-- 
+2.53.0
+

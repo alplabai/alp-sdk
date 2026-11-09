@@ -518,13 +518,14 @@ Opt-in by layer presence, like `meta-rz-drpai`: add the package's
 `meta-rz-isp` layer to `bblayers.conf` (not together with `meta-econsys`) and
 `ALP_ENABLE_ISP` defaults to `1`; `0` opts out of our half. Everything of ours
 lives under `dynamic-layers/meta-rz-isp/` and is parsed only with that layer:
-the ISP half of the CAM0 dtb (`e1m-v2{n,m}101-x-evk-cam0-isp.dtb`, composed on
-the generated CAM0 sensor fragment), removal of kernel patches 0016/0017
-(they conflict with the package's CRU rewrite), and `alp-isp-init.service`
+the ISP half of the CAM0 DT (folded into `e1m-v2{n,m}101-x-evk.dtb`, composed on
+the generated CAM0 sensor fragment), removal of kernel patch 0016 (it
+conflicts with the package's CRU rewrite) and the port of 0017 (CSI-2 lane
+polarity) onto the package's CSI-2 driver, and `alp-isp-init.service`
 (runs the vendor `v4l2-init.sh` at boot; installed into the image by
 `ALP_RZ_ISP_INSTALL` in `alp-image-common.inc`). The package supports the
 IMX415 only; see [`docs/v2n-isp.md`](../docs/v2n-isp.md) for the sensor
-caveat, the dropped patches and the status (BENCH-UNVERIFIED).
+caveat (IMX568C), the patches and the status (BENCH-UNVERIFIED).
 
 ## OTA via Mender (opt-in)
 
