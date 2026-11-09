@@ -316,10 +316,27 @@ mono sensor cannot feed `omxh264enc` through them. `alpcamerasrc`
 emits `GRAY8`, `GRAY16_LE` (10-bit sample scaled to the full 16-bit range) or
 `NV12` (mono: Y = pixel, UV = 128) at the negotiated size and rate. The size
 must be one the sensor produces natively; with no caps filter it defaults to
-1456x1088 at 30 fps (the IMX296 mode). Mono and Bayer-as-mono only: there is no
-demosaic or ISP. The framerate is rounded to an integer and must be one the
+1456x1088 at 30 fps (the IMX296 mode). The framerate is rounded to an integer and must be one the
 sensor mode supports (30000/1001 becomes 30); anything else fails
 `alp_camera_open` during caps negotiation. Property `camera-id` (default `0`, `ALP_E1M_CAM0`).
+
+Colour Bayer sensors (the colour IMX296 offers only `SBGGR10`; the colour
+IMX568C needs the same) have no GREY8 path, so for `NV12` the element tries
+mono first and then opens `ALP_PIXFMT_RAW10` at twice the requested size. The
+CPU debayer is a 2x2 superpixel: each RGGB/BGGR/GRBG/GBRG quad becomes one
+pixel (R, (G1+G2)/2, B) converted to BT.601 limited-range YUV with integer
+coefficients, so the output is half the sensor size: ask for `NV12` at
+728x544 on a 1456x1088 sensor. There is no ISP, no AWB and no AE. The camera
+API does not report the Bayer order, so set `bayer-order` (`rggb`, `bggr`,
+`grbg`, `gbrg`; default `bggr`, which is the IMX296 `SBGGR10`). `r-gain` and
+`b-gain` (floats, default `1.0`, 0 to 16) are a fixed white balance applied
+before the conversion.
+
+```
+gst-launch-1.0 alpcamerasrc bayer-order=bggr r-gain=1.0 b-gain=1.0 \
+    ! video/x-raw,format=NV12,width=728,height=544,framerate=30/1 \
+    ! omxh264enc ! h264parse ! rtph264pay ! udpsink host=<peer> port=5000
+```
 
 ```
 gst-launch-1.0 alpcamerasrc ! video/x-raw,format=NV12,width=1456,height=1088,framerate=30/1 \
