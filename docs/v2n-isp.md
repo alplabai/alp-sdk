@@ -53,8 +53,9 @@ One port exists: the **Vision Components MIPI IMX568C** colour global-shutter
 module (`ALP_CAMERA_CAM0 = "vc_mipi_imx568c"`, [`v2n-camera-csi.md`](v2n-camera-csi.md)).
 Its sub-driver, IQ entry points and init-script edit are derived from the
 package and live in the private mirror as the overlay layer
-`meta-alp-isp-imx568`; without that layer the build warns and the ISP still
-drives the IMX415 sub-driver. Scope of the port:
+`meta-alp-isp-imx568`. Selecting the IMX568C with the ISP enabled but without
+that layer fails the build, because the package's IMX415 sub-driver would
+otherwise drive the module. Scope of the port:
 
 - 2464x2064 RAW12, Bayer RGGB, 2 or 4 lanes (the lane count follows the DT).
   RAW10 is not implemented: the ISP input bit width is fixed at build time.

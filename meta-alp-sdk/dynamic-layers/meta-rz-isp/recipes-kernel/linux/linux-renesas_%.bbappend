@@ -81,6 +81,9 @@ python () {
                  "ISP path (the ISP image drops kernel patch 0016, CRU Y10/Y8, and the Mali-C55 "
                  "needs a Bayer input). Set ALP_ENABLE_ISP = \"0\" or pick a colour module." % cam0)
     overlay = 'meta-alp-isp-imx568' in (d.getVar('BBFILE_COLLECTIONS') or '').split()
+    if not cam0:
+        bb.fatal("The meta-alp-isp-imx568 overlay is in the layer list but ALP_CAMERA_CAM0 is "
+                 "empty. The overlay needs ALP_CAMERA_CAM0 = \"vc_mipi_imx568c\".")
     if cam0 not in d.getVar('ALP_ISP_PORTED_CAM0').split():
         # Folding the ISP into the only dtb would stop a module without an ISP
         # sensor sub-driver from streaming at all (it also owns the CRU).
@@ -90,9 +93,11 @@ python () {
                  "ALP_ENABLE_ISP = \"0\" to use this module without the ISP (docs/v2n-isp.md)."
                  % (cam0 or ''))
     if not overlay:
-        bb.warn("ALP_CAMERA_CAM0 = '%s' needs the meta-alp-isp-imx568 overlay layer (private "
-                "mirror, vendors/renesas-rzv2n/isp-support-package-v1.50/); without it the ISP "
-                "still drives the package's IMX415 sub-driver." % cam0)
+        # Without the overlay the package's IMX415 sub-driver would write IMX415
+        # register sequences into this module, so refuse instead of warning.
+        bb.fatal("ALP_CAMERA_CAM0 = '%s' needs the meta-alp-isp-imx568 overlay layer (private "
+                 "mirror, vendors/renesas-rzv2n/isp-support-package-v1.50/). Add it, or set "
+                 "ALP_ENABLE_ISP = \"0\" to use this module without the ISP." % cam0)
 }
 
 # ISP half of the CAM0 dtb.  Keyed on the variable the CAM0 block of
