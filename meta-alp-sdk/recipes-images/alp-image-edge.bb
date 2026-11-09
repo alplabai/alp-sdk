@@ -137,9 +137,8 @@ IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '
 # `?=` (a weak default) in the RZ/V2N confs -- checking only "is it set"
 # can't distinguish a real RZ/V2N machine from one where some other layer
 # happened to export the same name. 'rzv2n-family' is confirmed present at
-# this parse point: all six RZ/V2N machine confs (e1m-v2n101-a55,
-# e1m-v2n102-a55, e1m-v2n103-a55, e1m-v2m101-a55, e1m-v2m102-a55,
-# e1m-v2m103-a55) `require
+# this parse point: all twelve RZ/V2N machine confs (e1m-v2n101..106-a55,
+# e1m-v2m101..106-a55) `require
 # conf/machine/rzv2n-evk.conf`, which `require`s
 # conf/machine/include/rzv2n-family.inc (SOC_FAMILY = "rzv2n-family:
 # mali-family"), which itself `require`s conf/machine/include/soc-family.inc

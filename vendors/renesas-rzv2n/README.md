@@ -15,7 +15,9 @@ Camera variant).
 
 The N48 parts add the security IP over the N44 (datasheet R01DS0466EJ0130
 Table 1.2-1 / 1.3-1).  Secure boot and the rest of the security IP need the
-Renesas RZ MPU Security Package (NDA); that integration is a follow-up.
+Renesas RZ MPU Security Package (NDA); that integration is a follow-up.  The
+arm64 CE kernel crypto drivers ship on every RZ/V2N image; they bind only on
+N48 (build-unverified, no N48 unit benched).
 
 Authoritative per-SKU detail and the silicon stack live in
 [`e1m-spec` Annex A.2 / A.3](https://github.com/alplabai/e1m-spec/blob/main/STANDARD.md#a2-e1m-x-v2n-family-renesas-rzv2n).

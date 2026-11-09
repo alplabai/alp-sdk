@@ -80,7 +80,8 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 # DDR param source file: 8 GB/D16S32 by default, 4 GB/D8S32 for the two x103
-# memory-tier MACHINEs. Keyed on the exact MACHINE name (not on a shared
+# memory-tier MACHINEs (e1m-v2n106-a55 / e1m-v2m106-a55 inherit it through the
+# x103 override their MACHINEOVERRIDES chain carries). Keyed on the exact MACHINE name (not on a shared
 # override like e1m-v2m101-a55/e1m-v2n101-a55) so a plain read of THIS file
 # can't pull the wrong config into any other SKU.
 #

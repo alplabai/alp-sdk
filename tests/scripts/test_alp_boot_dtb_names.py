@@ -12,7 +12,11 @@ UBOOT = META / "recipes-bsp" / "u-boot" / "u-boot"
 
 
 def _machine_dtb(conf: Path) -> str:
-    m = re.search(r'^KERNEL_DEVICETREE\s*=\s*"[^"]*?([^/" ]+\.dtb)"', conf.read_text(encoding="utf-8"), re.M)
+    text = conf.read_text(encoding="utf-8")
+    # The N48 twins (104..106) inherit KERNEL_DEVICETREE through `require`.
+    for base in re.findall(r"^require conf/machine/(e1m-[\w-]+\.conf)$", text, re.M):
+        text += conf.with_name(base).read_text(encoding="utf-8")
+    m = re.search(r'^KERNEL_DEVICETREE\s*=\s*"[^"]*?([^/" ]+\.dtb)"', text, re.M)
     assert m, conf.name
     return m.group(1)
 
@@ -22,7 +26,7 @@ def test_machine_dtb_matches_the_u_boot_fdtfile():
     patch = (UBOOT / "0002-rzv2n-dev-ALP-E1M-production-boot.patch").read_text(encoding="utf-8")
     v2n = re.search(r'default "(e1m-v2n[^"]+\.dtb)"', patch).group(1)
     confs = sorted((META / "conf" / "machine").glob("e1m-v2[mn]10?-a55.conf"))
-    assert len(confs) == 6
+    assert len(confs) == 12
     for conf in confs:
         expected = v2m if "v2m" in conf.name else v2n
         assert _machine_dtb(conf) == expected, conf.name

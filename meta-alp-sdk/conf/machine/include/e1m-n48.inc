@@ -1,19 +1,17 @@
 # R9A09G056N48GBG (RZ/V2N N48: GPU + ISP + security IP) delta, shared by every
-# N48 SKU (E1M-V2N104..106, E1M-V2M104..106).  Datasheet R01DS0466EJ0130
-# Table 1.3-1: the A55 Arm crypto extensions (aes/sha/pmull) exist only on the
-# security-option parts (N45-N48); the N44 behind E1M-V2N101..103 / V2M101..103
-# has none (measured: no aes/sha1/sha2/pmull in /proc/cpuinfo).
+# N48 SKU (E1M-V2N104..106, E1M-V2M104..106).
 #
-# `e1m-n48` is the override that gates the N48-only bits; nothing else keys
-# on it.  Secure boot / the security IP proper needs the Renesas RZ MPU
-# Security Package (NDA) and is not wired here.
+# `e1m-n48` is the override that marks an N48 machine; nothing keys on it yet.
+# It is the hook for the follow-up that needs the Renesas RZ MPU Security
+# Package (NDA): secure boot and the rest of the security IP.
+#
+# Crypto: the arm64 CE kernel drivers (aes/sha1/sha2/ghash) are already built
+# into the shared linux-renesas config for every RZ/V2N machine.  On N44
+# (E1M-V2N101..103 / V2M101..103) the CPU has no crypto extension (measured: no
+# aes/sha/pmull in /proc/cpuinfo) so they do not bind; on N48 (datasheet
+# R01DS0466EJ0130 Table 1.3-1) they are expected to bind -- build-unverified,
+# no N48 unit benched.
+#
+# Tune: the stock cortexa55 tune already gives EVERY RZ/V2N machine, N44
+# included, -mcpu=cortex-a55+crypto.  Not changed here; tracked in #3120.
 MACHINEOVERRIDES =. "e1m-n48:"
-
-# Kernel: the arm64 CE crypto drivers (aes/sha1/sha2/ghash).  Built in; each
-# returns -ENODEV at init on a CPU without the feature, so it is inert on N44
-# anyway, but it is only added on N48 so the N44 image stays as it was.
-SRC_URI:append:pn-linux-renesas = " file://crypto-arm64-ce.cfg"
-
-# Userland: the N48 tune carries `crypto` (-mcpu=cortex-a55+crypto) via the stock
-# cortexa55 tune that rzv2n-evk.conf requires; nothing to add here.  NOTE the
-# N44 machines get the same stock tune -- see the CHANGELOG fragment for 3119.

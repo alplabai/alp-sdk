@@ -65,7 +65,7 @@ on_module:
         - { chip: act8760,          role: pmic_main_page1,           address_7bit: "0x26" }
         - { chip: da9292,           role: pmic_secondary,            address_7bit: "0x1E" }
         # Address RESOLVED (#1163, #1845): bench-measured 2026-09-24 on
-        # E1M-V2M106 -- 0x48 appears on BRD_I2C only after P64
+        # E1M-V2M103 -- 0x48 appears on BRD_I2C only after P64
         # (DEEPX_CORE_0P75_EN) is driven high, and its VOUT reads 0x5A
         # (= 0.85 V: 0.4 V + 90 x 5 mV), matching this role. 0x44 (deepx_ddr5_vdd) and 0x4F
         # (deepx_ddr5_vddq) were confirmed present on the same bus scan.

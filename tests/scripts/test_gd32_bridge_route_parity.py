@@ -8,7 +8,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 HDR = (ROOT / "include/alp/chips/gd32g553.h").read_text(encoding="utf-8")
-SOMS = sorted((ROOT / "metadata/e1m_modules").glob("E1M-V2[NM]10[123].yaml"))
+SOMS = sorted((ROOT / "metadata/e1m_modules").glob("E1M-V2[NM]10[1-6].yaml"))
 
 
 def _macro(name: str) -> int:

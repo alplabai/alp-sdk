@@ -60,15 +60,11 @@ def test_twins_mirror_their_n44_sibling():
             re.findall(r"(?:dram|flash)_mbit:\s*(\d+)", (SOM / f"{old}.yaml").read_text(encoding="utf-8")), new
 
 
-def test_crypto_kernel_fragment_and_tune_apply_only_to_n48_machines():
-    inc = (LAYER / "conf/machine/include/e1m-n48.inc").read_text(encoding="utf-8")
-    assert 'SRC_URI:append:pn-linux-renesas = " file://crypto-arm64-ce.cfg"' in inc
-    cfg = (LAYER / "recipes-kernel/linux/linux-renesas/crypto-arm64-ce.cfg").read_text(encoding="utf-8")
-    for sym in ("AES_ARM64_CE", "SHA2_ARM64_CE", "GHASH_ARM64_CE"):
-        assert f"CONFIG_CRYPTO_{sym}=y" in cfg
-    # Nothing but the inc references the fragment, and only the N48 machines pull the inc in.
-    assert "crypto-arm64-ce" not in (LAYER / "recipes-kernel/linux/linux-renesas_%.bbappend").read_text(encoding="utf-8")
+def test_n48_override_appears_only_in_n48_machine_conf_chains():
     for sku in TWINS:
         assert "include/e1m-n48.inc" in _conf_text(_machine(sku) + ".conf"), sku
     for sku in TWINS.values():
         assert "e1m-n48" not in _conf_text(_machine(sku) + ".conf"), sku
+    inc = (LAYER / "conf/machine/include/e1m-n48.inc").read_text(encoding="utf-8")
+    assert 'MACHINEOVERRIDES =. "e1m-n48:"' in inc
+    assert not (LAYER / "recipes-kernel/linux/linux-renesas/crypto-arm64-ce.cfg").exists()

@@ -113,13 +113,13 @@ recovery_only`, and no `flash_method`.  The CC3501E (TI Wi-Fi 6 + BLE
 link, programming the chip's own OTP — Alp Lab programs it in
 production, and a customer flash is permitted only to recover a
 bricked device, with Alp Lab-supplied binaries.
-The six SKUs must stay in lockstep (same `update_channel`, same
+The twelve SKUs must stay in lockstep (same `update_channel`, same
 `flash_policy`, same `firmware_path` provenance).
 
 ### V2N / V2M / `gd32_bridge`
 
-All six E1M-X presets (`E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103`,
-`E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103` — one PCB, variant-populated)
+All twelve E1M-X presets (`E1M-V2N101`..`E1M-V2N106`,
+`E1M-V2M101`..`E1M-V2M106` — one PCB, variant-populated)
 carry a byte-identical `gd32_bridge` entry declaring **two** axes:
 `flash_policy: recovery_only` + `update_channel: alp_ota_spi_bridge`.
 Field updates stream over the bridge link into the slot-A/B application

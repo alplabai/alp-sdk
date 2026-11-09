@@ -133,13 +133,20 @@ def test_machine_confs_default_alp_sdk_soc_to_the_preset_silicon():
 
     from alp_project_loader import silicon_to_kconfig
 
+    def conf_text(path):
+        # The N48 twins (e1m-v2x104..106) inherit ALP_SDK_SOC via `require`.
+        text = path.read_text(encoding="utf-8")
+        for base in re.findall(r"^require conf/machine/(e1m-[\w-]+\.conf)$", text, re.M):
+            text += conf_text(path.parent / base)
+        return text
+
     metadata = REPO / "metadata"
     confs = sorted((REPO / "meta-alp-sdk/conf/machine").glob("e1m-*.conf"))
-    assert len(confs) == 8
+    assert len(confs) == 14  # 2 AEN + 12 RZ/V2N
     for conf in confs:
         sku = conf.stem.rsplit("-", 1)[0].upper()  # e1m-v2n101 -> E1M-V2N101
         preset = yaml.safe_load((metadata / "e1m_modules" / f"{sku}.yaml").read_text(encoding="utf-8"))
         want = silicon_to_kconfig(preset["silicon"], metadata)
-        m = re.search(r'^ALP_SDK_SOC \?= "([^"]+)"', conf.read_text(encoding="utf-8"), re.M)
+        m = re.search(r'^ALP_SDK_SOC \?= "([^"]+)"', conf_text(conf), re.M)
         assert m, f"{conf.name}: no ALP_SDK_SOC ?= default"
         assert m.group(1) == want, conf.name
