@@ -208,7 +208,7 @@ isp_capture(alp_camera_backend_state_t *st, alp_camera_frame_t *out, uint32_t ti
 
 	struct pollfd p  = { .fd = c->fd, .events = POLLIN };
 	int           to = timeout_ms > (uint32_t)INT_MAX ? -1 : (int)timeout_ms;
-	int           pr = cam_poll(&p, to);
+	int           pr = cam_poll(&p, 1, to);
 	if (pr < 0) return ALP_ERR_IO;
 	if (pr == 0) {
 		if (!c->got_frame) {
