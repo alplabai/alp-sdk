@@ -50,6 +50,7 @@ IMAGE_INSTALL += "${@' alp-gpu2d-compose' if 'mali-family' in (d.getVar('MACHINE
 # weston/libdrm/DEEPX/rootfs sizing now come from alp-image-common.inc;
 # only the example package is edge-specific.
 IMAGE_INSTALL += " alp-lvgl-dashboard"
+IMAGE_INSTALL += " ${ALP_RZ_SECURITY_DEV_INSTALL}"
 
 # alp-drpai-inference (the issue #1268 exhibition-booth demo) rides the
 # SAME opt-in this MACHINE's ALP_ENABLE_DRPAI switch drives (see e.g.

@@ -95,6 +95,21 @@ ALP_RZ_DRPAI_INSTALL[vardepvalue] = "${ALP_RZ_DRPAI_INSTALL}"
 
 IMAGE_INSTALL += " ${ALP_RZ_DRPAI_INSTALL}"
 
+# Renesas RZ MPU Security Package (docs/v2n-security.md): the OP-TEE client
+# (libteec + tee-supplicant), only when the package layer is present, the
+# MACHINE is an `alp-security` (N48) one, and the build opted in with
+# ENABLE_SPD_OPTEE = "1".  The package's own test/sample/flash tools stay out
+# of every image but alp-image-edge, and there only with ALP_SEC_DEV_TOOLS = "1"
+# (ALP_RZ_SECURITY_DEV_INSTALL): the TA sample can rewrite boot flash.
+ALP_RZ_SECURITY_ON = "${@'1' if 'rz-security' in (d.getVar('BBFILE_COLLECTIONS') or '').split() and 'alp-security' in (d.getVar('MACHINE_FEATURES') or '').split() and d.getVar('ENABLE_SPD_OPTEE') == '1' else '0'}"
+ALP_RZ_SECURITY_INSTALL = "${@'optee-client' if d.getVar('ALP_RZ_SECURITY_ON') == '1' else ''}"
+ALP_SEC_DEV_TOOLS ?= "0"
+ALP_RZ_SECURITY_DEV_INSTALL = "${@'optee-test optee-example optee-ta-sample' if d.getVar('ALP_RZ_SECURITY_ON') == '1' and d.getVar('ALP_SEC_DEV_TOOLS') == '1' else ''}"
+ALP_RZ_SECURITY_ON[vardepvalue] = "${ALP_RZ_SECURITY_ON}"
+ALP_RZ_SECURITY_INSTALL[vardepvalue] = "${ALP_RZ_SECURITY_INSTALL}"
+ALP_RZ_SECURITY_DEV_INSTALL[vardepvalue] = "${ALP_RZ_SECURITY_DEV_INSTALL}"
+IMAGE_INSTALL += " ${ALP_RZ_SECURITY_INSTALL}"
+
 # On-module Murata LBEE5HY2FY-922 (Infineon CYW55513) Wi-Fi + BT: the
 # out-of-tree cyw-fmac driver + firmware blobs (this layer, own
 # recipes -- no vendor-layer gate needed) plus the standard userspace
