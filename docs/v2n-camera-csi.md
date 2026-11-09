@@ -306,6 +306,49 @@ Pass: 10 frames, no CSI errors in `dmesg`. If `i2cdetect` sees nothing,
 check the mux select (`gpioinfo | grep cam0-mux-sel` must read output,
 low) and the module's I2C address.
 
+## GStreamer source: `alpcamerasrc`
+
+`v4l2src` and `videoconvert` cannot read the CRU's `CR10` capture format, so a
+mono sensor cannot feed `omxh264enc` through them. `alpcamerasrc`
+(`tools/gst-alpcamerasrc/`, recipe `gst-plugin-alp-camera`, pulled in by
+`packagegroup-alp-camera` on V2N/V2M machines) is a live source on
+`<alp/camera.h>`: the SDK unpacks `CR10` (NEON on AArch64) and the element
+emits `GRAY8`, `GRAY16_LE` (10-bit sample scaled to the full 16-bit range) or
+`NV12` (mono: Y = pixel, UV = 128) at the negotiated size and rate. The size
+must be one the sensor produces natively; with no caps filter it defaults to
+1456x1088 at 30 fps (the IMX296 mode). The framerate is rounded to an integer and must be one the
+sensor mode supports (30000/1001 becomes 30); anything else fails
+`alp_camera_open` during caps negotiation. Property `camera-id` (default `0`, `ALP_E1M_CAM0`).
+
+Colour Bayer sensors (the colour IMX296 offers only `SBGGR10`; the colour
+IMX568C needs the same) have no GREY8 path, so for `NV12` the element tries
+mono first and then opens `ALP_PIXFMT_RAW10` at twice the requested size. The
+CPU debayer is a 2x2 superpixel: each RGGB/BGGR/GRBG/GBRG quad becomes one
+pixel (R, (G1+G2)/2, B) converted to BT.601 limited-range YUV with integer
+coefficients, so the output is half the sensor size: ask for `NV12` at
+728x544 on a 1456x1088 sensor. There is no ISP, no AWB and no AE. The camera
+API does not report the Bayer order, so set `bayer-order` (`rggb`, `bggr`,
+`grbg`, `gbrg`; default `bggr`, which is the IMX296 `SBGGR10`). `r-gain` and
+`b-gain` (floats, default `1.0`, 0 to 16) are a fixed white balance applied
+before the conversion.
+
+```
+gst-launch-1.0 alpcamerasrc bayer-order=bggr r-gain=1.0 b-gain=1.0 \
+    ! video/x-raw,format=NV12,width=728,height=544,framerate=30/1 \
+    ! omxh264enc ! h264parse ! rtph264pay ! udpsink host=<peer> port=5000
+```
+
+```
+gst-launch-1.0 alpcamerasrc ! video/x-raw,format=NV12,width=1456,height=1088,framerate=30/1 \
+    ! omxh264enc ! h264parse ! rtph264pay ! udpsink host=<peer> port=5000
+```
+
+Status: the conversions are host-tested
+(`tests/yocto/gst_alpcamerasrc_convert.c`) and the recipe builds under Yocto.
+Not run on silicon yet. Open: whether the gst-omx fork on V2N accepts `NV12`
+from this source at the sensor's size (the VCD is specified for 1080p60), and
+the delivered fps on the target.
+
 ## Using `<alp/camera.h>` on Linux
 
 The portable `alp_camera_open()` works on the A55 through the V4L2 /

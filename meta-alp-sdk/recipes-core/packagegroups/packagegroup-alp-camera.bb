@@ -88,3 +88,9 @@ RDEPENDS:${PN} += " \
     ${ALP_RZ_CODECS_RDEPENDS}                  \
     ${ALP_RZ_OPENCVA_RDEPENDS}                 \
 "
+
+# alpcamerasrc (CR10 camera -> GRAY8/GRAY16_LE/NV12 for omxh264enc): only the
+# RZ CRU emits CR10, so only V2N/V2M machines get it.
+ALP_GST_CAMERA_RDEPENDS = "${@bb.utils.contains('MACHINE_FEATURES', 'v2n', 'gst-plugin-alp-camera', '', d)}"
+ALP_GST_CAMERA_RDEPENDS[vardepvalue] = "${ALP_GST_CAMERA_RDEPENDS}"
+RDEPENDS:${PN} += "${ALP_GST_CAMERA_RDEPENDS}"

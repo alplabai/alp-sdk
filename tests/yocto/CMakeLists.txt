@@ -1094,6 +1094,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_camera_cr10_unpack
              COMMAND alp_test_camera_cr10_unpack)
 
+    # alpcamerasrc conversions (CR10 -> GRAY8 / GRAY16_LE / NV12); no GStreamer needed.
+    add_executable(alp_test_gst_alpcamerasrc_convert
+        ${CMAKE_CURRENT_SOURCE_DIR}/gst_alpcamerasrc_convert.c
+    )
+    target_include_directories(alp_test_gst_alpcamerasrc_convert PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/camera
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/gst-alpcamerasrc
+    )
+    target_compile_features(alp_test_gst_alpcamerasrc_convert PRIVATE c_std_99)
+
+    add_test(NAME alp_test_gst_alpcamerasrc_convert
+             COMMAND alp_test_gst_alpcamerasrc_convert)
+
     # Microbenchmark (not a ctest): run on the target aarch64 board, not an emulator.
     add_executable(alp_bench_camera_cr10
         ${CMAKE_CURRENT_SOURCE_DIR}/camera_cr10_bench.c
