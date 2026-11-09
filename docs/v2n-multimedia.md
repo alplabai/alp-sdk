@@ -21,7 +21,9 @@ On V2N-family MACHINEs (`MACHINE_FEATURES` has `v2n`) with `meta-rz-codecs` in
 `ALP_RZ_CODECS_RDEPENDS` in `packagegroup-alp-camera.bb`).
 
 ffmpeg is built LGPL-only (`recipes-multimedia/ffmpeg/ffmpeg_%.bbappend` removes
-`gpl`, `x264` and `postproc`). There is no hardware encode through ffmpeg.
+`gpl`, `x264` and `postproc`, and sets the `ffmpeg` CLI package to
+LGPL-2.1-or-later). A bbappend applies layer-wide, so every ffmpeg built with
+meta-alp-sdk is LGPL-only, not just this package group. There is no hardware encode through ffmpeg.
 
 ## Licence flags you must accept
 

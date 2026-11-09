@@ -370,7 +370,7 @@ internal `devkit-feed` workflow uploads the result to the release.
 
 - **Multimedia (opt-in).** `IMAGE_FEATURES += "alp-multimedia"` adds GStreamer
   good/bad/libav/rtsp-server, LGPL-only ffmpeg and the Renesas OMX codec stack; it
-  needs `LICENSE_FLAGS_ACCEPTED` lines. See `v2n-multimedia.md`.
+  needs `LICENSE_FLAGS_ACCEPTED` lines. See [v2n-multimedia.md](v2n-multimedia.md).
 
 - **GigaDevice xSPI NOR (some SKUs).** Some production E1M V2N-family
   modules carry a GigaDevice LX-family octal xSPI NOR in the "NOR flash
