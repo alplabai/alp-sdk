@@ -90,9 +90,10 @@ static gboolean gst_alp_camera_src_set_caps(GstBaseSrc *bsrc, GstCaps *caps)
 	alp_camera_config_t cfg = ALP_CAMERA_CONFIG_DEFAULT(self->camera_id);
 	cfg.width               = (uint16_t)w;
 	cfg.height              = (uint16_t)h;
-	cfg.fps =
-	    (uint8_t)(GST_VIDEO_INFO_FPS_N(&self->info) / MAX(GST_VIDEO_INFO_FPS_D(&self->info), 1));
-	cfg.format = fmt == GST_VIDEO_FORMAT_GRAY16_LE ? ALP_PIXFMT_RAW10 : ALP_PIXFMT_GREY8;
+	/* nearest integer rate: 30000/1001 -> 30 */
+	guint fps_d = MAX(GST_VIDEO_INFO_FPS_D(&self->info), 1);
+	cfg.fps     = (uint8_t)((GST_VIDEO_INFO_FPS_N(&self->info) + fps_d / 2u) / fps_d);
+	cfg.format  = fmt == GST_VIDEO_FORMAT_GRAY16_LE ? ALP_PIXFMT_RAW10 : ALP_PIXFMT_GREY8;
 
 	self->cam = alp_camera_open(&cfg);
 	if (self->cam == NULL) {
@@ -140,7 +141,11 @@ static GstFlowReturn gst_alp_camera_src_create(GstPushSrc *psrc, GstBuffer **out
 		if (st == ALP_OK) break;
 		if (GST_BASE_SRC_IS_FLUSHING(psrc)) return GST_FLOW_FLUSHING;
 		/* TIMEOUT: poll again.  IO: the backend dropped a corrupt or short frame; ask again. */
-		if (st != ALP_ERR_TIMEOUT && st != ALP_ERR_IO) return GST_FLOW_ERROR;
+		if (st != ALP_ERR_TIMEOUT && st != ALP_ERR_IO) {
+			GST_ELEMENT_ERROR(
+			    self, RESOURCE, READ, ("camera capture failed"), ("alp status %d", (int)st));
+			return GST_FLOW_ERROR;
+		}
 	}
 
 	size_t need = (size_t)w * h * (g16 ? 2u : 1u);
@@ -238,6 +243,10 @@ static void gst_alp_camera_src_init(GstAlpCameraSrc *self)
 	gst_base_src_set_do_timestamp(GST_BASE_SRC(self), TRUE);
 }
 
+#ifndef ALP_PLUGIN_VERSION
+#define ALP_PLUGIN_VERSION "0.0.0"
+#endif
+
 static gboolean plugin_init(GstPlugin *plugin)
 {
 	GST_DEBUG_CATEGORY_INIT(alp_camera_src_debug, "alpcamerasrc", 0, "alpcamerasrc");
@@ -249,7 +258,7 @@ GST_PLUGIN_DEFINE(GST_VERSION_MAJOR,
                   alpcamera,
                   "Alp SDK camera source",
                   plugin_init,
-                  "1.0",
-                  "Apache-2.0",
+                  ALP_PLUGIN_VERSION,
+                  "Apache 2.0", /* GStreamer accepts only its fixed licence list */
                   "alp-sdk",
                   "https://github.com/alplabai/alp-sdk")

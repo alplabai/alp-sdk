@@ -24,6 +24,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 S = "${WORKDIR}/git/tools/gst-alpcamerasrc"
 
+EXTRA_OECMAKE = "-DALP_SDK_VERSION=${PV}"
+
 inherit cmake pkgconfig
 
 # A plugin module: the .so is the payload, not a dev symlink.

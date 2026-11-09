@@ -96,6 +96,29 @@ int main(void)
 	for (uint32_t i = 48u; i < sizeof(onv); ++i)
 		ALP_ASSERT_EQ_INT(onv[i], 128);
 
+	/* NV12 with padded strides: w=14 -> stride 16, UV plane beyond w*h (offset 80) */
+	{
+		uint8_t src[14 * 4], o[16 * 4 + 16 * 2 + 16];
+		for (uint32_t i = 0; i < sizeof(src); ++i)
+			src[i] = (uint8_t)(i + 1u);
+		memset(o, 0xAA, sizeof(o));
+		alp_gst_gray8_to_nv12(src, 14u, 4u, o, 16u, 80u, 16u);
+		for (uint32_t y = 0; y < 4u; ++y) {
+			for (uint32_t x = 0; x < 14u; ++x)
+				ALP_ASSERT_EQ_INT(o[y * 16 + x], src[y * 14 + x]);
+			for (uint32_t x = 14u; x < 16u; ++x)
+				ALP_ASSERT_EQ_INT(o[y * 16 + x], 0xAA);
+		}
+		for (uint32_t i = 64u; i < 80u; ++i) /* gap before the UV plane */
+			ALP_ASSERT_EQ_INT(o[i], 0xAA);
+		for (uint32_t y = 0; y < 2u; ++y) {
+			for (uint32_t x = 0; x < 14u; ++x)
+				ALP_ASSERT_EQ_INT(o[80 + y * 16 + x], 128);
+			for (uint32_t x = 14u; x < 16u; ++x)
+				ALP_ASSERT_EQ_INT(o[80 + y * 16 + x], 0xAA);
+		}
+	}
+
 	free(cr10);
 	printf("gst_alpcamerasrc_convert: GRAY8/GRAY16_LE/NV12 ok, neon=%d\n", CAM_CR10_HAVE_NEON);
 	ALP_TEST_SUMMARY();

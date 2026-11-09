@@ -317,7 +317,9 @@ emits `GRAY8`, `GRAY16_LE` (10-bit sample scaled to the full 16-bit range) or
 `NV12` (mono: Y = pixel, UV = 128) at the negotiated size and rate. The size
 must be one the sensor produces natively; with no caps filter it defaults to
 1456x1088 at 30 fps (the IMX296 mode). Mono and Bayer-as-mono only: there is no
-demosaic or ISP. Property `camera-id` (default `0`, `ALP_E1M_CAM0`).
+demosaic or ISP. The framerate is rounded to an integer and must be one the
+sensor mode supports (30000/1001 becomes 30); anything else fails
+`alp_camera_open` during caps negotiation. Property `camera-id` (default `0`, `ALP_E1M_CAM0`).
 
 ```
 gst-launch-1.0 alpcamerasrc ! video/x-raw,format=NV12,width=1456,height=1088,framerate=30/1 \
