@@ -1,0 +1,11 @@
+# Alp SDK camera module: Vision Components MIPI IMX568C (Sony IMX568 colour global-shutter, 2-lane CSI-2).
+# Mono vs colour is read from the module descriptor by the vc_mipi driver (kernel patch
+# 0036); the two ids exist so a product can name the part it fitted.  The 2-lane variant
+# matches X-EVK CAM0; the module also runs 4 lanes.
+schema_version: 1
+module_id:      vc_mipi_imx568c
+display_name:   "Vision Components MIPI IMX568C (Sony IMX568 colour global-shutter, 2-lane CSI-2)"
+chip:           imx568
+i2c_addr_7bit:  0x1A
+xclk_hz:        74250000
+lanes:          2

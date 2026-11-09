@@ -92,6 +92,7 @@ SRC_URI:append = " \
     file://0031-gpio-gd32-bridge-gate-IO15-IO26-on-protocol-minor-16.patch \
     file://0032-gpio-gd32-bridge-gate-can-stby-on-protocol-minor-13.patch \
     file://0033-watchdog-rzv2h_wdt-do-not-ping-the-WDT-after-it-is-s.patch \
+    file://0036-media-i2c-add-vision-components-mipi-csi-2-camera-module-driver.patch \
     file://uio.cfg \
     file://e1m-v2n-doorbell.dtsi \
     file://panic.cfg \
@@ -176,6 +177,12 @@ python () {
 # pixel rate from lanes and bit depth; on 2 lanes only the binned mode is
 # offered (the 12-bit full frame cannot fit the link at the default HMAX).
 # 4-lane behaviour is unchanged.
+#
+# 0036 (Vision Components MIPI modules, IMX568): the 6.1 tree has no driver for
+# the VC camera modules.  The patch adds the vendor's GPL-2.0 vc_mipi driver
+# (drivers/media/i2c/vc_mipi, CONFIG_VIDEO_VC_MIPI), imported from the NXP flavour
+# that targets 6.1, with a V4L2_CID_PIXEL_RATE control so rzg2l-csi2 can derive the
+# D-PHY rate.  A new driver: nothing else changes, so unconditional.
 #
 # 0030 (OV9282 v6.6 modes, #2618): replaces the 6.1 ov9282.c with the v6.6
 # one: 1280x800 and 640x400 modes next to the default 1280x720, Y8_1X8 next

@@ -90,7 +90,7 @@ A module only gets a fragment (and its sensor driver a line in
 `metadata/os/linux-kernel-drivers.yaml`: the driver is native, or the alp
 patch that adds it (or its lane count) exists in `linux-renesas/`. A module
 whose chip has no `drivers.linux` block is skipped silently; one skipped for
-a missing patch is reported by `gen_camera_dt.py`. All five modules qualify
+a missing patch is reported by `gen_camera_dt.py`. All seven modules qualify
 today:
 
 | `ALP_CAMERA_CAM0` | Sensor | Lanes | Bench |
@@ -100,6 +100,7 @@ today:
 | `raspberry_pi_camera_module_2` | IMX219 | 2 | BENCH-UNVERIFIED |
 | `raspberry_pi_camera_module_1` | OV5647 | 2 | BENCH-UNVERIFIED |
 | `innomaker_cam_imx335` | IMX335 2-lane (patch `0029`) | 2 | BENCH-UNVERIFIED |
+| `vc_mipi_imx568` / `vc_mipi_imx568c` | Vision Components IMX568 mono / colour (`vc,vc_mipi`, patch `0036`) | 2 | BENCH-UNVERIFIED |
 
 `clock-noncontinuous` (the OV9281 endpoint): the native 6.1 `ov9282.c`
 ignores it and always writes the gated MIPI clock (`0x4800 = 0x20`); the
@@ -173,10 +174,16 @@ needs your own node on the CAM0 I2C bus and a `csi20` endpoint.
 | IMX219 | `imx219` (in 6.1) | 2 | Bayer modes of the 6.1 driver | BENCH-UNVERIFIED (#1149) |
 | IMX296 (mono / colour) | `imx296` (v6.6 backport, patch 0028) | 1 | 1456x1088; `Y10_1X10` mono, `SBGGR10_1X10` colour | IMX296LQ (colour) bench-proven 2026-10-08 on E1M-V2M103 CAM0/J5 (generated fragment; 60.38 fps, zero CSI/CRU errors); colour / AWB is not tuned. No external trigger (XTRIG) in the driver: free-running only. No `sony,imx296.yaml` binding in 6.1, so `dtbs_check` does not validate the node |
 | IMX335 | `imx335` (6.1 + patch 0029) | 2 or 4 | 2 lanes: 1296x972 `SRGGB10_1X10`; 4 lanes: 2592x1940 `SRGGB12_1X12` and 1296x972 `SRGGB10_1X10` | BENCH-UNVERIFIED. With 2 lanes the 12-bit full frame does not fit the link at the default HMAX, so it is hidden |
+| IMX568 (Vision Components module, mono / colour) | `vc_mipi` (vendor GPL-2.0, patch 0036) | 2 (X-EVK CAM0); the module also runs 4 | RAW8, RAW10, RAW12 at 2464x2064, with and without 2x2 binning, as `Y8`/`Y10` (mono) or Bayer (colour); mono `Y12` has no receiver entry | BENCH-UNVERIFIED. Mono/colour, lane rate and modes are read from the module at probe. Sensor `0x1a` is the DT node; the module controller `0x10` is found by the driver. External trigger and strobe go through the driver's V4L2 controls ("Trigger Mode", "IO Mode", "Single Trigger") and need the module's trigger input wired. 2-lane RAW8 may exceed the receiver's 2128 Mbps cap (computed from the vendor mode table, not measured) |
 
 Devicetree each driver needs (all on the sensor's I2C node and its `port`
 endpoint; lane polarity goes on the `csi20` endpoint, see patch 0017):
 
+- **IMX568 (Vision Components)**: `compatible = "vc,vc_mipi"`, `reg = <0x1a>`,
+  endpoint `data-lanes = <1 2>`. No clock, supply or reset is read. The driver
+  exposes `V4L2_CID_PIXEL_RATE` (lane rate x lanes / bits per pixel) because
+  `rzg2l_csi2_calc_mbps()` derives the D-PHY rate from it alone; the lane rate
+  comes from the module descriptor.
 - **IMX296**: `compatible = "sony,imx296"` (or `sony,imx296ll` / `sony,imx296lq`
   to force mono / colour; plain `sony,imx296` auto-detects, which needs the settle delay patch 0028
   adds after leaving standby), `reg = <0x1a>`.
