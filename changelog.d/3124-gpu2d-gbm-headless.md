@@ -1,0 +1,3 @@
+### Fixed — gpu2d GLES backend now reaches the Mali GPU on headless V2N/V2M through a GBM display (#3124)
+
+`src/backends/gpu2d/yocto_gles.c` keeps `eglGetDisplay(EGL_DEFAULT_DISPLAY)` first; when that fails (the Wayland libmali needs a compositor, `eglInitialize` returns 0x3001) it retries with `eglGetPlatformDisplayEXT(EGL_PLATFORM_GBM_KHR, ...)` on `/dev/dri/renderD128`, else `/dev/dri/card0`, and logs the chosen display on stderr. The GBM display, gbm device and DRM fd are released at close and on every failure path. libgbm is linked only when `pkg-config gbm` is found (`ALP_SDK_GPU2D_GLES_GBM`); the recipe's `gles` PACKAGECONFIG now depends on `virtual/libgbm`. Without gbm the behaviour is unchanged.

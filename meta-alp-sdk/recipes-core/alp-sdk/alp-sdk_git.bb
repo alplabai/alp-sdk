@@ -287,9 +287,10 @@ PACKAGECONFIG:append = "${@' drpai' if ('rzv2n-family' in (d.getVar('MACHINEOVER
 #         the -native/-nativesdk variants (BBCLASSEXTEND below) off the GPU stack.
 #         BENCH-UNVERIFIED.
 #         Runtime: the Mali `wayland` userspace variant needs weston running
-#         (IMAGE_FEATURES += "alp-display"); without it open() degrades to the
-#         CPU path.
-PACKAGECONFIG[gles]     = "-DALP_SDK_USE_GPU2D_GLES=ON -DALP_SDK_GPU2D_GLES_REQUIRED=ON,-DALP_SDK_USE_GPU2D_GLES=OFF,virtual/libgles2 virtual/egl,libegl libgles2"
+#         (IMAGE_FEATURES += "alp-display"); without it open() retries on a GBM
+#         display over the DRM node (libgbm, virtual/libgbm = mali-library on
+#         mali-family) and only then degrades to the CPU path.
+PACKAGECONFIG[gles]     = "-DALP_SDK_USE_GPU2D_GLES=ON -DALP_SDK_GPU2D_GLES_REQUIRED=ON,-DALP_SDK_USE_GPU2D_GLES=OFF,virtual/libgles2 virtual/egl virtual/libgbm,libegl libgles2 libgbm"
 ALP_ENABLE_GPU2D_GLES ?= "1"
 PACKAGECONFIG:append:class-target = "${@' gles' if ('mali-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and 'opengles' in (d.getVar('DISTRO_FEATURES') or '').split() and d.getVar('ALP_ENABLE_GPU2D_GLES') == '1') else ''}"
 

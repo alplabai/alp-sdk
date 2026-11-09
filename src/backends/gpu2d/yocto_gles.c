@@ -39,13 +39,18 @@
  *
  * Context: a 1x1 pbuffer on EGL_DEFAULT_DISPLAY.  On the Renesas default
  * Mali `wayland` userspace variant that needs a running Wayland compositor
- * (alp-display / weston); without one open() degrades to the CPU path.
+ * (alp-display / weston).  Headless, when libgbm is present (compiled in
+ * with ALP_SDK_GPU2D_GLES_GBM), the backend retries on a GBM platform
+ * display over /dev/dri/renderD128 or card0 and logs which display it took;
+ * without either, open() degrades to the CPU path.
  * Each op makes the context current on the calling thread under a backend
  * mutex, so ops may come from different threads, and then puts back whatever
  * EGL display/context/surface/API the caller had current: an application with
  * its own EGL/GLES rendering is not disturbed.  The default display is shared
  * by the whole process, so close() never calls eglTerminate() on it (the one
- * eglInitialize() reference taken at open is kept until process exit).
+ * eglInitialize() reference taken at open is kept until process exit); a GBM
+ * display is private to the handle, so close() terminates it and releases
+ * the gbm device and DRM fd.
  *
  * Observability: the handle counts ops that ran on the GPU and ops that fell
  * back after a GL error.  The first GL-error fallback logs one line to
@@ -69,9 +74,17 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
+
+#if defined(ALP_SDK_GPU2D_GLES_GBM)
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <gbm.h>
+#endif
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
@@ -90,9 +103,13 @@
 #endif
 
 typedef struct {
-	EGLDisplay      dpy;
-	EGLContext      ctx;
-	EGLSurface      surf;
+	EGLDisplay dpy;
+	EGLContext ctx;
+	EGLSurface surf;
+#if defined(ALP_SDK_GPU2D_GLES_GBM)
+	struct gbm_device *gbm; /* non-NULL: dpy is our own GBM display */
+	int                gbm_fd;
+#endif
 	GLuint          prog;
 	GLuint          fbo;
 	GLuint          tex_src;
@@ -185,24 +202,93 @@ static void _teardown(gles_state_t *g)
 		if (g->surf != EGL_NO_SURFACE) {
 			eglDestroySurface(g->dpy, g->surf);
 		}
-		/* No eglTerminate(): the default display is process-wide. */
+		/* No eglTerminate() on the default display: it is process-wide. */
+#if defined(ALP_SDK_GPU2D_GLES_GBM)
+		if (g->gbm != NULL) {
+			eglTerminate(g->dpy); /* the GBM display is ours alone */
+		}
+#endif
 	}
+#if defined(ALP_SDK_GPU2D_GLES_GBM)
+	if (g->gbm != NULL) {
+		gbm_device_destroy(g->gbm);
+		g->gbm = NULL;
+	}
+	if (g->gbm_fd >= 0) {
+		close(g->gbm_fd);
+		g->gbm_fd = -1;
+	}
+#endif
 	g->dpy  = EGL_NO_DISPLAY;
 	g->ctx  = EGL_NO_CONTEXT;
 	g->surf = EGL_NO_SURFACE;
 }
+
+#if defined(ALP_SDK_GPU2D_GLES_GBM)
+#ifndef EGL_PLATFORM_GBM_KHR
+#define EGL_PLATFORM_GBM_KHR 0x31D7
+#endif
+
+/* Headless fallback: the default (Wayland) display needs a compositor, a GBM
+ * display on the DRM node does not.  renderD128 first (no master needed),
+ * then card0.  On failure nothing is left open. */
+static bool _gbm_display(gles_state_t *g)
+{
+	const char *ext = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
+	if (ext == NULL || (strstr(ext, "EGL_KHR_platform_gbm") == NULL &&
+	                    strstr(ext, "EGL_MESA_platform_gbm") == NULL)) {
+		return false;
+	}
+	typedef EGLDisplay (*get_plat_dpy_fn)(EGLenum, void *, const EGLint *);
+	get_plat_dpy_fn get_plat = (get_plat_dpy_fn)eglGetProcAddress("eglGetPlatformDisplayEXT");
+	if (get_plat == NULL) {
+		return false;
+	}
+	static const char *const nodes[] = { "/dev/dri/renderD128", "/dev/dri/card0" };
+	for (size_t i = 0; i < sizeof(nodes) / sizeof(nodes[0]); i++) {
+		g->gbm_fd = open(nodes[i], O_RDWR | O_CLOEXEC);
+		if (g->gbm_fd < 0) {
+			continue;
+		}
+		g->gbm = gbm_create_device(g->gbm_fd);
+		if (g->gbm != NULL) {
+			g->dpy = get_plat(EGL_PLATFORM_GBM_KHR, g->gbm, NULL);
+			EGLint maj, min;
+			if (g->dpy != EGL_NO_DISPLAY && eglInitialize(g->dpy, &maj, &min) == EGL_TRUE) {
+				fprintf(stderr, "[gpu2d/gles] EGL display: GBM on %s\n", nodes[i]);
+				return true;
+			}
+			g->dpy = EGL_NO_DISPLAY;
+			gbm_device_destroy(g->gbm);
+			g->gbm = NULL;
+		}
+		close(g->gbm_fd);
+		g->gbm_fd = -1;
+	}
+	return false;
+}
+#endif
 
 /* Create the context + program once.  Returns true with the context
  * released from this thread; false leaves nothing allocated. */
 static bool _init_inner(gles_state_t *g)
 {
 	*g = (gles_state_t){ .dpy = EGL_NO_DISPLAY, .ctx = EGL_NO_CONTEXT, .surf = EGL_NO_SURFACE };
+#if defined(ALP_SDK_GPU2D_GLES_GBM)
+	g->gbm_fd = -1;
+#endif
 
 	g->dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 	EGLint maj, min;
 	if (g->dpy == EGL_NO_DISPLAY || eglInitialize(g->dpy, &maj, &min) != EGL_TRUE) {
 		g->dpy = EGL_NO_DISPLAY;
+#if defined(ALP_SDK_GPU2D_GLES_GBM)
+		if (!_gbm_display(g)) {
+			return false;
+		}
+#else
 		return false;
+#endif
 	}
 	if (eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) {
 		goto fail;
