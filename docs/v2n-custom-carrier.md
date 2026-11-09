@@ -133,14 +133,16 @@ Two ways to deal with that:
 Layer parse and image build run on the build host; boot on a carrier needs
 the carrier. Coverage: `bitbake -p` and the dtb compile; `example-product-image
 -c rootfs` for `e1m-v2n101-a55` (RC=0); `linux-renesas -c compile` and
-`example-product-image -c rootfs` for `e1m-v2m103-a55` (see below). Not booted.
+`example-product-image -c rootfs` for `e1m-v2m103-a55` (RC=0). Not booted.
 
 ## Caveats
 
 - No Vulkan: the Mali stack ships GLES / EGL only
   ([v2n-mali-gpu.md](v2n-mali-gpu.md)).
-- No hardware-accelerated ffmpeg: hardware codecs are reached through
-  GStreamer OMX (`commercial_gstreamer1.0-omx`); anything that goes through
+- No hardware-accelerated ffmpeg: the hardware H.264/H.265 codec is reached
+  only through GStreamer OMX (`gstreamer1.0-omx`, flag
+  `commercial_gstreamer1.0-omx`), which the opt-in multimedia packagegroup
+  adds ([v2n-multimedia.md](v2n-multimedia.md)). Anything that goes through
   ffmpeg runs on the CPU.
 
 ## Brcmfmac board name
