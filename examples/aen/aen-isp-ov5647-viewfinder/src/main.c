@@ -47,9 +47,14 @@
  * still the bottleneck.
  *
  * FPS: this app pins cfg.fps = 10 explicitly. The backend honors cfg.fps
- * (issue #2276), so leaving it unset would pass ALP_CAMERA_CONFIG_DEFAULT's
- * 30 fps through to the sensor instead of the 10 fps described above)
- * -- it has never been re-benched at 30 fps, and 10 fps buys two things
+ * (issue #2276); ALP_CAMERA_CONFIG_DEFAULT's fps is 0 ("let the backend
+ * pick its own default", issue #2278), and this backend's own default
+ * happens to also be 10 (alif_isp_pico.c's camera_apply_fps() call) --
+ * but that is an internal implementation detail this app does not want
+ * to depend on silently matching. Pinning 10 here explicitly, rather
+ * than leaving cfg.fps at 0 and hoping the backend default stays 10,
+ * keeps this app correct even if that backend default ever changes --
+ * it has never been benched at any OTHER rate, and 10 fps buys two things
  * this app still needs at that rate: (1) CPU conversion headroom, since
  * the ~100 ms 10 fps frame period is what let the fix above keep two
  * buffers queued to the ISP MI while the third converts (a 30 fps ~33 ms
@@ -118,9 +123,10 @@ int main(void)
 	cfg.format              = ALP_PIXFMT_RGB565;
 	/* Pin 10 fps explicitly -- see the file header's FPS note.  This app's
 	 * CPU YUV->RGB565 conversion and dim-scene AE headroom are only
-	 * bench-proven at 10 fps (runs 147/154); ALP_CAMERA_CONFIG_DEFAULT's
-	 * fps is 30, which the backend now honors (issue #2276), and this app
-	 * has not been benched at 30. */
+	 * bench-proven at 10 fps (runs 147/154); the backend honors cfg.fps
+	 * (issue #2276) and ALP_CAMERA_CONFIG_DEFAULT's fps is 0 (issue
+	 * #2278), so an unset cfg.fps here would ride whatever default this
+	 * backend picks rather than the rate this app is actually proven at. */
 	cfg.fps = 10;
 
 	/* --- 1. open -------------------------------------------------- */
