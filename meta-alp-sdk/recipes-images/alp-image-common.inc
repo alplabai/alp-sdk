@@ -184,6 +184,8 @@ TOOLCHAIN_TARGET_TASK:append = " ${ALP_RZ_DRPAI_SDK_TASK} ${ALP_RZ_CODECS_SDK_TA
 FEATURE_PACKAGES_alp-camera  = "packagegroup-alp-camera"
 FEATURE_PACKAGES_alp-display = "packagegroup-alp-display"
 FEATURE_PACKAGES_alp-ros     = "packagegroup-alp-ros"
+# Opt-in, in NO shipped image: commercial-flagged codecs (docs/v2n-multimedia.md).
+FEATURE_PACKAGES_alp-multimedia = "packagegroup-alp-multimedia"
 
 # ROS 2 opt-in switch.  `alp-ros` (requested by alp-image-edge, or by a
 # customer image via IMAGE_FEATURES += "alp-ros") only takes effect when
