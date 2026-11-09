@@ -12,14 +12,11 @@ Compare the same demo across SoMs to see what the
 actually buying you at runtime:
 
 - **E1M-AEN801** (E8 silicon) has GPU2D + DAVE2D + DMA2D
-  (`metadata/socs/alif/ensemble/e8.json`).  The
-  §D.lib.loader emits `CONFIG_ALP_LVGL_GPU2D=y` +
-  `CONFIG_ALP_LVGL_DMA2D=y`, and LVGL hardware-accelerates the
-  blits.
+  (`metadata/socs/alif/ensemble/e8.json`).  LVGL
+  hardware-acceleration of the blits is not wired in the SDK yet.
 - **E1M-AEN301** is E3 silicon -- DMA2D only, no GPU2D
-  (`metadata/socs/alif/ensemble/e3.json`).  Loader emits
-  `CONFIG_ALP_LVGL_DMA2D=y` only; blits fall back to CPU.  FPS
-  drop is the visible measure of "what does GPU2D buy me".
+  (`metadata/socs/alif/ensemble/e3.json`).  Blits run on
+  the CPU.
 - **native_sim/native/64** binds Zephyr's dummy display driver
   through the portable `<alp/display.h>` + `<alp/gui.h>` surfaces
   (no SDL2 window) -- the CPU-only baseline.

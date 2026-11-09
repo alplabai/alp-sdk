@@ -51,14 +51,7 @@ integration:
     hw_backends:
       class: networking
       upstream_source: "warmcat/libwebsockets"
-      accelerators:
-        - class: crypto
-          priority:
-            - { backend: mbedtls, kconfig: CONFIG_ALP_LWS_MBEDTLS=y }
-            - { backend: bearssl, kconfig: CONFIG_ALP_LWS_BEARSSL=y }
-        - class: dma
-          priority:
-            - { backend: tcp_dma, kconfig: CONFIG_ALP_LWS_TCP_DMA=y }
+      accelerators: []
       sw_fallback:
         required: true
         kconfig: CONFIG_ALP_LWS_NO_TLS=y

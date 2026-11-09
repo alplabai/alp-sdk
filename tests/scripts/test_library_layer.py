@@ -1195,8 +1195,6 @@ def test_declaration_form_does_not_change_emitted_kconfig(tmp_path: Path) -> Non
     # project-wide form, so a future regression names exactly what broke.
     for symbol in (
         "CONFIG_ALP_CMSIS_DSP_SCALAR=y",
-        "CONFIG_ALP_CMSIS_DSP_HELIUM=y",
-        "CONFIG_ALP_CMSIS_DSP_ADC_DMA=y",
     ):
         assert symbol in bare_lines, f"missing {symbol} from project-wide form"
 

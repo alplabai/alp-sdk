@@ -99,8 +99,8 @@ CASES = [
     # `integration.zephyr.hw_backends` manifest section, which is exactly
     # why the project-wide/core-scoped Kconfig-widening bug shipped
     # invisibly through this gate. `coap-client-get` declares `libraries:
-    # [coap]` project-wide and `coap.yaml` carries an `hw_backends` matcher,
-    # so this pins `CONFIG_ALP_COAP_NO_TLS=y` / `CONFIG_ALP_COAP_MBEDTLS=y`
+    # [coap]` project-wide and `coap.yaml` carries an `hw_backends` block,
+    # so this pins `CONFIG_ALP_COAP_NO_TLS=y`
     # staying in the build-plan's rendered alp.conf for THIS declaration
     # form specifically.
     ("coap-client-get.build-plan",  ORCH, "examples/connectivity/coap-client-get/board.yaml",   "build-plan"),

@@ -92,10 +92,8 @@ Without the module (the `#else` fallback in `src/main.c`):
 
 Swap the storage medium behind the `storage_partition` DTS label:
 
-| SoM family | Storage medium                    | HW-accelerated Kconfig knob   |
+| SoM family | Storage medium                    | Kconfig knob                  |
 |------------|------------------------------------|-------------------------------|
-| E1M-AEN    | Alif on-die MRAM over xSPI DMA    | `CONFIG_ALP_LITTLEFS_XSPI_DMA` |
-| E1M-V2N(-M1) | eMMC over DMA                   | `CONFIG_ALP_LITTLEFS_EMMC_DMA` |
 | any        | Sync I/O (this example's default) | `CONFIG_ALP_LITTLEFS_SYNC_IO` |
 
 No change to `src/main.c` is required -- only the board's DTS

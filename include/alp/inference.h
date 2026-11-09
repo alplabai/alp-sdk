@@ -78,14 +78,12 @@ extern "C" {
  *
  *  The `ETHOS_U` token is a single customer-facing handle that
  *  covers every Arm Ethos NPU variant the SDK targets:
- *  - Ethos-U85 on Alif Ensemble E4 / E6 / E8 (Transformer-capable;
- *    the loader picks this first on those SKUs via the
- *    `CONFIG_ALP_TFLM_ETHOS_U85=y` per-NPU driver gate).
- *  - Ethos-U55 on every Alif Ensemble SKU (two per SoC;
- *    `CONFIG_ALP_TFLM_ETHOS_U55=y`).
+ *  - Ethos-U85 on Alif Ensemble E4 / E6 / E8 (Transformer-capable).
+ *  - Ethos-U55 on every Alif Ensemble SKU (two per SoC).
  *  Customers don't have to know which variant the silicon carries;
  *  Vela picks at model-compile time and the runtime dispatches via
- *  the matching driver shim emitted by `scripts/alp_project.py`. */
+ *  the matching driver shim, picked from the SoM's capabilities
+ *  (`CONFIG_ALP_SDK_INFERENCE_*`). */
 typedef enum {
 	ALP_INFERENCE_BACKEND_AUTO    = 0, /**< Whichever backend loads cfg->format on this SoM
 					 *   (a DRP-AI model goes to DRP-AI, a DXNN model to

@@ -24,9 +24,7 @@ cores:
     os: "off"
   m55_hp:
     app: ./src
-    # LVGL pulls in via the standard Tier 1 library knob.  The
-    # §D.lib.loader cross-references AEN's `capabilities:` block and
-    # emits CONFIG_ALP_LVGL_DMA2D=y on E*-series.
+    # LVGL pulls in via the standard Tier 1 library knob.
     # SPI for the display + GPIO for the D/C# + reset pins.  The
     # board devicetree binds these to Zephyr's MIPI DBI Type C
     # controller and the ST7789 display driver; the app stays on LVGL.
