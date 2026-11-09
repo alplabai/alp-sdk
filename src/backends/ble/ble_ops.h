@@ -34,6 +34,10 @@ typedef struct alp_ble_conn_state {
 	struct alp_ble      *radio; /* back-ref to owning radio handle */
 	void                *be_data;
 	const alp_ble_ops_t *ops;
+	/** Set by the dispatcher when disconnect() starts
+	 *  (alp_handle_mark_closing()); a blocked gatt_read()/gatt_write() must
+	 *  observe it and return ALP_ERR_NOT_READY. */
+	bool closing;
 } alp_ble_conn_state_t;
 
 struct alp_ble_ops {
@@ -61,6 +65,12 @@ struct alp_ble_ops {
 	void (*close)(alp_ble_radio_state_t *state);
 
 	/* Conn-side ops */
+	/** Wake a gatt_read()/gatt_write() blocked in the backend.  Called by
+	 *  disconnect() after @c conn_state->closing is set and before the
+	 *  in-flight ops are drained; it only wakes waiters (the woken call
+	 *  returns ALP_ERR_NOT_READY).  May be NULL when the backend
+	 *  re-checks @c closing between short waits instead. */
+	void (*conn_cancel)(alp_ble_conn_state_t *conn_state);
 	alp_status_t (*disconnect)(alp_ble_conn_state_t *conn_state);
 	alp_status_t (*gatt_read)(alp_ble_conn_state_t *conn_state,
 	                          alp_ble_attr_handle_t handle,

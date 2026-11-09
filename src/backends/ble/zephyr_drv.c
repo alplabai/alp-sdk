@@ -57,6 +57,7 @@
 
 #include "alp_errno.h"
 #include "alp_slot_claim.h"
+#include "alp_sliced_wait.h"
 #include "ble_ops.h"
 
 #if defined(CONFIG_ALP_SDK_BLE)
@@ -1037,7 +1038,18 @@ static alp_status_t z_gatt_read(alp_ble_conn_state_t *conn_st,
 		return errno_to_alp(err);
 	}
 
-	if (k_sem_take(&ctx->done, K_MSEC(timeout_ms)) == 0) {
+	/* Wait in slices so a concurrent disconnect() can cancel the wait (see
+	 * alp_sliced_wait.h); a cancelled wait is abandoned exactly like an
+	 * expired one below. */
+	int      took = 0;
+	uint32_t slice;
+	bool     cancelled = ALP_SLICED_WAIT(&conn_st->closing,
+	                                     timeout_ms,
+	                                     slice,
+	                                     took,
+	                                     k_sem_take(&ctx->done, K_MSEC(slice)),
+	                                     took == -EAGAIN);
+	if (!cancelled && took == 0) {
 		/* Read the result BEFORE releasing the slot -- once released it
 		 * can be claimed and overwritten by another thread. */
 		alp_status_t rc = ctx->result;
@@ -1052,7 +1064,7 @@ static alp_status_t z_gatt_read(alp_ble_conn_state_t *conn_st,
 	 * Waiting that out is what keeps this frame alive underneath it, and
 	 * the wait is bounded: the callback body blocks on nothing. */
 	if (alp_lifecycle_cas(&ctx->state, BLE_PROC_LIVE, BLE_PROC_ABANDONED)) {
-		return ALP_ERR_TIMEOUT;
+		return cancelled ? ALP_ERR_NOT_READY : ALP_ERR_TIMEOUT;
 	}
 	(void)k_sem_take(&ctx->done, K_FOREVER);
 	alp_status_t rc = ctx->result;
@@ -1115,7 +1127,15 @@ static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
 		return errno_to_alp(err);
 	}
 
-	if (k_sem_take(&ctx->done, K_MSEC(timeout_ms)) == 0) {
+	int      took = 0;
+	uint32_t slice;
+	bool     cancelled = ALP_SLICED_WAIT(&conn_st->closing,
+	                                     timeout_ms,
+	                                     slice,
+	                                     took,
+	                                     k_sem_take(&ctx->done, K_MSEC(slice)),
+	                                     took == -EAGAIN);
+	if (!cancelled && took == 0) {
 		alp_status_t rc = ctx->result;
 		_write_ctx_free(ctx);
 		return rc;
@@ -1123,7 +1143,7 @@ static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
 
 	/* Timeout handoff, identical to z_gatt_read()'s above. */
 	if (alp_lifecycle_cas(&ctx->state, BLE_PROC_LIVE, BLE_PROC_ABANDONED)) {
-		return ALP_ERR_TIMEOUT;
+		return cancelled ? ALP_ERR_NOT_READY : ALP_ERR_TIMEOUT;
 	}
 	(void)k_sem_take(&ctx->done, K_FOREVER);
 	alp_status_t rc = ctx->result;

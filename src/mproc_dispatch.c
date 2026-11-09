@@ -344,12 +344,18 @@ alp_status_t alp_hwsem_unlock(alp_hwsem_t *sem)
 void alp_hwsem_close(alp_hwsem_t *sem)
 {
 	if (sem == NULL) return;
-	/* Sleep-poll drain (issue #629): this pool counts alp_hwsem_lock(),
-	 * which can block up to its caller's timeout_ms, so
-	 * alp_handle_begin_close_blocking() sleeps between polls instead of
-	 * busy-spinning -- see src/common/alp_slot_claim.c/.h. Idempotent: a
-	 * second/never-opened close no-ops. */
-	if (!alp_handle_begin_close_blocking(&sem->lifecycle, &sem->active_ops)) return;
+	/* Cancel, then sleep-poll drain (issue #629): this pool counts
+	 * alp_hwsem_lock(), which can block up to its caller's timeout_ms.
+	 * Mark the handle closing, wake the blocked lock (it returns
+	 * ALP_ERR_NOT_READY), then wait for it to leave -- the drain sleeps
+	 * between polls instead of busy-spinning, see
+	 * src/common/alp_slot_claim.c/.h. Idempotent: a second/never-opened
+	 * close no-ops. */
+	if (!alp_handle_mark_closing(&sem->lifecycle, &sem->state.closing)) return;
+	if (sem->state.ops != NULL && sem->state.ops->hwsem_cancel != NULL) {
+		sem->state.ops->hwsem_cancel(&sem->state);
+	}
+	alp_handle_drain_blocking(&sem->active_ops);
 	if (sem->state.ops != NULL && sem->state.ops->hwsem_close != NULL) {
 		sem->state.ops->hwsem_close(&sem->state);
 	}

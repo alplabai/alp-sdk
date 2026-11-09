@@ -199,9 +199,14 @@ alp_status_t alp_camera_stop(alp_camera_t *c);
  * @param[in]  timeout_ms  Max wait in milliseconds; UINT32_MAX for
  *                         "wait indefinitely".
  *
+ * @note A concurrent @ref alp_camera_close wakes a blocked call, which
+ *       returns ALP_ERR_NOT_READY; close() then completes without waiting
+ *       out @p timeout_ms.
+ *
  * @return ALP_OK / ALP_ERR_INVAL (NULL out or handle) /
- *         ALP_ERR_NOT_READY (stream not started) / ALP_ERR_TIMEOUT /
- *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
+ *         ALP_ERR_NOT_READY (stream not started, or the handle was closed
+ *         while waiting) / ALP_ERR_TIMEOUT / ALP_ERR_NOSUPPORT /
+ *         ALP_ERR_IO.
  */
 alp_status_t alp_camera_capture(alp_camera_t *c, alp_camera_frame_t *out, uint32_t timeout_ms);
 

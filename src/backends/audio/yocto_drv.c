@@ -59,6 +59,9 @@
 #if defined(__linux__)
 
 #include <errno.h>
+#include <poll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -94,7 +97,37 @@ typedef struct {
 	alp_audio_format_t format;
 	uint8_t           *scratch;        /* out-only; NULL for in (capture) handles */
 	uint16_t           scratch_frames; /* capacity of `scratch`, in frames */
+	/* eventfd a concurrent close() writes to wake a blocked read/write;
+	 * polled alongside the PCM descriptors and never read, so it stays
+	 * readable for an op that starts after the cancel. */
+	int cancel_fd;
 } y_audio_data_t;
+
+/** @brief Allocate the per-handle box together with its cancel eventfd. */
+static y_audio_data_t *y_data_new(void)
+{
+	y_audio_data_t *d = (y_audio_data_t *)calloc(1, sizeof(*d));
+	if (d == NULL) return NULL;
+	d->cancel_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+	if (d->cancel_fd < 0) {
+		free(d);
+		return NULL;
+	}
+	return d;
+}
+
+static void y_data_free(y_audio_data_t *d)
+{
+	close(d->cancel_fd);
+	free(d);
+}
+
+/** @brief Wake a read/write blocked in y_pcm_wait() (see y_data_new). */
+static void y_data_cancel(const y_audio_data_t *d)
+{
+	uint64_t one = 1;
+	(void)!write(d->cancel_fd, &one, sizeof(one));
+}
 
 /* ------------------------------------------------------------------ */
 /* Helpers (vendor-API bodies preserved verbatim from audio_yocto.c)   */
@@ -178,6 +211,40 @@ static int y_remaining_wait_ms(int call_budget_ms, uint64_t call_start_ms)
 	uint64_t elapsed = y_monotonic_ms() - call_start_ms;
 	if (elapsed >= (uint64_t)call_budget_ms) return 0;
 	return (int)((uint64_t)call_budget_ms - elapsed);
+}
+
+/* Wait for the PCM to become ready, like snd_pcm_wait(), but also wake on
+ * the handle's cancel eventfd.  Returns 1 = ready, 0 = timeout,
+ * -ECANCELED = close() cancelled the wait, other negative = errno.
+ * POLLERR is reported as ready so the following readi/writei sees the
+ * xrun and the existing snd_pcm_recover() path handles it. */
+#define Y_MAX_PCM_FDS 8
+
+static int y_pcm_wait(void *ctx, snd_pcm_t *pcm, int timeout_ms)
+{
+	const y_audio_data_t *d = (const y_audio_data_t *)ctx;
+	struct pollfd         pfd[Y_MAX_PCM_FDS + 1];
+	int                   n = snd_pcm_poll_descriptors_count(pcm);
+	if (n <= 0) return n < 0 ? n : -EIO;
+	if (n > Y_MAX_PCM_FDS) return -EIO;
+	n = snd_pcm_poll_descriptors(pcm, pfd, (unsigned)n);
+	if (n < 0) return n;
+	pfd[n] = (struct pollfd){ .fd = d->cancel_fd, .events = POLLIN };
+
+	uint64_t start_ms = y_monotonic_ms();
+	for (;;) {
+		int pr = poll(pfd, (nfds_t)n + 1u, y_remaining_wait_ms(timeout_ms, start_ms));
+		if (pr < 0) {
+			if (errno == EINTR) continue;
+			return -errno;
+		}
+		if (pr == 0) return 0;
+		if ((pfd[n].revents & POLLIN) != 0) return -ECANCELED;
+		unsigned short revents = 0;
+		int            rc      = snd_pcm_poll_descriptors_revents(pcm, pfd, (unsigned)n, &revents);
+		if (rc < 0) return rc;
+		if ((revents & (POLLIN | POLLOUT | POLLERR | POLLNVAL)) != 0) return 1;
+	}
 }
 
 /** @brief Per-channel byte width for an alp_audio_format_t (0 = invalid). */
@@ -351,19 +418,19 @@ static alp_status_t y_in_open(const alp_audio_config_t     *cfg,
 	int  n = resolve_device_name(cfg->peripheral_id, dev, sizeof(dev));
 	if (n < 0 || (size_t)n >= sizeof(dev)) return ALP_ERR_INVAL;
 
-	y_audio_data_t *d = (y_audio_data_t *)calloc(1, sizeof(*d));
+	y_audio_data_t *d = y_data_new();
 	if (d == NULL) return ALP_ERR_NOMEM;
 
 	int rc = snd_pcm_open(&d->pcm, dev, SND_PCM_STREAM_CAPTURE, 0);
 	if (rc < 0) {
-		free(d);
+		y_data_free(d);
 		return alsa_to_alp(rc);
 	}
 
 	alp_status_t s = configure_pcm(d->pcm, cfg);
 	if (s != ALP_OK) {
 		(void)snd_pcm_close(d->pcm);
-		free(d);
+		y_data_free(d);
 		return s;
 	}
 
@@ -431,7 +498,8 @@ static alp_status_t y_in_read(alp_audio_in_backend_state_t *state,
      * 0 through; ALSA treats 0 as immediate return.  UINT32_MAX means
      * "block forever" (-1); anything else is clamped, never truncated
      * into a negative value -- see alp_yocto_alsa_wait_arg. */
-	int rc = snd_pcm_wait(d->pcm, alp_yocto_alsa_wait_arg(timeout_ms));
+	int rc = y_pcm_wait(d, d->pcm, alp_yocto_alsa_wait_arg(timeout_ms));
+	if (rc == -ECANCELED) return ALP_ERR_NOT_READY; /* close() woke this read */
 	if (rc == 0) return ALP_ERR_TIMEOUT;
 	if (rc < 0) return alsa_to_alp(rc);
 
@@ -447,6 +515,12 @@ static alp_status_t y_in_read(alp_audio_in_backend_state_t *state,
 	return ALP_OK;
 }
 
+/** @brief close() hook: wake a read blocked in y_pcm_wait(). */
+static void y_in_cancel(alp_audio_in_backend_state_t *state)
+{
+	if (state->be_data != NULL) y_data_cancel((const y_audio_data_t *)state->be_data);
+}
+
 /** @brief Drop, close the capture PCM, and free the per-handle box. */
 static void y_in_close(alp_audio_in_backend_state_t *state)
 {
@@ -457,7 +531,7 @@ static void y_in_close(alp_audio_in_backend_state_t *state)
 		(void)snd_pcm_close(d->pcm);
 		d->pcm = NULL;
 	}
-	free(d);
+	y_data_free(d);
 	state->be_data = NULL;
 }
 
@@ -484,19 +558,19 @@ static alp_status_t y_out_open(const alp_audio_config_t      *cfg,
 	int  n = resolve_device_name(cfg->peripheral_id, dev, sizeof(dev));
 	if (n < 0 || (size_t)n >= sizeof(dev)) return ALP_ERR_INVAL;
 
-	y_audio_data_t *d = (y_audio_data_t *)calloc(1, sizeof(*d));
+	y_audio_data_t *d = y_data_new();
 	if (d == NULL) return ALP_ERR_NOMEM;
 
 	int rc = snd_pcm_open(&d->pcm, dev, SND_PCM_STREAM_PLAYBACK, 0);
 	if (rc < 0) {
-		free(d);
+		y_data_free(d);
 		return alsa_to_alp(rc);
 	}
 
 	alp_status_t s = configure_pcm(d->pcm, cfg);
 	if (s != ALP_OK) {
 		(void)snd_pcm_close(d->pcm);
-		free(d);
+		y_data_free(d);
 		return s;
 	}
 
@@ -519,13 +593,13 @@ static alp_status_t y_out_open(const alp_audio_config_t      *cfg,
 	if (!y_checked_total_bytes(
 	        cfg->frames_per_block, d->channels, d->sample_bytes, &scratch_bytes)) {
 		(void)snd_pcm_close(d->pcm);
-		free(d);
+		y_data_free(d);
 		return ALP_ERR_INVAL;
 	}
 	d->scratch = (uint8_t *)malloc(scratch_bytes);
 	if (d->scratch == NULL) {
 		(void)snd_pcm_close(d->pcm);
-		free(d);
+		y_data_free(d);
 		return ALP_ERR_NOMEM;
 	}
 	d->scratch_frames = cfg->frames_per_block;
@@ -585,7 +659,7 @@ static void apply_software_volume(alp_audio_format_t format,
 /* Low-level ALSA entry points the write core drives, indirected so
  * hermetic tests can swap in an in-memory fake PCM (no real ALSA
  * device needed) while production always binds the real functions. */
-typedef int (*y_alsa_wait_fn)(snd_pcm_t *pcm, int timeout_ms);
+typedef int (*y_alsa_wait_fn)(void *ctx, snd_pcm_t *pcm, int timeout_ms);
 typedef snd_pcm_sframes_t (*y_alsa_writei_fn)(snd_pcm_t        *pcm,
                                               const void       *buf,
                                               snd_pcm_uframes_t frames);
@@ -606,7 +680,8 @@ alp_status_t alp_yocto_alsa_out_write_core(snd_pcm_t         *pcm,
                                            size_t            *out_frames,
                                            uint32_t           timeout_ms,
                                            y_alsa_wait_fn     wait_fn,
-                                           y_alsa_writei_fn   writei_fn);
+                                           y_alsa_writei_fn   writei_fn,
+                                           void              *wait_ctx);
 
 /**
  * @brief Allocation-free chunked write core (#632).
@@ -653,7 +728,8 @@ alp_status_t alp_yocto_alsa_out_write_core(snd_pcm_t         *pcm,
                                            size_t            *out_frames,
                                            uint32_t           timeout_ms,
                                            y_alsa_wait_fn     wait_fn,
-                                           y_alsa_writei_fn   writei_fn)
+                                           y_alsa_writei_fn   writei_fn,
+                                           void              *wait_ctx)
 {
 	if (out_frames != NULL) *out_frames = 0;
 	if (buf == NULL && frames > 0) return ALP_ERR_INVAL;
@@ -682,7 +758,11 @@ alp_status_t alp_yocto_alsa_out_write_core(snd_pcm_t         *pcm,
 		if (scale && chunk > scratch_frames) chunk = scratch_frames;
 
 		int wait_ms = y_remaining_wait_ms(budget_ms, start_ms);
-		int rc      = wait_fn(pcm, wait_ms);
+		int rc      = wait_fn(wait_ctx, pcm, wait_ms);
+		if (rc == -ECANCELED) {
+			if (out_frames != NULL) *out_frames = frames_done;
+			return ALP_ERR_NOT_READY; /* close() woke this write */
+		}
 		if (rc == 0) {
 			if (out_frames != NULL) *out_frames = frames_done;
 			return (frames_done > 0) ? ALP_OK : ALP_ERR_TIMEOUT;
@@ -740,8 +820,9 @@ static alp_status_t y_out_write(alp_audio_out_backend_state_t *state,
 	                                     frames,
 	                                     out_frames,
 	                                     timeout_ms,
-	                                     snd_pcm_wait,
-	                                     snd_pcm_writei);
+	                                     y_pcm_wait,
+	                                     snd_pcm_writei,
+	                                     d);
 }
 
 /** @brief Record the 0..255 linear volume on the dispatcher out state.
@@ -773,7 +854,7 @@ static void y_out_close(alp_audio_out_backend_state_t *state)
 	}
 	free(d->scratch);
 	d->scratch = NULL;
-	free(d);
+	y_data_free(d);
 	state->be_data = NULL;
 }
 
@@ -781,17 +862,25 @@ static void y_out_close(alp_audio_out_backend_state_t *state)
 /* Registration                                                        */
 /* ------------------------------------------------------------------ */
 
+/** @brief close() hook: wake a write blocked in y_pcm_wait(). */
+static void y_out_cancel(alp_audio_out_backend_state_t *state)
+{
+	if (state->be_data != NULL) y_data_cancel((const y_audio_data_t *)state->be_data);
+}
+
 static const alp_audio_ops_t _ops = {
 	.in_open        = y_in_open,
 	.in_start       = y_in_start,
 	.in_stop        = y_in_stop,
 	.in_read        = y_in_read,
+	.in_cancel      = y_in_cancel,
 	.in_close       = y_in_close,
 	.out_open       = y_out_open,
 	.out_start      = y_out_start,
 	.out_stop       = y_out_stop,
 	.out_write      = y_out_write,
 	.out_set_volume = y_out_set_volume,
+	.out_cancel     = y_out_cancel,
 	.out_close      = y_out_close,
 };
 

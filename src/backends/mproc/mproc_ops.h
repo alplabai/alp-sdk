@@ -45,6 +45,9 @@ typedef struct alp_mbox_backend_state {
 typedef struct alp_hwsem_backend_state {
 	void                  *be_data;
 	const alp_mproc_ops_t *ops;
+	/** Set by the dispatcher when close() starts (alp_handle_mark_closing());
+	 *  a blocked hwsem_lock() must observe it and return ALP_ERR_NOT_READY. */
+	bool closing;
 } alp_hwsem_backend_state_t;
 
 /* ------------------------------------------------------------------ */
@@ -79,6 +82,12 @@ struct alp_mproc_ops {
 	alp_status_t (*hwsem_try_lock)(alp_hwsem_backend_state_t *state);
 	alp_status_t (*hwsem_lock)(alp_hwsem_backend_state_t *state, uint32_t timeout_ms);
 	alp_status_t (*hwsem_unlock)(alp_hwsem_backend_state_t *state);
+	/** Wake a hwsem_lock() blocked in the backend.  Called by close() after
+	 *  @c state->closing is set and before the in-flight ops are drained;
+	 *  it only wakes waiters (the woken lock returns ALP_ERR_NOT_READY).
+	 *  May be NULL when the backend re-checks @c closing between short
+	 *  waits instead. */
+	void (*hwsem_cancel)(alp_hwsem_backend_state_t *state);
 	void (*hwsem_close)(alp_hwsem_backend_state_t *state);
 };
 

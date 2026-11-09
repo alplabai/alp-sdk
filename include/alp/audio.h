@@ -165,10 +165,14 @@ alp_status_t alp_audio_in_stop(alp_audio_in_t *in);
  * @param[out] out_frames   Receives the frame count actually delivered.
  *                          May be NULL.
  * @param[in]  timeout_ms   Max wait for available frames.
+ * @note A concurrent @ref alp_audio_in_close wakes a blocked call, which
+ *       returns ALP_ERR_NOT_READY; close() then completes without waiting
+ *       out @p timeout_ms.
  * @note See @ref alp_audio_in_start for the startup settling-transient
  *       caveat -- it applies to the first block(s) this function delivers
  *       after start/restart, not just to alp_audio_in_start() itself.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT /
+ * @return ALP_OK / ALP_ERR_NOT_READY (not open, or closed while waiting) /
+ *         ALP_ERR_INVAL / ALP_ERR_TIMEOUT /
  *         ALP_ERR_IO. ALP_ERR_IO (issue #2133 round 4c) means the backend
  *         itself reported dropped data mid-session (e.g. the Zephyr
  *         alif_pdm driver's slab-exhaustion/queue-overflow/hardware-FIFO-
@@ -304,7 +308,15 @@ alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
  *                          rather than truncated.
  * @param[out] out_frames   Receives the frame count actually pushed.  May be NULL.
  * @param[in]  timeout_ms   Max wait for driver readiness.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
+ * @note A concurrent @ref alp_audio_out_close wakes a blocked call, which
+ *       returns ALP_ERR_NOT_READY; @p out_frames then holds the frames
+ *       accepted before the wake.  close() completes without waiting out
+ *       @p timeout_ms while the call waits for buffer space; on the Zephyr
+ *       backend a call already blocked handing a buffer to the I2S driver's
+ *       transmit queue is not interruptible and returns when the driver
+ *       accepts it.
+ * @return ALP_OK / ALP_ERR_NOT_READY (not open, or closed while waiting) /
+ *         ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
  *         ALP_ERR_TIMEOUT / a deferred-start trigger failure (see above).
  */
 alp_status_t alp_audio_out_write(alp_audio_out_t *out,
