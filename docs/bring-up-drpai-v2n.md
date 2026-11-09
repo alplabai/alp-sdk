@@ -571,11 +571,29 @@ driver has no queue (a second `DRPAI_START` while a job runs returns
   and the runtime teardown in `close()`, so threads on different handles
   wait their turn instead of colliding on the driver. Two models on DRP-AI
   therefore cost the sum of their latencies.
-- **A failed job is not reported.** The runtime's `Run()` returns void,
-  so a rejected or timed-out job still returns `ALP_OK`. A driver status
-  query is not a cheap fix (it needs a second open of `/dev/drpai0`,
-  which takes the driver semaphore for up to 1000 ms and the
-  shared-memory lock), so the SDK makes none; sanity-check the outputs.
+- **A failed job is reported after `Run()`.** The runtime's `Run()`
+  returns void, so `alp_inference_invoke()` asks the driver
+  (`DRPAI_GET_STATUS`). The driver counts opens of `/dev/drpai0`: the
+  first open runs `drpai_open_process()` (CPG init, status reset to IDLE,
+  device resets) and the close with two fds left runs
+  `drpai_close_process()` (another reset). The backend therefore queries
+  only if this process already holds `/dev/drpai0` (found in
+  `/proc/self/fd`), so its open and close only change the count. If the
+  runtime holds no fd, nothing is opened and `invoke()` returns `ALP_OK`,
+  as before; a first open would reset a device the runtime is using, wipe
+  the job result, and could fail with `EIO`/`ETIMEDOUT` for a job that ran
+  fine. With the fd held, the open, the ioctl and the close each wait up
+  to 1000 ms on the driver semaphore (a timeout in the open or close leaves
+  that semaphore over-released, a vendor driver bug, so later driver calls
+  are no longer serialised), and the ioctl takes the shared-memory lock, so
+  it can also fail with `EINPROGRESS`/`EADDRNOTAVAIL`. A job still in RUN
+  or a query that times out returns `ALP_ERR_TIMEOUT`; a lock conflict
+  returns `ALP_ERR_BUSY`; a recorded DRP/AIMAC error, reset or suspend, or
+  any other query failure, returns `ALP_ERR_IO`. Not detected: a
+  `DRPAI_START` the driver rejects before it starts the job (it clears the
+  result only after its checks, so the previous result reads as success).
+  Whether the closed MERA2 runtime keeps its fd open during `Run()` is not
+  bench-verified on V2N; if it does not, the check never runs.
 - **DRP-AI is one process per board.** The arena placement above is per
   process, so two processes would both load at the arena base and corrupt
   each other. The first DRP-AI handle in a process therefore takes an
