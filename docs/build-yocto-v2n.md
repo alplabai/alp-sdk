@@ -368,6 +368,10 @@ internal `devkit-feed` workflow uploads the result to the release.
 
 ## Notes
 
+- **Multimedia (opt-in).** `IMAGE_FEATURES += "alp-multimedia"` adds GStreamer
+  good/bad/libav/rtsp-server, LGPL-only ffmpeg and the Renesas OMX codec stack; it
+  needs `LICENSE_FLAGS_ACCEPTED` lines. See [v2n-multimedia.md](v2n-multimedia.md).
+
 - **GigaDevice xSPI NOR (some SKUs).** Some production E1M V2N-family
   modules carry a GigaDevice LX-family octal xSPI NOR in the "NOR flash
   (variant per SKU)" slot — see [`soms/v2n.md`](soms/v2n.md).
@@ -388,3 +392,6 @@ internal `devkit-feed` workflow uploads the result to the release.
   — see [`docs/bring-up-drpai-v2n.md`](bring-up-drpai-v2n.md)'s status
   banner for the task count and artefact.  On-bench boot and a
   `drpai`-enabled bake are the remaining gates.
+
+For a product's own carrier and downstream layer see
+[`v2n-custom-carrier.md`](v2n-custom-carrier.md).

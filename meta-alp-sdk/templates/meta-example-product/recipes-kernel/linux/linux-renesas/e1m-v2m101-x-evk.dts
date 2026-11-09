@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * Example product carrier on an E1M-V2N-M1 (V2M) SoM: the V2N composition
+ * plus the DEEPX DX-M1 dtsi.
+ */
+
+/dts-v1/;
+
+#include "e1m-v2n-som.dtsi"
+#include "example-carrier.dtsi"
+#include "e1m-v2m-deepx.dtsi"
+
+/ {
+	model = "Example product on E1M-V2N-M1";
+	/* Stock string first: cyw-fmac-firmware symlinks the brcmfmac board-named
+	 * files by it (CYW_BOARD_NAMES). */
+	compatible = "alp,e1m-v2m101-x-evk", "example,product-v2m",
+		     "renesas,r9a09g056n48", "renesas,r9a09g056";
+
+	memory@48000000 {
+		device_type = "memory";
+		reg = <0x0 0x48000000 0x1 0xf8000000>;
+	};
+};
+
+#include "e1m-v2n-ownership.dtsi"

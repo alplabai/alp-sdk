@@ -160,6 +160,9 @@ into the topic-specific docs.
   over the on-module PCM/I2S link: routing, open items, HIL steps.
 - [build-yocto-v2n.md](build-yocto-v2n.md) — building + deploying
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
+- [v2n-multimedia.md](v2n-multimedia.md) — opt-in GStreamer/ffmpeg/OMX package group
+- [v2n-custom-carrier.md](v2n-custom-carrier.md) — custom carrier on V2N / V2N-M1: stock MACHINE, carrier dts,
+  downstream Yocto layer template, which dtb U-Boot loads.
 - [provisioning.md](provisioning.md) — provisioning a SoM from a
   versioned release bundle (the `provision_som.py` orchestrator + runbook).
 - [provisioning-v2n.md](provisioning-v2n.md) — the V2N / V2N-M1
