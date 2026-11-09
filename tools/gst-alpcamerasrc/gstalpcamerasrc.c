@@ -36,6 +36,7 @@ struct _GstAlpCameraSrc {
 	GstPushSrc    parent;
 	guint         camera_id;
 	alp_camera_t *cam;
+	gint          flushing; /* set by unlock(), cleared by unlock_stop(); read in create() */
 	GstVideoInfo  info;
 };
 
@@ -119,10 +120,16 @@ static gboolean gst_alp_camera_src_stop(GstBaseSrc *bsrc)
 	return TRUE;
 }
 
+/* create() polls in 200 ms slices and re-checks the flag, so unlock only sets it. */
 static gboolean gst_alp_camera_src_unlock(GstBaseSrc *bsrc)
 {
-	/* create() polls in 200 ms slices and re-checks flushing, so nothing to wake. */
-	(void)bsrc;
+	g_atomic_int_set(&GST_ALP_CAMERA_SRC(bsrc)->flushing, 1);
+	return TRUE;
+}
+
+static gboolean gst_alp_camera_src_unlock_stop(GstBaseSrc *bsrc)
+{
+	g_atomic_int_set(&GST_ALP_CAMERA_SRC(bsrc)->flushing, 0);
 	return TRUE;
 }
 
@@ -139,7 +146,7 @@ static GstFlowReturn gst_alp_camera_src_create(GstPushSrc *psrc, GstBuffer **out
 	for (;;) {
 		st = alp_camera_capture(self->cam, &f, 200);
 		if (st == ALP_OK) break;
-		if (GST_BASE_SRC_IS_FLUSHING(psrc)) return GST_FLOW_FLUSHING;
+		if (g_atomic_int_get(&self->flushing)) return GST_FLOW_FLUSHING;
 		/* TIMEOUT: poll again.  IO: the backend dropped a corrupt or short frame; ask again. */
 		if (st != ALP_ERR_TIMEOUT && st != ALP_ERR_IO) {
 			GST_ELEMENT_ERROR(
@@ -228,11 +235,12 @@ static void gst_alp_camera_src_class_init(GstAlpCameraSrcClass *klass)
 	    "Alp Lab AB");
 	gst_element_class_add_static_pad_template(ec, &src_template);
 
-	bs->fixate   = gst_alp_camera_src_fixate;
-	bs->set_caps = gst_alp_camera_src_set_caps;
-	bs->stop     = gst_alp_camera_src_stop;
-	bs->unlock   = gst_alp_camera_src_unlock;
-	ps->create   = gst_alp_camera_src_create;
+	bs->fixate      = gst_alp_camera_src_fixate;
+	bs->set_caps    = gst_alp_camera_src_set_caps;
+	bs->stop        = gst_alp_camera_src_stop;
+	bs->unlock      = gst_alp_camera_src_unlock;
+	bs->unlock_stop = gst_alp_camera_src_unlock_stop;
+	ps->create      = gst_alp_camera_src_create;
 }
 
 static void gst_alp_camera_src_init(GstAlpCameraSrc *self)

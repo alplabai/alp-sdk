@@ -20,6 +20,8 @@ target_include_directories(gstalpcamera PRIVATE ${ALP_SDK_INC})
 set(ALP_SDK_VERSION "0.0.0" CACHE STRING "plugin version")
 target_compile_definitions(gstalpcamera PRIVATE PACKAGE="alp-sdk"
                            ALP_PLUGIN_VERSION="${ALP_SDK_VERSION}")
+# An undeclared GStreamer macro must not compile into an unresolved symbol.
+target_compile_options(gstalpcamera PRIVATE -Werror=implicit-function-declaration)
 target_link_libraries(gstalpcamera PRIVATE PkgConfig::GST ${ALP_SDK_LIB})
 
 install(TARGETS gstalpcamera LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/gstreamer-1.0)
