@@ -306,6 +306,30 @@ Pass: 10 frames, no CSI errors in `dmesg`. If `i2cdetect` sees nothing,
 check the mux select (`gpioinfo | grep cam0-mux-sel` must read output,
 low) and the module's I2C address.
 
+## GStreamer source: `alpcamerasrc`
+
+`v4l2src` and `videoconvert` cannot read the CRU's `CR10` capture format, so a
+mono sensor cannot feed `omxh264enc` through them. `alpcamerasrc`
+(`tools/gst-alpcamerasrc/`, recipe `gst-plugin-alp-camera`, pulled in by
+`packagegroup-alp-camera` on V2N/V2M machines) is a live source on
+`<alp/camera.h>`: the SDK unpacks `CR10` (NEON on AArch64) and the element
+emits `GRAY8`, `GRAY16_LE` (10-bit sample scaled to the full 16-bit range) or
+`NV12` (mono: Y = pixel, UV = 128) at the negotiated size and rate. The size
+must be one the sensor produces natively; with no caps filter it defaults to
+1456x1088 at 30 fps (the IMX296 mode). Mono and Bayer-as-mono only: there is no
+demosaic or ISP. Property `camera-id` (default `0`, `ALP_E1M_CAM0`).
+
+```
+gst-launch-1.0 alpcamerasrc ! video/x-raw,format=NV12,width=1456,height=1088,framerate=30/1 \
+    ! omxh264enc ! h264parse ! rtph264pay ! udpsink host=<peer> port=5000
+```
+
+Status: the conversions are host-tested
+(`tests/yocto/gst_alpcamerasrc_convert.c`) and the recipe builds under Yocto.
+Not run on silicon yet. Open: whether the gst-omx fork on V2N accepts `NV12`
+from this source at the sensor's size (the VCD is specified for 1080p60), and
+the delivered fps on the target.
+
 ## Using `<alp/camera.h>` on Linux
 
 The portable `alp_camera_open()` works on the A55 through the V4L2 /

@@ -1,0 +1,3 @@
+### Added — `alpcamerasrc` GStreamer source for the V2N CRU (CR10)
+
+**`tools/gst-alpcamerasrc/` adds a GStreamer element on `<alp/camera.h>` that outputs `GRAY8`, `GRAY16_LE` and `NV12` (mono: Y = pixel, UV = 128) from the CRU's `CR10` capture, so `alpcamerasrc ! video/x-raw,format=NV12 ! omxh264enc ! h264parse ! rtph264pay` is a valid camera-to-H.264 pipeline.** `v4l2src` and `videoconvert` cannot read `CR10`. The new `gst-plugin-alp-camera` recipe is part of `packagegroup-alp-camera` on V2N/V2M machines; the conversions have a host test, `tests/yocto/gst_alpcamerasrc_convert.c`. It has not been run on silicon yet. See `docs/v2n-camera-csi.md`.
