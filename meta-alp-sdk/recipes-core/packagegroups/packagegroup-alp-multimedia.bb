@@ -40,3 +40,14 @@ ALP_RZ_OMX_RDEPENDS = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'meta-rz-codec
 ALP_RZ_OMX_RDEPENDS[vardepvalue] = "${ALP_RZ_OMX_RDEPENDS}"
 
 RDEPENDS:${PN} += "${ALP_RZ_OMX_RDEPENDS}"
+
+# Renesas ISU (image scaling unit, driven through VSPM) GStreamer filter: scales
+# and converts GRAY8/NV12/RGB to NV12 in hardware. Same two gates as the OMX
+# stack above, because the RZ/V2N ISU kernel patches live in meta-rz-codecs
+# (kernel-module-vspm.bbappend). Listed explicitly even though vspmfilter
+# RDEPENDS most of them, so the rpm set is visible here.
+ALP_RZ_ISU_RDEPENDS = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'meta-rz-codecs', \
+    bb.utils.contains('MACHINE_FEATURES', 'v2n', 'gstreamer1.0-plugin-vspmfilter vspmif-user-module kernel-module-vspm kernel-module-vspmif kernel-module-mmngr mmngr-user-module mmngrbuf-user-module', '', d), '', d)}"
+ALP_RZ_ISU_RDEPENDS[vardepvalue] = "${ALP_RZ_ISU_RDEPENDS}"
+
+RDEPENDS:${PN} += "${ALP_RZ_ISU_RDEPENDS}"
