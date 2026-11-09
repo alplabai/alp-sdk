@@ -17,9 +17,10 @@ device tree changes.
 
 `bblayers.conf`: the same layers as a stock build (poky, meta-oe,
 meta-rz-bsp, meta-rz-distro, the meta-rz-features layers you use,
-meta-mender-core, `meta-alp-sdk`), plus your layer. A known-good set is
-`conf/bblayers.conf` of the V2M103 dev image; `meta-deepx-m1` is needed only
-for V2M.
+meta-mender-core, `meta-alp-sdk`), plus your layer; `meta-deepx-m1` is needed
+only for V2M. The layer assembly is in section 2 of
+[build-yocto-v2n.md](build-yocto-v2n.md) and in
+[`../meta-alp-sdk/README.md`](../meta-alp-sdk/README.md).
 
 ```
 BBLAYERS += "/path/to/meta-alp-sdk /path/to/meta-your-product"
@@ -51,10 +52,12 @@ Copy `meta-alp-sdk/templates/meta-example-product` and rename it.
   `meta-alp-sdk`.
 - `recipes-kernel/linux/`: the carrier dts and dtsi.
 
-**Trap: do not base the image on `core-image-*`.** The vendor layers' `core-image-%.bbappend`
-files match by recipe name and do not reach `alp-image-*`; the Mali/Weston
-wiring is a conf-level override and does. Extending `alp-image-base` (or
-`alp-image-edge`) avoids the problem; see the `meta-alp-sdk` README.
+**Trap: vendor `core-image-%.bbappend` files do not reach your image.** A
+bbappend matches the exact recipe name, so an image under any other name,
+including a product recipe that merely `require`s a `core-image-*.bb`, gets none
+of the drpai / codecs / opencva payload those bbappends add. `alp-image-base`
+(through `alp-image-common.inc`) ports that payload explicitly, so extend
+`alp-image-base` or `alp-image-edge`; see the `meta-alp-sdk` README.
 
 Build: `bitbake <product>-image`.
 
@@ -79,19 +82,27 @@ A product replaces the EVK carrier dtsi with its own:
 ### Hard rules
 
 - Ownership dtsi last (above).
-- V2N-M1: never drive PA6 (`M1_RESET`), P80 or P95 (PCIe mux PD / SEL); host
-  firmware owns them ([bring-up-v2n-m1.md](bring-up-v2n-m1.md)).
+- V2N-M1: add no writer of your own for PA6 (`M1_RESET`) or P95 (PCIe mux
+  SEL), and keep the P80 (mux PD) output-low gpio-hog in `e1m-v2m-deepx.dtsi`
+  as shipped: it matches U-Boot, and removing it re-disables the PCIe mux about
+  93 ms after link-up and loses the DX-M1
+  ([bring-up-v2n-m1.md](bring-up-v2n-m1.md)).
 - Keep the SoM management buses reachable: I2C0 (P30/P31) carries the identity
   EEPROM, I2C8 (P06/P07) carries the GD32 bridge and the DA9292 at 0x1E, which
   U-Boot programs. Leave both `okay`, with pull-ups, and bind no Linux driver
   to 0x1E.
+- No Linux pinctrl or gpio claim on any port-9 pad, P9.5 included: it shares
+  the PMC9/PM9 bytes with the CM33's P9.6/P9.7, and the non-atomic
+  read-modify-write clobbers the CM33's live SCK7/CS mux.
 - Stay off the pads the CM33 uses (the GD32 supervisor link on P76/P77/P96/P97;
   see [rzv2n-m33-secure-boot.md](rzv2n-m33-secure-boot.md)). The
   ownership dtsi is generated from the core-ownership metadata; do not edit it
   by hand.
 - P90-P92, P2x and PBx are not 3.3 V tolerant: a carrier that puts 3.3 V on
-  them needs a level shifter declared in its `board.yaml` `pad_levels:`, and
-  `scripts/check_pad_voltage.py` must pass.
+  them needs a level shifter declared in the carrier's `pad_levels:` (in
+  `metadata/boards/<carrier>.yaml`, or the project's `board.yaml`). The gate scans an alp-sdk tree:
+  put the file under `metadata/boards/` of a checkout and run
+  `python3 scripts/check_pad_voltage.py --root <checkout>`; it must pass.
 
 ## 4. Which dtb U-Boot loads
 
@@ -107,7 +118,9 @@ Two ways to deal with that:
 - **Shadow the stock basename (template default).** Ship your board dts under
   the stock file name (`e1m-v2n101-x-evk.dts` / `e1m-v2m101-x-evk.dts`) in a
   layer with higher priority. `KERNEL_DEVICETREE` and U-Boot stay stock; the
-  dtb content is yours. This is the same mechanism `ALP_CAMERA_CAM0` uses.
+  dtb content is yours. Leave `ALP_CAMERA_CAM0` unset with a shadowed
+  dts: its fragment references EVK-dtsi labels that your carrier dtsi lacks, and
+  dtc fails.
 - **Custom dtb name.** Set `KERNEL_DEVICETREE = "renesas/<name>.dtb"` for your
   MACHINE and change U-Boot: a `u-boot_%.bbappend` patch for
   the family-to-dtb table in `include/configs/rzv2n-dev.h` (provisioned
@@ -118,5 +131,22 @@ Two ways to deal with that:
 ## Verification
 
 Layer parse and image build run on the build host; boot on a carrier needs
-the carrier. The template was checked with `bitbake -p` and the dtb compile of
-the example carrier (see the PR for the build log).
+the carrier. Coverage: `bitbake -p` and the dtb compile; `example-product-image
+-c rootfs` for `e1m-v2n101-a55` (RC=0); `linux-renesas -c compile` and
+`example-product-image -c rootfs` for `e1m-v2m103-a55` (see below). Not booted.
+
+## Caveats
+
+- No Vulkan: the Mali stack ships GLES / EGL only
+  ([v2n-mali-gpu.md](v2n-mali-gpu.md)).
+- No hardware-accelerated ffmpeg: hardware codecs are reached through
+  GStreamer OMX (`commercial_gstreamer1.0-omx`); anything that goes through
+  ffmpeg runs on the CPU.
+
+## Brcmfmac board name
+
+Keep `alp,e1m-v2n101-x-evk` / `alp,e1m-v2m101-x-evk` first in the root
+`compatible` (the template does): `cyw-fmac-firmware` symlinks the board-named
+brcmfmac files by those strings (`CYW_BOARD_NAMES`), so a different first
+string makes the on-module WLAN firmware lookup fail at every boot before it
+falls back to the generic name. Extend `CYW_BOARD_NAMES` if you must change it.

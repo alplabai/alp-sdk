@@ -701,3 +701,7 @@ hardware.
   — DEEPX DX-M1 integration notes (covers V2M101 / V2M102 / V2M103).
 - `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`
   — the orchestrator spec this layer is wired to.
+
+For a downstream product layer and custom carrier on V2N / V2N-M1, start from
+[`templates/meta-example-product/`](templates/meta-example-product/) and
+[`docs/v2n-custom-carrier.md`](../docs/v2n-custom-carrier.md).

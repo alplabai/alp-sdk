@@ -392,3 +392,6 @@ internal `devkit-feed` workflow uploads the result to the release.
   — see [`docs/bring-up-drpai-v2n.md`](bring-up-drpai-v2n.md)'s status
   banner for the task count and artefact.  On-bench boot and a
   `drpai`-enabled bake are the remaining gates.
+
+For a product's own carrier and downstream layer see
+[`v2n-custom-carrier.md`](v2n-custom-carrier.md).

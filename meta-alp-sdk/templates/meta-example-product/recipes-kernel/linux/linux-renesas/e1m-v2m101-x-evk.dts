@@ -12,7 +12,9 @@
 
 / {
 	model = "Example product on E1M-V2N-M1";
-	compatible = "example,product-v2m",
+	/* Stock string first: cyw-fmac-firmware symlinks the brcmfmac board-named
+	 * files by it (CYW_BOARD_NAMES). */
+	compatible = "alp,e1m-v2m101-x-evk", "example,product-v2m",
 		     "renesas,r9a09g056n48", "renesas,r9a09g056";
 
 	memory@48000000 {
