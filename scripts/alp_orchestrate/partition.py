@@ -846,7 +846,9 @@ def resolve_storage_partitions(
     change.  Adding, renaming or removing an auto-placed partition
     re-sorts the list and MOVES every later-sorting auto-placed one, so
     a shipped (OTA'd) product must pin `offset_kib:` on every partition
-    whose contents must survive an update; pins never move.
+    whose contents must survive an update; pins never move.  With
+    `ota.provider` set (not `none`) the validator requires the pin on
+    every `storage:` entry.
     """
     if not project.storage:
         return []

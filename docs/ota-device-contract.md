@@ -26,6 +26,11 @@ the GD32 application bootloader does.
 
 ### Contract
 
+With `ota.provider` set (not `none`) in `board.yaml`, every `storage:` partition must pin
+`offset_kib:` so a rename or added partition cannot shift OTA slot offsets;
+the orchestrator validator refuses an unpinned layout (SoM `memory_map:`
+regions are not covered).
+
 The server side (Hakan's repo) hands the device an artifact
 (`.mender` tarball) over HTTPS.  The device must:
 
