@@ -165,9 +165,13 @@ typedef struct {
 /**
  * @brief Bind a driver context to an open I²C bus and verify chip ID.
  *
- * Reads WHO_AM_I and verifies it matches @ref ICM42670_WHO_AM_I_VAL.
- * Does not start sampling -- caller selects ODR + FS via
- * @ref icm42670_set_accel and @ref icm42670_set_gyro.
+ * Reads WHO_AM_I and verifies it matches @ref ICM42670_WHO_AM_I_VAL,
+ * enables both engines in low-noise mode, then sets the full-scale
+ * range to @ref ICM42670_ACCEL_FS_2G / @ref ICM42670_GYRO_FS_250_DPS
+ * (read-modify-write of FS_SEL [6:5]; the ODR field is left at its reset
+ * value) and keeps @c dev->accel_fs / @c dev->gyro_fs in sync.  The
+ * caller selects ODR (and a different FS) via @ref icm42670_set_accel
+ * and @ref icm42670_set_gyro.
  *
  * @return ALP_OK on success; ALP_ERR_IO on WHO_AM_I mismatch.
  */

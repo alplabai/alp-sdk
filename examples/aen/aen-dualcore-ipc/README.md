@@ -71,11 +71,11 @@ before dropping into its trailing idle/serve loop:
 - `RESULT PASS: dualcore-ipc -- ...` — real evidence: HP serviced >=1 HE
   request (or, on HE, all `ROUND_TRIPS` round-trips completed with 0 reply
   mismatches).
-- `RESULT SKIP: dualcore-ipc -- ...` — the peer never showed, or stopped
-  responding, within a bounded window: either core's MHU-1 sender link never
-  came ready (`ACCESS_READY`), HP never saw a request, or HP never replied to
-  HE's first (or a later) round — states what was locally proven, not a
-  failure of this app's code.
+- `RESULT SKIP: dualcore-ipc -- ...` — the peer never showed within a bounded
+  window: either core's MHU-1 sender link never came ready (`ACCESS_READY`),
+  HP never saw a request, or HP never replied to HE's first round — states
+  what was locally proven, not a failure of this app's code. HP that answers
+  some rounds and then stops replying is a `FAIL`, not a `SKIP`.
 - `RESULT FAIL: dualcore-ipc -- ...` — a real local error: `alp_mproc_boot_core`
   (HP) returned an unexpected rc (`ALP_ERR_NOSUPPORT` included -- see below),
   or a reply's payload did not match `request.payload + 1` (a correctness

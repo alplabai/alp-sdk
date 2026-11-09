@@ -215,6 +215,13 @@ ota:
     total_size_mb: 4096
 ```
 
+When `ota.provider` is set to anything other than `none`, every
+`storage:` partition must pin `offset_kib:`; the validator refuses
+otherwise. Rollback fields alone do not enable the rule. It covers
+`storage:` partitions only, not the SoM `memory_map:` regions. Unpinned
+partitions are allocated in name order, so adding or renaming one would
+move OTA slots.
+
 Project-wide, provider-driven dispatch (ADR 0009 resolved):
 
 | Provider   | Yocto emit                              | Zephyr emit                                                                       |
@@ -297,6 +304,8 @@ moves every later-sorting auto-placed partition, so an OTA'd image would
 mount existing littlefs/NVS data at the wrong address.  For a product
 that ships, pin `offset_kib:` on every partition whose data must
 survive an update; a pinned offset never moves when siblings change.
+With `ota.provider` set (not `none`) pinning is required on every
+`storage:` entry, not advice; SoM `memory_map:` regions are not covered.
 
 `flash_device:` resolves against the SoM preset in this order:
 

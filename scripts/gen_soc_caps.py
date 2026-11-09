@@ -355,15 +355,14 @@ def _emit_cap_layer(out: list[str]) -> None:
     out.append(" * Capability layer -- portable, SoM-agnostic.  Derived from the")
     out.append(" * active CONFIG_ALP_SOC_* selection via the macros above.")
     out.append(" *")
-    out.append(" * Counts collapse to 0/1 via `> 0`, so ALP_HAS() is always a")
+    out.append(" * Counts and flags collapse to 0/1 via `> 0`, so ALP_HAS() is always a")
     out.append(" * constant expression and safe inside #if and static_assert.")
     out.append(" * --------------------------------------------------------------- */")
     cap_defs: list[tuple[str, str]] = []
-    for soc_name, cap_name, kind in CAP_ALIASES:
-        if kind == "count":
-            cap_defs.append((f"ALP_CAP_{cap_name}", f"(ALP_SOC_{soc_name} > 0)"))
-        else:
-            cap_defs.append((f"ALP_CAP_{cap_name}", f"(ALP_SOC_{soc_name})"))
+    for soc_name, cap_name, _kind in CAP_ALIASES:
+        # "bool" caps normalise too: the unknown-SoC branch defaults every
+        # ALP_SOC_* to UINT16_MAX, which must not leak out as a cap value.
+        cap_defs.append((f"ALP_CAP_{cap_name}", f"(ALP_SOC_{soc_name} > 0)"))
     _emit_aligned_defines(out, cap_defs)
     out.append("")
     out.append("#define ALP_HAS(cap) (ALP_CAP_##cap)")

@@ -199,8 +199,9 @@ security:
 # see [STATUS] above.  Sizes below sum to ~2.4 MiB (1024 + 1024 + 64 +
 # 64 + 256 KiB), but on E1M-AEN801 there is no remainder to place them
 # in: the SoM's own `memory_map:` regions already occupy the full 5632
-# KiB App MRAM window (metadata/e1m_modules/E1M-AEN801.yaml), so every
-# entry below emits `status: blocked` in the generated
+# KiB App MRAM window (metadata/e1m_modules/E1M-AEN801.yaml), so there is
+# no room past them: every entry below, pinned at its `offset_kib:`,
+# overruns `mram_main` and emits `status: blocked` in the generated
 # `dts-partitions.dtsi` for that reason alone.  `mram_main` would ALSO
 # not be a working `flash_device:` target even with free room: no AEN
 # preset declares a `dt_label:` override for it, so it resolves to a
@@ -209,25 +210,38 @@ security:
 # docs/board-config-features.md's "Storage partitions (`storage:`)"
 # section).  This block demonstrates the `storage:`
 # declarative shape only, not a working layout, on this SKU.
+#
+# The layout is demo-only and blocked.  Because `ota:` is enabled
+# above, every partition must pin `offset_kib:`; the pins below keep
+# the allocator's name order (app_data, mcuboot_primary,
+# mcuboot_scratch, mcuboot_secondary, settings) packed back to back
+# from the end of the SoM's regions (5632 KiB).  They sit past the end
+# of `mram_main`, so the entries stay `status: blocked` (now as an
+# overrun at the pinned offset).
 storage:
   - name:         mcuboot_primary
+    offset_kib:   5888
     fs:           raw
     size_kib:     1024
     flash_device: mram_main
   - name:         mcuboot_secondary
+    offset_kib:   6976
     fs:           raw
     size_kib:     1024
     flash_device: mram_main
   - name:         mcuboot_scratch
+    offset_kib:   6912
     fs:           raw
     size_kib:     64
     flash_device: mram_main
   - name:         settings
+    offset_kib:   8000
     fs:           littlefs
     size_kib:     64
     flash_device: mram_main
     mount:        /lfs/settings
   - name:         app_data
+    offset_kib:   5632
     fs:           littlefs
     size_kib:     256
     flash_device: mram_main

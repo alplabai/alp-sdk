@@ -44,9 +44,9 @@ notes: |
   The host-side driver (chips/gd32g553/) is a pure C99 module that
   rides <alp/peripheral.h> -- it speaks SPI master and / or I2C
   master against the GD32 from the Renesas side.  The matching
-  firmware tree lives in firmware/gd32-bridge/ (separate compile artifact,
-  separate flash binary, separate toolchain) -- see
-  docs/gd32-bridge.md.
+  firmware lives in the separate alplabai/gd32-bridge-firmware repository
+  (separate compile artifact, separate flash binary, separate toolchain)
+  -- see docs/gd32-bridge.md.
 
   Hardware control surface from V2N (planned 2026-05-12; SWD-from-host design):
     - SPI fast path (P76/77/96/97 host  ↔  PA8/9/10/PB15 GD32 slave)

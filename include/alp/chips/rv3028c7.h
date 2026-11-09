@@ -134,7 +134,11 @@ alp_status_t rv3028c7_get_time(rv3028c7_t *ctx, rv3028c7_time_t *out);
 /** @brief Write a wall-clock time (24-hour mode). */
 alp_status_t rv3028c7_set_time(rv3028c7_t *ctx, const rv3028c7_time_t *t);
 
-/** @brief Configure the alarm registers + match mask. */
+/** @brief Configure the alarm registers + match mask.
+ * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (a pointer NULL, or
+ *         minute > 59, hour > 23, day outside 1..31 when
+ *         @c use_weekday is false, weekday > 6 when it is true -- no
+ *         register is written), or ALP_ERR_IO. */
 alp_status_t rv3028c7_set_alarm(rv3028c7_t                   *ctx,
                                 const rv3028c7_time_t        *when,
                                 const rv3028c7_alarm_match_t *match);
@@ -271,7 +275,7 @@ alp_status_t rv3028c7_set_int_enable(rv3028c7_t *ctx, rv3028c7_src_t src, bool e
  * EEPROM or any register of the EEPROM RAM mirror (0x30..0x37,
  * including EEPROM_BACKUP 0x37 and its backup-switchover mode BSM
  * field), and none touches EEADDR/EEDATA/EECMD (0x25..0x27) or the
- * EERD bit.  Every register they use (0x07..0x0F, 0x10) is a plain
+ * EERD bit.  Every register they use (0x07..0x10, 0x13) is a plain
  * RAM register.  This is deliberate: an EEPROM write wears the part
  * (nCYCLE endurance, p.98, as low as 100 cycles at the hot corner)
  * and a changed backup-switchover mode changes how the part is
@@ -366,8 +370,10 @@ alp_status_t rv3028c7_timer_read(rv3028c7_t *ctx, rv3028c7_timer_state_t *out);
  * @param when   Alarm time (minute, hour, and day or weekday).
  * @param match  Which fields participate and whether 09h is a date or a
  *               weekday.
- * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (a pointer NULL),
- *         or ALP_ERR_IO.
+ * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (a pointer NULL, or
+ *         minute > 59, hour > 23, day outside 1..31, weekday > 6 --
+ *         checked before any write, so a previously armed alarm stays
+ *         armed), or ALP_ERR_IO.
  */
 alp_status_t rv3028c7_alarm_arm(rv3028c7_t                   *ctx,
                                 const rv3028c7_time_t        *when,
@@ -420,9 +426,52 @@ alp_status_t rv3028c7_alarm_clear(rv3028c7_t *ctx);
  * @param flags Output: OR of RV3028C7_WAKE_* for enabled, latched
  *              sources.  May be NULL.
  * @return ALP_OK, ALP_ERR_NOT_READY, or ALP_ERR_IO.  No STATUS write is
- *         issued when no TF/AF/UF flag is latched.
+ *         issued when no TF/AF/UF flag (or EVF with EIE on) is latched.
  */
 alp_status_t rv3028c7_wake_service(rv3028c7_t *ctx, uint8_t *flags);
+
+/** Sampling period of the EVI input filter (Event Control 13h, ET field, bits 5:4,
+ *  Application Manual Rev. 1.4 Sec. 3.8 p.26). */
+typedef enum {
+	RV3028C7_EVI_FILTER_NONE    = 0, /**< ET = 00: no filtering, edge detection. */
+	RV3028C7_EVI_FILTER_3_9_MS  = 1, /**< ET = 01: tSP = 3.9 ms (256 Hz), level detection. */
+	RV3028C7_EVI_FILTER_15_6_MS = 2, /**< ET = 10: tSP = 15.6 ms (64 Hz), level detection. */
+	RV3028C7_EVI_FILTER_125_MS  = 3, /**< ET = 11: tSP = 125 ms (8 Hz), level detection. */
+} rv3028c7_evi_filter_t;
+
+/**
+ * @brief Arm the External Event input (EVI, pin 8) as an INT source.
+ *
+ * Follows Sec. 4.11.1 (p.71): EIE (Control 2 10h bit 2, p.24) is cleared, Event Control
+ * (13h, Sec. 3.8 p.26) gets EHL (bit 6: 0 = falling edge / low level, 1 = rising edge / high
+ * level), ET (bits 5:4, @p filter) and TSS = 0 (bit 0: the EVI pin is the event source, not the
+ * backup switchover), EVF (Status 0Eh bit 1, p.22) is cleared by writing 0, and EIE is set.
+ * From then on an event latches EVF and holds INT low until EVF is cleared
+ * (@ref rv3028c7_wake_service or @ref rv3028c7_event_disarm).  TSOW is preserved; no time stamp
+ * is enabled (TSE stays as it is).
+ *
+ * With @ref RV3028C7_EVI_FILTER_NONE the event is an edge, so EVF can be cleared while EVI
+ * still sits at the active level and INT stays released.  With a filter the event is a level:
+ * EVF is set again after tDELAY (tSP < tDELAY < 2 tSP) for as long as the level holds
+ * (p.71 note 6).  An event that happened before this call is not seen.
+ *
+ * @param ctx          Initialised driver context.
+ * @param active_high  true: rising edge / high level is the event; false: falling / low (POR).
+ * @param filter       EVI filter.
+ * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (@p filter out of range), ALP_ERR_BUSY
+ *         (TSE = 1 with TSS = 1: the time stamp is bound to the backup switchover and is not
+ *         taken over), or ALP_ERR_IO.
+ */
+alp_status_t rv3028c7_event_arm(rv3028c7_t *ctx, bool active_high, rv3028c7_evi_filter_t filter);
+
+/**
+ * @brief Disarm the External Event input: EIE = 0 and EVF cleared.  The Event Control
+ *        polarity / filter bits are left as they are.  Idempotent.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ALP_OK, ALP_ERR_NOT_READY, or ALP_ERR_IO.
+ */
+alp_status_t rv3028c7_event_disarm(rv3028c7_t *ctx);
 
 /** @} */
 

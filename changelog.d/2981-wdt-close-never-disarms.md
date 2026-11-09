@@ -1,0 +1,3 @@
+### Changed — wdt: alp_wdt_close() never disarms the watchdog on Yocto (#2981)
+
+**On Yocto, alp_wdt_close() no longer disarms the watchdog.** It issues neither WDIOS_DISABLECARD nor the magic close character, so on Linux the watchdog keeps running after close, a crash or exit included, only when the driver supports magic close (WDIOF_MAGICCLOSE) or the kernel is nowayout (CONFIG_WATCHDOG_NOWAYOUT or the driver's nowayout= parameter); otherwise watchdog_release() stops it on close. Zephyr never stops it. Code that relied on close() to stop the watchdog must now call alp_wdt_disable() first (or keep feeding it from another owner). wdt.h now states the single portable contract.

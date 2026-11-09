@@ -43,6 +43,7 @@
 #define DT_DRV_COMPAT renesas_rz_sci_b_spi
 
 #include <zephyr/drivers/spi.h>
+#include <zephyr/drivers/spi/alp_spi_compat.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/irq.h>
 #include <zephyr/drivers/interrupt_controller/intc_rz_icu.h>
@@ -363,7 +364,7 @@ static void rz_sci_b_spi_callback(spi_callback_args_t *p_args)
 
 	switch (p_args->event) {
 	case SPI_EVENT_TRANSFER_COMPLETE:
-		if (!spi_context_is_slave(&data->ctx)) {
+		if (!ALP_SPI_CTX_IS_PERIPHERAL(&data->ctx)) {
 			if (data->fsp_ctrl.rx_count == data->fsp_ctrl.count ||
 			    data->fsp_ctrl.tx_count == data->fsp_ctrl.count) {
 				data_receive_len = (!!(data->fsp_ctrl.rx_count))
@@ -466,12 +467,12 @@ static int rz_sci_b_spi_configure(const struct device *dev, const struct spi_con
 		return -ENOTSUP;
 	}
 
-	if ((config->operation & SPI_OP_MODE_SLAVE) && !IS_ENABLED(CONFIG_SPI_SLAVE)) {
+	if ((config->operation & SPI_OP_MODE_PERIPHERAL) && !IS_ENABLED(CONFIG_SPI_SLAVE)) {
 		LOG_ERR("CONFIG_SPI_SLAVE not enabled");
 		return -ENOTSUP;
 	}
 
-	if (config->operation & SPI_OP_MODE_SLAVE) {
+	if (config->operation & SPI_OP_MODE_PERIPHERAL) {
 		data->fsp_cfg.operating_mode = SPI_MODE_SLAVE;
 	} else {
 		if (config->frequency == 0) {
@@ -505,7 +506,7 @@ static int rz_sci_b_spi_configure(const struct device *dev, const struct spi_con
 	 * (e.g. the 10 MHz the example asks for) is simply clamped to the SCI
 	 * ceiling rather than rejected -- no artificial cap here.
 	 */
-	if (!(config->operation & SPI_OP_MODE_SLAVE)) {
+	if (!(config->operation & SPI_OP_MODE_PERIPHERAL)) {
 		fsp_err = R_SCI_B_SPI_CalculateBitrate(config->frequency,
 						       data->fsp_ext_cfg.clock_source,
 						       &data->fsp_ext_cfg.clk_div);
@@ -894,7 +895,7 @@ static int transceive(const struct device *dev, const struct spi_config *config,
 #endif /* ALP_V2N_SCI7_DMAC */
 
 #ifdef CONFIG_SPI_SLAVE
-	if (spi_context_is_slave(&data->ctx) && !ret) {
+	if (ALP_SPI_CTX_IS_PERIPHERAL(&data->ctx) && !ret) {
 		ret = data->ctx.recv_frames;
 	}
 #endif /* CONFIG_SPI_SLAVE */

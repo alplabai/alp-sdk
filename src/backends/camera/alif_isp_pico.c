@@ -112,6 +112,7 @@ LOG_MODULE_REGISTER(alp_camera_alif_isp_pico, CONFIG_LOG_DEFAULT_LEVEL);
 #include "camera_ops.h"
 #include "alif_isp_pico.h"
 #include "alp_slot_claim.h"
+#include "alp_sliced_wait.h"
 #include "yuv_to_rgb565.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_CAMERA_HANDLES
@@ -640,9 +641,18 @@ isp_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t
 		return _errno_to_alp(err);
 	}
 
-	k_timeout_t          t  = (timeout_ms == UINT32_MAX) ? K_FOREVER : K_MSEC(timeout_ms);
+	/* video_dequeue() has no cancel API: wait in slices and re-check the
+	 * closing flag between them (see alp_sliced_wait.h). */
 	struct video_buffer *vb = NULL;
-	err                     = video_dequeue(st->dev, &vb, t);
+	uint32_t             slice;
+	if (ALP_SLICED_WAIT(&state->closing,
+	                    timeout_ms,
+	                    slice,
+	                    err,
+	                    video_dequeue(st->dev, &vb, K_MSEC(slice)),
+	                    err == -EAGAIN)) {
+		return ALP_ERR_NOT_READY;
+	}
 	if (err != 0) {
 		return _errno_to_alp(err);
 	}

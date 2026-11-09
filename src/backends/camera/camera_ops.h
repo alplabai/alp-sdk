@@ -32,6 +32,9 @@ typedef struct alp_camera_backend_state {
 	/** Settled frame rate x 1000, recorded by the backend at open;
 	 *  0 = not known (alp_camera_get_fps() then answers NOSUPPORT). */
 	uint32_t fps_x1000;
+	/** Set by the dispatcher when close() starts (alp_handle_mark_closing());
+	 *  a blocked capture() must observe it and return ALP_ERR_NOT_READY. */
+	bool closing;
 } alp_camera_backend_state_t;
 
 /** Vtable each camera backend implements. */
@@ -47,6 +50,12 @@ struct alp_camera_ops {
 	alp_status_t (*release)(alp_camera_backend_state_t *state, alp_camera_frame_t *frame);
 	alp_status_t (*configure_isp)(alp_camera_backend_state_t    *state,
 	                              const alp_camera_isp_config_t *isp);
+	/** Wake a capture() blocked in the backend.  Called by close() after
+	 *  @c state->closing is set and before the in-flight ops are drained;
+	 *  it only wakes waiters (the woken capture() returns
+	 *  ALP_ERR_NOT_READY).  May be NULL when the backend never blocks
+	 *  unboundedly or checks @c closing itself between short waits. */
+	void (*cancel)(alp_camera_backend_state_t *state);
 	void (*close)(alp_camera_backend_state_t *state);
 };
 

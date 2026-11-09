@@ -33,7 +33,18 @@ typedef struct drpai_data {
 	unsigned long size;
 } drpai_data_t;
 
-#define DRPAI_GET_DRPAI_AREA 0x4010c401UL
+typedef struct drpai_status {
+	unsigned int status;
+	int          err;
+	unsigned int reserved[32];
+} drpai_status_t;
+
+#define DRPAI_GET_DRPAI_AREA  0x4010c401UL
+#define DRPAI_GET_STATUS      0x8088c403UL /* arbitrary unique value */
+#define DRPAI_STATUS_IDLE     (1)
+#define DRPAI_STATUS_RUN      (2)
+#define DRPAI_ERRINFO_SUCCESS (0)
+#define DRPAI_ERRINFO_DRP_ERR (-1)
 
 /* inference_drpai.cpp reaches the device with `::open("/dev/drpai0")` and
  * `::ioctl()`.  Route both to the fakes below for the file that includes
@@ -43,16 +54,32 @@ typedef struct drpai_data {
 inline int alp_fake_drpai_open(const char *path, int flags)
 {
 	(void)path;
+	++drpai_test::g_status_opens;
 	if (!drpai_test::g_device_present) {
 		errno = ENOENT;
+		return -1;
+	}
+	if (drpai_test::g_status_open_errno != 0) {
+		errno = drpai_test::g_status_open_errno;
 		return -1;
 	}
 	return ::open("/dev/null", flags);
 }
 
-inline int alp_fake_drpai_ioctl(int fd, unsigned long req, drpai_data_t *area)
+inline int alp_fake_drpai_ioctl(int fd, unsigned long req, void *arg)
 {
 	(void)fd;
+	if (req == DRPAI_GET_STATUS) {
+		auto *st   = static_cast<drpai_status_t *>(arg);
+		st->status = drpai_test::g_status_state;
+		st->err    = drpai_test::g_status_err;
+		if (drpai_test::g_status_ioctl_errno != 0) {
+			errno = drpai_test::g_status_ioctl_errno;
+			return -1;
+		}
+		return 0;
+	}
+	auto *area = static_cast<drpai_data_t *>(arg);
 	if (req != DRPAI_GET_DRPAI_AREA) {
 		errno = ENOTTY;
 		return -1;
@@ -62,5 +89,6 @@ inline int alp_fake_drpai_ioctl(int fd, unsigned long req, drpai_data_t *area)
 	return 0;
 }
 
-#define open(path, flags) alp_fake_drpai_open((path), (flags))
-#define ioctl(fd, req, a) alp_fake_drpai_ioctl((fd), (req), (a))
+#define ALP_DRPAI_TEST_FD_HELD (drpai_test::g_runtime_fd_held)
+#define open(path, flags)      alp_fake_drpai_open((path), (flags))
+#define ioctl(fd, req, a)      alp_fake_drpai_ioctl((fd), (req), (a))

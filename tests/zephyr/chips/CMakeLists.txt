@@ -66,6 +66,7 @@ target_sources(app PRIVATE
     src/test_displays.c
     src/test_gd32_bridge.c
     src/test_industrial.c
+    src/test_industrial_drivers.c
     src/test_platform_ics.c
     src/test_rv3028c7_wake.c
     src/test_ina228.c
@@ -116,3 +117,10 @@ target_sources(app PRIVATE
     src/fake_da9292.c
     src/fake_tps628640.c
 )
+
+# test_industrial_drivers.c intercepts the GPIO/PWM/SPI calls the motor and
+# thermocouple drivers make so it can assert their order and values.
+zephyr_link_libraries(
+    -Wl,--wrap=alp_gpio_write
+    -Wl,--wrap=alp_pwm_set_duty
+    -Wl,--wrap=alp_spi_transceive)

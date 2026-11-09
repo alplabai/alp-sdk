@@ -61,6 +61,10 @@ static alp_status_t z_open(const alp_storage_config_t  *cfg,
 	 * backend by priority (zephyr_disk serves SD_MMC). */
 	if (cfg->kind == ALP_STORAGE_KIND_SD_MMC) return ALP_ERR_NOSUPPORT;
 
+	/* flash_area_open() takes a uint8_t: a wider id would silently wrap
+	 * onto another partition (256 + n opens area n). */
+	if (cfg->instance_id > UINT8_MAX) return ALP_ERR_INVAL;
+
 	/* A raw write under a mounted fs corrupts it.  BUSY (not NOSUPPORT)
 	 * so the dispatcher does not fall through to another backend. */
 	if (alp_zmnt_find_mounted(cfg->instance_id) != NULL) return ALP_ERR_BUSY;

@@ -57,6 +57,7 @@ LOG_MODULE_REGISTER(alp_camera_zephyr_video, CONFIG_LOG_DEFAULT_LEVEL);
 #include "camera_frmival.h"
 #include "camera_ops.h"
 #include "alp_slot_claim.h"
+#include "alp_sliced_wait.h"
 
 #ifndef CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT
 #define CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT 2
@@ -406,10 +407,19 @@ z_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t t
 	if (st == NULL) return ALP_ERR_NOT_READY;
 	if (!st->streaming) return ALP_ERR_NOT_READY;
 
-	k_timeout_t t = (timeout_ms == UINT32_MAX) ? K_FOREVER : K_MSEC(timeout_ms);
-
+	/* video_dequeue() has no cancel API: wait in slices and re-check the
+	 * closing flag between them (see alp_sliced_wait.h). */
 	struct video_buffer *vb  = NULL;
-	int                  err = video_dequeue(st->dev, &vb, t);
+	int                  err = 0;
+	uint32_t             slice;
+	if (ALP_SLICED_WAIT(&state->closing,
+	                    timeout_ms,
+	                    slice,
+	                    err,
+	                    video_dequeue(st->dev, &vb, K_MSEC(slice)),
+	                    err == -EAGAIN)) {
+		return ALP_ERR_NOT_READY;
+	}
 	if (err != 0) return _errno_to_alp(err);
 	if (vb == NULL) return ALP_ERR_IO;
 

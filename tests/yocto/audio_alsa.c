@@ -60,8 +60,9 @@ extern alp_status_t alp_yocto_alsa_out_write_core(
     size_t             frames,
     size_t            *out_frames,
     uint32_t           timeout_ms,
-    int (*wait_fn)(snd_pcm_t *pcm, int timeout_ms),
-    snd_pcm_sframes_t (*writei_fn)(snd_pcm_t *pcm, const void *buf, snd_pcm_uframes_t frames));
+    int (*wait_fn)(void *ctx, snd_pcm_t *pcm, int timeout_ms),
+    snd_pcm_sframes_t (*writei_fn)(snd_pcm_t *pcm, const void *buf, snd_pcm_uframes_t frames),
+    void *wait_ctx);
 
 /* Opaque, never-dereferenced sentinel standing in for a real snd_pcm_t
  * -- the fake wait/writei below never touch it, they just record what
@@ -252,8 +253,9 @@ static void reset_fakes(void)
 	g_writei_partial_first_call = false;
 }
 
-static int fake_wait(snd_pcm_t *pcm, int timeout_ms)
+static int fake_wait(void *ctx, snd_pcm_t *pcm, int timeout_ms)
 {
+	(void)ctx;
 	ALP_ASSERT_TRUE(pcm == FAKE_PCM);
 	if (g_wait_calls < FAKE_MAX_CALLS) g_wait_ms_seen[g_wait_calls] = timeout_ms;
 	if (g_wait_calls == g_wait_sleep_on_call_index && g_wait_sleep_ms_on_call > 0) {
@@ -304,7 +306,8 @@ static void test_write_core_unity_volume_is_zero_copy_single_chunk(void)
 	                                                        &out_frames,
 	                                                        100u,
 	                                                        fake_wait,
-	                                                        fake_writei);
+	                                                        fake_writei,
+	                                                        NULL);
 
 	ALP_ASSERT_EQ_INT(s, ALP_OK);
 	ALP_ASSERT_EQ_INT(out_frames, 4);
@@ -339,7 +342,8 @@ static void test_write_core_scaled_write_processed_in_bounded_chunks(void)
 	                                               &out_frames,
 	                                               100u,
 	                                               fake_wait,
-	                                               fake_writei);
+	                                               fake_writei,
+	                                               NULL);
 
 	ALP_ASSERT_EQ_INT(s, ALP_OK);
 	ALP_ASSERT_EQ_INT(out_frames, 10);
@@ -378,7 +382,8 @@ static void test_write_core_partial_alsa_write_accumulates_out_frames(void)
 	                                                        &out_frames,
 	                                                        100u,
 	                                                        fake_wait,
-	                                                        fake_writei);
+	                                                        fake_writei,
+	                                                        NULL);
 
 	ALP_ASSERT_EQ_INT(s, ALP_OK);
 	/* First call asked for 6, ALSA accepted 3 (half); second call asks
@@ -408,7 +413,8 @@ static void test_write_core_zero_timeout_is_single_nonblocking_attempt(void)
 	                                                        &out_frames,
 	                                                        0u /* don't wait at all */,
 	                                                        fake_wait,
-	                                                        fake_writei);
+	                                                        fake_writei,
+	                                                        NULL);
 
 	ALP_ASSERT_EQ_INT(s, ALP_ERR_TIMEOUT);
 	ALP_ASSERT_EQ_INT(out_frames, 0);
@@ -435,7 +441,8 @@ static void test_write_core_uint32_max_timeout_waits_forever_arg(void)
 	                                                        &out_frames,
 	                                                        UINT32_MAX,
 	                                                        fake_wait,
-	                                                        fake_writei);
+	                                                        fake_writei,
+	                                                        NULL);
 
 	ALP_ASSERT_EQ_INT(s, ALP_OK);
 	ALP_ASSERT_EQ_INT(g_wait_ms_seen[0], -1); /* forever, per the portable contract */
@@ -460,7 +467,8 @@ static void test_write_core_wait_error_propagates(void)
 	                                                        &out_frames,
 	                                                        100u,
 	                                                        fake_wait,
-	                                                        fake_writei);
+	                                                        fake_writei,
+	                                                        NULL);
 
 	ALP_ASSERT_EQ_INT(s, ALP_ERR_IO);
 	ALP_ASSERT_EQ_INT(out_frames, 0);
@@ -499,7 +507,8 @@ static void test_write_core_one_deadline_shared_across_chunks_not_reset_per_chun
 	                                               &out_frames,
 	                                               200u,
 	                                               fake_wait,
-	                                               fake_writei);
+	                                               fake_writei,
+	                                               NULL);
 
 	ALP_ASSERT_EQ_INT(s, ALP_OK);
 	ALP_ASSERT_EQ_INT(out_frames, 4);
@@ -546,7 +555,8 @@ static void test_write_core_overflowing_frames_rejected_before_alsa_scaled_path(
 	                                  &out_frames,
 	                                  100u,
 	                                  fake_wait,
-	                                  fake_writei);
+	                                  fake_writei,
+	                                  NULL);
 
 	ALP_ASSERT_EQ_INT(s, ALP_ERR_INVAL);
 	ALP_ASSERT_EQ_INT(out_frames, 0);
@@ -573,7 +583,8 @@ static void test_write_core_overflowing_frames_rejected_before_alsa_unity_path(v
 	                                                        &out_frames,
 	                                                        100u,
 	                                                        fake_wait,
-	                                                        fake_writei);
+	                                                        fake_writei,
+	                                                        NULL);
 
 	ALP_ASSERT_EQ_INT(s, ALP_ERR_INVAL);
 	ALP_ASSERT_EQ_INT(out_frames, 0);
@@ -603,7 +614,8 @@ static void test_write_core_frames_overflow_boundary_mono_s16(void)
 	                                                        &out_frames,
 	                                                        100u,
 	                                                        fake_wait,
-	                                                        fake_writei);
+	                                                        fake_writei,
+	                                                        NULL);
 
 	ALP_ASSERT_EQ_INT(s, ALP_ERR_INVAL);
 	ALP_ASSERT_EQ_INT(out_frames, 0);
@@ -637,12 +649,41 @@ static void test_write_core_largest_valid_frame_count_unity_volume_succeeds(void
 	                                               &out_frames,
 	                                               100u,
 	                                               fake_wait,
-	                                               fake_writei);
+	                                               fake_writei,
+	                                               NULL);
 
 	ALP_ASSERT_EQ_INT(s, ALP_OK);
 	ALP_ASSERT_TRUE(out_frames == max_frames);
 	ALP_ASSERT_EQ_INT(g_writei_calls, 1);
 	ALP_ASSERT_TRUE(g_writei_frames_seen[0] == max_frames);
+}
+
+/* close() cancels a blocked write: a wait cancelled via the handle's
+ * eventfd (-ECANCELED) surfaces as ALP_ERR_NOT_READY, no frame written. */
+static void test_write_core_cancelled_wait_returns_not_ready(void)
+{
+	reset_fakes();
+	g_wait_return           = -ECANCELED;
+	int16_t      src[8]     = { 0 };
+	size_t       out_frames = 99;
+	alp_status_t s          = alp_yocto_alsa_out_write_core(FAKE_PCM,
+	                                                        ALP_AUDIO_FMT_S16_LE,
+	                                                        2,
+	                                                        2,
+	                                                        255,
+	                                                        NULL,
+	                                                        0,
+	                                                        src,
+	                                                        4,
+	                                                        &out_frames,
+	                                                        UINT32_MAX,
+	                                                        fake_wait,
+	                                                        fake_writei,
+	                                                        NULL);
+
+	ALP_ASSERT_EQ_INT(s, ALP_ERR_NOT_READY);
+	ALP_ASSERT_EQ_INT(out_frames, 0);
+	ALP_ASSERT_EQ_INT(g_writei_calls, 0);
 }
 
 int main(void)
@@ -671,6 +712,7 @@ int main(void)
 	test_write_core_zero_timeout_is_single_nonblocking_attempt();
 	test_write_core_uint32_max_timeout_waits_forever_arg();
 	test_write_core_wait_error_propagates();
+	test_write_core_cancelled_wait_returns_not_ready();
 	test_write_core_one_deadline_shared_across_chunks_not_reset_per_chunk();
 
 	test_write_core_overflowing_frames_rejected_before_alsa_scaled_path();

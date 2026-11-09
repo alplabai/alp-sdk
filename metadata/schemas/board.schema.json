@@ -241,7 +241,7 @@
 
     "storage": {
       "type": "array",
-      "description": "Optional flash / persistent-storage partitioning.  Each entry declares one partition: a name, a filesystem (`fs: raw` for unformatted partitions used as OTA slot backing / image cache), a size, an optional mount point, and a flash-device reference into the SoM preset's `memory_map:` or `on_module.ospi_memories:` block.  The orchestrator emits a partial DTS overlay (the `&<flash>; partitions { ... }` node) plus the matching Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS / CONFIG_FAT_FILESYSTEM_ELM / ...) per entry.  Partition addresses are pinned by the orchestrator (bottom-up, page-aligned within the flash device) for byte-stable OTA images across rebuilds; supply `offset_kib:` to override the allocator with an explicit offset.",
+      "description": "Optional flash / persistent-storage partitioning.  Each entry declares one partition: a name, a filesystem (`fs: raw` for unformatted partitions used as OTA slot backing / image cache), a size, an optional mount point, and a flash-device reference into the SoM preset's `memory_map:` or `on_module.ospi_memories:` block.  The orchestrator emits a partial DTS overlay (the `&<flash>; partitions { ... }` node) plus the matching Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS / CONFIG_FAT_FILESYSTEM_ELM / ...) per entry.  Partition addresses are pinned by the orchestrator (bottom-up, page-aligned within the flash device) for byte-stable OTA images across rebuilds; supply `offset_kib:` to override the allocator with an explicit offset; REQUIRED on every `storage:` entry when `ota.provider` is set to anything other than `none` (the validator refuses otherwise; SoM `memory_map:` regions are not covered).",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -379,7 +379,7 @@
           "type": "integer",
           "minimum": 60,
           "default": 1800,
-          "description": "How often the device polls the deployment server for updates, in SECONDS.  Mender default is 60 s; SDK default is 1800 s (30 min) for battery-friendly nodes.  `provider: hawkbit` converts to CONFIG_HAWKBIT_POLL_INTERVAL, which Zephyr declares in MINUTES with `range 1 43200`, so a hawkbit project's value must be a whole number of minutes between 60 s and 2592000 s -- anything else is refused at emit rather than written out of range."
+          "description": "How often the device polls the deployment server for updates, in SECONDS.  On a Mender Yocto slice it sets MENDER_UPDATE_POLL_INTERVAL_SECONDS (meta-mender default 1800 s); SDK default is 1800 s (30 min) for battery-friendly nodes.  `provider: hawkbit` converts to CONFIG_HAWKBIT_POLL_INTERVAL, which Zephyr declares in MINUTES with `range 1 43200`, so a hawkbit project's value must be a whole number of minutes between 60 s and 2592000 s -- anything else is refused at emit rather than written out of range."
         },
         "storage": {
           "type": "object",

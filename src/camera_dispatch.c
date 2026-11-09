@@ -247,14 +247,20 @@ void alp_camera_close(alp_camera_t *h)
 	if (h == NULL) {
 		return;
 	}
-	/* Sleep-poll drain (issue #629): this pool counts alp_camera_capture(),
-	 * which can block up to its caller's timeout_ms, so
-	 * alp_handle_begin_close_blocking() sleeps between polls instead of
-	 * busy-spinning (same rationale as rpc_dispatch.c's _rpc_drain(),
-	 * GHSA-xhm8). Idempotent: a second/never-opened close no-ops. */
-	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) {
+	/* Cancel, then sleep-poll drain (issue #629): this pool counts
+	 * alp_camera_capture(), which can block up to its caller's
+	 * timeout_ms.  Mark the handle closing, wake the blocked capture()
+	 * (it returns ALP_ERR_NOT_READY), and only then wait for it to leave
+	 * -- the drain sleeps between polls instead of busy-spinning (same
+	 * rationale as rpc_dispatch.c's _rpc_drain(), GHSA-xhm8).
+	 * Idempotent: a second/never-opened close no-ops. */
+	if (!alp_handle_mark_closing(&h->lifecycle, &h->state.closing)) {
 		return;
 	}
+	if (h->state.ops != NULL && h->state.ops->cancel != NULL) {
+		h->state.ops->cancel(&h->state);
+	}
+	alp_handle_drain_blocking(&h->active_ops);
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}

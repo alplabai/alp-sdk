@@ -53,6 +53,7 @@ flash_args contract:
 
 from __future__ import annotations
 
+import errno
 import os
 import posixpath
 import shlex
@@ -253,14 +254,66 @@ def _busy_block_devices() -> "list[tuple[str, str]]":
             tail = ln.split(" - ", 1)[1].split()
             if len(tail) >= 2 and tail[1].startswith("/dev/"):
                 busy.append((f"mounted at {mountpoint}", os.path.basename(os.path.realpath(tail[1]))))
-    try:
-        for ln in _PROC_SWAPS.read_text(encoding="utf-8").splitlines()[1:]:
-            src = ln.split()[0] if ln.strip() else ""
-            if src.startswith("/dev/"):
-                busy.append(("active swap", os.path.basename(os.path.realpath(src))))
-    except OSError:
-        pass
+    # An unreadable /proc/swaps raises: swap cannot be ruled out, so refuse.
+    for ln in _PROC_SWAPS.read_text(encoding="utf-8").splitlines()[1:]:
+        src = ln.split()[0] if ln.strip() else ""
+        if src.startswith("/dev/"):
+            busy.append(("active swap", os.path.basename(os.path.realpath(src))))
     return busy
+
+
+def _rdev(path: Path) -> int:
+    """Device number of the node at ``path`` (injectable for tests)."""
+    return os.stat(path).st_rdev
+
+
+def _open_excl(path: str) -> None:
+    """Open ``path`` read-only with ``O_EXCL`` and close it.  On a block
+    device ``O_EXCL`` without ``O_CREAT`` fails with ``EBUSY`` while the
+    kernel holds the device (mounted, swap, dm/md/LUKS member), whichever
+    mount namespace the caller lives in.  Injectable for tests.
+    """
+    os.close(os.open(path, os.O_RDONLY | os.O_EXCL))
+
+
+def _kernel_name(resolved: Path) -> str:
+    """Kernel block name of the node at ``resolved``, by device number
+    (``st_rdev`` -> /sys/dev/block/maj:min), so mknod aliases and real-node
+    ``/dev/root`` match.  Raises ``OSError`` when it cannot be resolved.
+    """
+    rdev = _rdev(resolved)
+    link = _SYS_DEV_BLOCK / f"{os.major(rdev)}:{os.minor(rdev)}"
+    if not link.exists():
+        raise OSError(f"no block device {os.major(rdev)}:{os.minor(rdev)} in {_SYS_DEV_BLOCK}")
+    return os.path.basename(os.path.realpath(link))
+
+
+def _kernel_busy(resolved: Path, name: str) -> "str | None":
+    """Namespace-independent in-use check on ``name`` and its partitions:
+    ``O_EXCL`` open (EBUSY) and a non-empty sysfs ``holders`` (opened LUKS,
+    assembled md, an LV in use).  Returns a reason, or raises ``OSError``
+    for an errno meaning "cannot tell" (EACCES, EIO, ...), which the caller
+    refuses.  ENOENT on a *partition* node is skipped -- a container may
+    pass only the whole disk through, and that partition's ``holders`` is
+    still checked -- but ENOENT on the target itself is "cannot tell".
+    """
+    node = _SYS_BLOCK / name
+    children = [c for c in sorted(os.listdir(node))
+                if (node / c / "partition").exists()]
+    for dev in [name, *children]:
+        holders = _SYS_BLOCK / dev / "holders"
+        if holders.is_dir() and os.listdir(holders):
+            return f"'{dev}' has holders (dm/md/LUKS/LV)"
+        path = str(resolved) if dev == name else f"/dev/{dev}"
+        try:
+            _open_excl(path)
+        except OSError as exc:
+            if exc.errno == errno.EBUSY:
+                return f"'{dev}' is held by the kernel (EBUSY)"
+            if exc.errno == errno.ENOENT and dev != name:
+                continue
+            raise
+    return None
 
 
 def _require_unused_device(resolved: Path) -> "str | None":
@@ -271,7 +324,9 @@ def _require_unused_device(resolved: Path) -> "str | None":
     --execute, so a mistyped ``--emmc-device /dev/sda`` would otherwise
     overwrite the workstation's system disk.  Fails closed: when the mount
     table or sysfs cannot be read the target cannot be proven unused, so it
-    is refused.  Multi-device btrfs members other than the one the kernel
+    is refused, as is an unreadable /proc/swaps.  Also namespace-independent
+    (container with the host disk passed through): ``O_EXCL`` EBUSY and sysfs
+    holders.  Multi-device btrfs members other than the one the kernel
     reports, and ZFS pool members, are not detected.  Returns ``None`` when
     safe.
     """
@@ -282,7 +337,19 @@ def _require_unused_device(resolved: Path) -> "str | None":
             f"yocto_wic: refusing target '{resolved}' -- cannot verify it is "
             f"not mounted ({exc}); write from a Linux host with /proc and /sys."
         )
-    target = os.path.basename(os.path.realpath(resolved))
+    try:
+        target = _kernel_name(resolved)
+        reason = _kernel_busy(resolved, target)
+    except OSError as exc:
+        return (
+            f"yocto_wic: refusing target '{resolved}' -- cannot verify it is "
+            f"idle ({exc})."
+        )
+    if reason:
+        return (
+            f"yocto_wic: refusing target '{resolved}' -- {reason}; it is in "
+            f"use on this host (any namespace); release it first."
+        )
     for what, name in busy:
         if target in _block_family(name):
             return (

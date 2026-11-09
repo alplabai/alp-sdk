@@ -13,7 +13,7 @@
  *     (`<mnt_point>/alp_storage.bin`) for
  *     INTERNAL_FLASH/QSPI_FLASH/OSPI_FLASH; erase is emulated by
  *     overwriting the region with 0xFF.  `instance_id` is the flash-area
- *     ID of the partition.  The mount is found by its BACKING partition,
+ *     ID of the partition (0..255; a larger value returns ALP_ERR_INVAL).  The mount is found by its BACKING partition,
  *     not its name: the generated `alp_storage_mounts[]` entry whose
  *     `storage_dev == PARTITION_ID(<name>_partition)` and whose
  *     `mnt_point` is currently mounted (any board.yaml `mount:` such as

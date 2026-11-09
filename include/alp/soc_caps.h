@@ -387,7 +387,7 @@
  * Capability layer -- portable, SoM-agnostic.  Derived from the
  * active CONFIG_ALP_SOC_* selection via the macros above.
  *
- * Counts collapse to 0/1 via `> 0`, so ALP_HAS() is always a
+ * Counts and flags collapse to 0/1 via `> 0`, so ALP_HAS() is always a
  * constant expression and safe inside #if and static_assert.
  * --------------------------------------------------------------- */
 #define ALP_CAP_HW_I2C      (ALP_SOC_I2C_COUNT > 0)
@@ -398,7 +398,7 @@
 #define ALP_CAP_HW_ADC      (ALP_SOC_ADC_COUNT > 0)
 #define ALP_CAP_HW_DAC      (ALP_SOC_DAC_COUNT > 0)
 #define ALP_CAP_HW_CAN      (ALP_SOC_CAN_COUNT > 0)
-#define ALP_CAP_HW_CAN_FD   (ALP_SOC_CAN_FD_SUPPORTED)
+#define ALP_CAP_HW_CAN_FD   (ALP_SOC_CAN_FD_SUPPORTED > 0)
 #define ALP_CAP_HW_RTC      (ALP_SOC_RTC_COUNT > 0)
 #define ALP_CAP_HW_WDT      (ALP_SOC_WDT_COUNT > 0)
 #define ALP_CAP_HW_QENC     (ALP_SOC_QENC_COUNT > 0)
@@ -408,19 +408,19 @@
 #define ALP_CAP_HW_USB      (ALP_SOC_USB_COUNT > 0)
 #define ALP_CAP_HW_MIPI_CSI (ALP_SOC_MIPI_CSI_COUNT > 0)
 #define ALP_CAP_HW_MIPI_DSI (ALP_SOC_MIPI_DSI_COUNT > 0)
-#define ALP_CAP_XSPI_DMA    (ALP_SOC_XSPI_DMA)
-#define ALP_CAP_HEXSPI_DMA  (ALP_SOC_HEXSPI_DMA)
-#define ALP_CAP_EMMC_DMA    (ALP_SOC_EMMC_DMA)
-#define ALP_CAP_QUADSPI_DMA (ALP_SOC_QUADSPI_DMA)
-#define ALP_CAP_NPU_DRPAI   (ALP_SOC_DRP_AI)
-#define ALP_CAP_HELIUM_MVE  (ALP_SOC_HELIUM_MVE)
-#define ALP_CAP_NEON        (ALP_SOC_NEON)
-#define ALP_CAP_GPU2D       (ALP_SOC_GPU2D)
-#define ALP_CAP_DAVE2D      (ALP_SOC_DAVE2D)
-#define ALP_CAP_CRYPTOCELL  (ALP_SOC_CRYPTOCELL)
-#define ALP_CAP_INLINE_AES  (ALP_SOC_INLINE_AES)
-#define ALP_CAP_CAU         (ALP_SOC_CAU)
-#define ALP_CAP_DMA2D       (ALP_SOC_DMA2D)
+#define ALP_CAP_XSPI_DMA    (ALP_SOC_XSPI_DMA > 0)
+#define ALP_CAP_HEXSPI_DMA  (ALP_SOC_HEXSPI_DMA > 0)
+#define ALP_CAP_EMMC_DMA    (ALP_SOC_EMMC_DMA > 0)
+#define ALP_CAP_QUADSPI_DMA (ALP_SOC_QUADSPI_DMA > 0)
+#define ALP_CAP_NPU_DRPAI   (ALP_SOC_DRP_AI > 0)
+#define ALP_CAP_HELIUM_MVE  (ALP_SOC_HELIUM_MVE > 0)
+#define ALP_CAP_NEON        (ALP_SOC_NEON > 0)
+#define ALP_CAP_GPU2D       (ALP_SOC_GPU2D > 0)
+#define ALP_CAP_DAVE2D      (ALP_SOC_DAVE2D > 0)
+#define ALP_CAP_CRYPTOCELL  (ALP_SOC_CRYPTOCELL > 0)
+#define ALP_CAP_INLINE_AES  (ALP_SOC_INLINE_AES > 0)
+#define ALP_CAP_CAU         (ALP_SOC_CAU > 0)
+#define ALP_CAP_DMA2D       (ALP_SOC_DMA2D > 0)
 #define ALP_CAP_HW_I3C      (ALP_SOC_I3C_COUNT > 0)
 
 #define ALP_HAS(cap) (ALP_CAP_##cap)

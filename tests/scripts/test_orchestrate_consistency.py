@@ -853,3 +853,50 @@ def test_log_module_multi_guard_goes_live_when_every_guard_is_set() -> None:
     assert "CONFIG_MBEDTLS_LOG_LEVEL_DBG=y" not in lines
     assert any(ln.startswith("# CONFIG_MBEDTLS_LOG_LEVEL_DBG=y")
                for ln in lines)
+
+
+_OTA_STORAGE_BODY = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  m55_he:
+    os: zephyr
+    app: ./he
+
+ota:
+  provider: mender
+  artifact_name: alp-aen-test
+
+storage:
+  - name: a_data
+    size_kib: 64
+    flash_device: mram_main
+    {pin_a}
+  - name: b_data
+    size_kib: 64
+    flash_device: mram_main
+"""
+
+
+def test_ota_requires_offset_kib_on_every_partition(tmp_path: Path) -> None:
+    """#2988: with ota: enabled, an unpinned storage[] entry is refused and named."""
+    path = _write_board(tmp_path, _OTA_STORAGE_BODY.format(pin_a="offset_kib: 0"))
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "offset_kib" in msg and "b_data" in msg and "a_data" not in msg
+
+
+def test_ota_all_partitions_pinned_passes_validation(tmp_path: Path) -> None:
+    body = _OTA_STORAGE_BODY.format(pin_a="offset_kib: 0").rstrip("\n")
+    body += "\n    offset_kib: 64\n"
+    project = load_board_yaml(_write_board(tmp_path, body))
+    assert all(e.offset_kib is not None for e in project.storage)
+
+
+def test_ota_provider_none_does_not_require_offset_kib(tmp_path: Path) -> None:
+    body = _OTA_STORAGE_BODY.format(pin_a="").replace(
+        "provider: mender", "provider: none")
+    project = load_board_yaml(_write_board(tmp_path, body))
+    assert any(e.offset_kib is None for e in project.storage)

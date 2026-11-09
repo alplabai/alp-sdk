@@ -3963,6 +3963,10 @@
           "hash": "f4d733b357026eaf",
           "signature": "alp_status_t drv8825_set_direction(drv8825_t *dev, bool forward);"
         },
+        "drv8825_set_enable": {
+          "hash": "136941058e708c71",
+          "signature": "alp_status_t drv8825_set_enable(drv8825_t *dev, bool enabled);"
+        },
         "drv8825_set_microstep": {
           "hash": "7aad577eb44517ed",
           "signature": "alp_status_t drv8825_set_microstep(drv8825_t *dev, drv8825_ustep_t mode);"
@@ -4282,9 +4286,17 @@
           "hash": "37487daca310bd65",
           "value": "0x08000000u"
         },
+        "GD32_SWD_FMC_FLASH_BYTES": {
+          "hash": "9aa02da11ddf460f",
+          "value": "(512u * 1024u)"
+        },
         "GD32_SWD_FMC_SECTOR_BYTES": {
           "hash": "6dfbbf65b00764e0",
           "value": "2048u"
+        },
+        "GD32_SWD_FMC_SECTOR_COUNT": {
+          "hash": "73194c71ea87db19",
+          "value": "(GD32_SWD_FMC_FLASH_BYTES / GD32_SWD_FMC_SECTOR_BYTES)"
         },
         "GD32_SWD_FMC_SRAM_BASE": {
           "hash": "7fc23683f5251981",
@@ -7710,6 +7722,14 @@
           "hash": "2c67b6ffd4fae807",
           "signature": "alp_status_t rv3028c7_dispatch_irq(rv3028c7_t *ctx, uint8_t *status_seen);"
         },
+        "rv3028c7_event_arm": {
+          "hash": "07e0b2731499da40",
+          "signature": "alp_status_t rv3028c7_event_arm(rv3028c7_t *ctx, bool active_high, rv3028c7_evi_filter_t filter);"
+        },
+        "rv3028c7_event_disarm": {
+          "hash": "72647dd87409316b",
+          "signature": "alp_status_t rv3028c7_event_disarm(rv3028c7_t *ctx);"
+        },
         "rv3028c7_get_time": {
           "hash": "63de6081431873a4",
           "signature": "alp_status_t rv3028c7_get_time(rv3028c7_t *ctx, rv3028c7_time_t *out);"
@@ -7814,6 +7834,17 @@
             "RV3028C7_CLKOUT_LOW = 7"
           ],
           "hash": "17e79a83af25706d",
+          "kind": "enum"
+        },
+        "rv3028c7_evi_filter_t": {
+          "definition": "typedef enum { RV3028C7_EVI_FILTER_NONE = 0, RV3028C7_EVI_FILTER_3_9_MS = 1, RV3028C7_EVI_FILTER_15_6_MS = 2, RV3028C7_EVI_FILTER_125_MS = 3, } rv3028c7_evi_filter_t;",
+          "enumerators": [
+            "RV3028C7_EVI_FILTER_NONE = 0",
+            "RV3028C7_EVI_FILTER_3_9_MS = 1",
+            "RV3028C7_EVI_FILTER_15_6_MS = 2",
+            "RV3028C7_EVI_FILTER_125_MS = 3"
+          ],
+          "hash": "30d1b0bf3dd7970e",
           "kind": "enum"
         },
         "rv3028c7_src_handler_t": {
@@ -14629,36 +14660,36 @@
       "functions": {},
       "macros": {
         "ALP_CAP_CAU": {
-          "hash": "9f4302620b16b573",
-          "value": "(ALP_SOC_CAU)"
+          "hash": "e0cf94eb92893ff1",
+          "value": "(ALP_SOC_CAU > 0)"
         },
         "ALP_CAP_CRYPTOCELL": {
-          "hash": "d9e5836873835e81",
-          "value": "(ALP_SOC_CRYPTOCELL)"
+          "hash": "09fd2326eb389f50",
+          "value": "(ALP_SOC_CRYPTOCELL > 0)"
         },
         "ALP_CAP_DAVE2D": {
-          "hash": "7c287d35d490bd93",
-          "value": "(ALP_SOC_DAVE2D)"
+          "hash": "b25fba53725ac644",
+          "value": "(ALP_SOC_DAVE2D > 0)"
         },
         "ALP_CAP_DMA2D": {
-          "hash": "bd1b8ac6ea2c47d4",
-          "value": "(ALP_SOC_DMA2D)"
+          "hash": "2c4b7cc1a8c0162f",
+          "value": "(ALP_SOC_DMA2D > 0)"
         },
         "ALP_CAP_EMMC_DMA": {
-          "hash": "7aea83817767d724",
-          "value": "(ALP_SOC_EMMC_DMA)"
+          "hash": "f0d068e5eb1059c5",
+          "value": "(ALP_SOC_EMMC_DMA > 0)"
         },
         "ALP_CAP_GPU2D": {
-          "hash": "ba53a01d7fbf30fc",
-          "value": "(ALP_SOC_GPU2D)"
+          "hash": "029d03a4a594f3bb",
+          "value": "(ALP_SOC_GPU2D > 0)"
         },
         "ALP_CAP_HELIUM_MVE": {
-          "hash": "5581405c3d20ae89",
-          "value": "(ALP_SOC_HELIUM_MVE)"
+          "hash": "5d9e21907e10076c",
+          "value": "(ALP_SOC_HELIUM_MVE > 0)"
         },
         "ALP_CAP_HEXSPI_DMA": {
-          "hash": "9a3251edaaf99f62",
-          "value": "(ALP_SOC_HEXSPI_DMA)"
+          "hash": "aabbb2cda31075eb",
+          "value": "(ALP_SOC_HEXSPI_DMA > 0)"
         },
         "ALP_CAP_HW_ADC": {
           "hash": "1f872a36d423604e",
@@ -14669,8 +14700,8 @@
           "value": "(ALP_SOC_CAN_COUNT > 0)"
         },
         "ALP_CAP_HW_CAN_FD": {
-          "hash": "cc3adbe7dd495ed3",
-          "value": "(ALP_SOC_CAN_FD_SUPPORTED)"
+          "hash": "c81120d0e43526bf",
+          "value": "(ALP_SOC_CAN_FD_SUPPORTED > 0)"
         },
         "ALP_CAP_HW_DAC": {
           "hash": "0f8836815d0d9436",
@@ -14737,24 +14768,24 @@
           "value": "(ALP_SOC_WDT_COUNT > 0)"
         },
         "ALP_CAP_INLINE_AES": {
-          "hash": "2485d38c457f2cc6",
-          "value": "(ALP_SOC_INLINE_AES)"
+          "hash": "7c369bdab180b0e1",
+          "value": "(ALP_SOC_INLINE_AES > 0)"
         },
         "ALP_CAP_NEON": {
-          "hash": "4294b4b5e2159a7f",
-          "value": "(ALP_SOC_NEON)"
+          "hash": "5722f00be3502d50",
+          "value": "(ALP_SOC_NEON > 0)"
         },
         "ALP_CAP_NPU_DRPAI": {
-          "hash": "7093de00f8a12ca4",
-          "value": "(ALP_SOC_DRP_AI)"
+          "hash": "5411c934de1b4c36",
+          "value": "(ALP_SOC_DRP_AI > 0)"
         },
         "ALP_CAP_QUADSPI_DMA": {
-          "hash": "776bb6d8731c2a11",
-          "value": "(ALP_SOC_QUADSPI_DMA)"
+          "hash": "7d7b5d84a726b21c",
+          "value": "(ALP_SOC_QUADSPI_DMA > 0)"
         },
         "ALP_CAP_XSPI_DMA": {
-          "hash": "dd0012dcc15f11e9",
-          "value": "(ALP_SOC_XSPI_DMA)"
+          "hash": "7a8fe6b823e15d0b",
+          "value": "(ALP_SOC_XSPI_DMA > 0)"
         },
         "ALP_HAS": {
           "hash": "14d66ec4232ed62c",

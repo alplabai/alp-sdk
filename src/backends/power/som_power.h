@@ -356,8 +356,10 @@ bool alp_som_power_reset_syndrome_trusted(void);
 alp_status_t alp_som_power_rtc_flags_pending(bool *pending);
 
 /** Arm the RV-3028 external-event wake (#2811): with EIE still off, write 0 to a stale EVF, then
- *  set EIE (CONTROL_2 10h bit 2) so an EVI event drives /INT.  Event Control (13h) is not
- *  written: its power-on value is the one this relies on (see alif_se_power.c). */
+ *  set EIE (CONTROL_2 10h bit 2) so an EVI event drives /INT.  Event Control (13h) is set to
+ *  active low, level detect with the 3.9 ms filter (EHL 0, ET 01, TSS 0; TSOW kept), the same
+ *  values as rv3028c7_event_arm(); ALP_ERR_BUSY if the time stamp is bound to the backup
+ *  switchover (TSE + TSS). */
 alp_status_t alp_som_power_rtc_evi_arm(void);
 
 /** Clear EIE again and write 0 to EVF.  Idempotent. */

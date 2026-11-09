@@ -1120,8 +1120,12 @@ def _validate_cross_fields(
         storage_name_set = {e.name for e in storage_entries}
         try:
             mem_map = resolve_memory_map(som_preset, metadata_root)
-        except Exception:                                # noqa: BLE001
-            mem_map = []
+        except Exception as exc:                         # noqa: BLE001
+            # Never fall back to an empty map: every PSA ref would then fail
+            # with a misleading "does not resolve" error that hides this one.
+            raise OrchestratorError(
+                f"board.yaml `security.psa:` cannot be validated: resolving "
+                f"the SoM memory map failed: {exc}") from exc
         region_names = {
             str(r.get("name")) for r in mem_map
             if isinstance(r, dict) and r.get("name")

@@ -261,6 +261,29 @@ bool alp_handle_begin_close_blocking(uint8_t *lifecycle, uint32_t *active_ops);
  */
 void alp_handle_drain_blocking(uint32_t *active_ops);
 
+/**
+ * @brief First half of a cancelling close: CAS OPEN -> CLOSING, then
+ *        publish @p closing so a blocked op can see it.
+ *
+ * Used by handle classes whose ops block (camera capture, hwsem lock,
+ * audio read/write, BLE GATT).  The closer runs the backend's cancel()
+ * hook and then alp_handle_drain_blocking() -- together the same drain
+ * alp_handle_begin_close_blocking() performs, with a wake-up in between.
+ * The flag is level-triggered (never cleared before the slot is
+ * re-claimed), so a waiter that has not yet reached its wait still
+ * sees it.
+ *
+ * @return false if the handle was not OPEN (idempotent close).
+ */
+static inline bool alp_handle_mark_closing(uint8_t *lifecycle, bool *closing)
+{
+	if (!alp_lifecycle_cas(lifecycle, ALP_HANDLE_LC_OPEN, ALP_HANDLE_LC_CLOSING)) {
+		return false;
+	}
+	__atomic_store_n(closing, true, __ATOMIC_RELEASE);
+	return true;
+}
+
 /* --------------------------------------------------------------------
  * Reentrant self-close guard (issue #756).
  *

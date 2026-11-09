@@ -26,6 +26,11 @@ the GD32 application bootloader does.
 
 ### Contract
 
+With `ota.provider` set (not `none`) in `board.yaml`, every `storage:` partition must pin
+`offset_kib:` so a rename or added partition cannot shift OTA slot offsets;
+the orchestrator validator refuses an unpinned layout (SoM `memory_map:`
+regions are not covered).
+
 The server side (Hakan's repo) hands the device an artifact
 (`.mender` tarball) over HTTPS.  The device must:
 
@@ -46,8 +51,8 @@ The server side (Hakan's repo) hands the device an artifact
    mismatch.
 4. **Commit + reset.** Mender flips the bootloader's A/B selector,
    issues a reset.
-5. **Confirm health post-reset.** Within `MENDER_INVENTORY_INTERVAL`
-   (default 60 s) the device confirms it boots, contacts the
+5. **Confirm health post-reset.** Within `MENDER_UPDATE_POLL_INTERVAL_SECONDS`
+   (`ota.poll_interval_s`; meta-mender default 1800 s) the device confirms it boots, contacts the
    server, and acknowledges the new version.  If the device
    doesn't confirm within `MENDER_RETRY_POLL` (default 5 min), the
    bootloader rolls back to the previous slot on the next reset.

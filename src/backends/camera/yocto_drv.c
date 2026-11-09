@@ -86,6 +86,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -156,6 +157,11 @@ typedef struct cam {
 	bool     streaming;
 	bool     got_frame;
 
+	/* eventfd close() writes to wake a capture() blocked in poll(); it is
+	 * polled alongside the video node and never read, so it stays
+	 * readable for a capture() that arrives after the cancel. */
+	int cancel_fd;
+
 	/* cached bounce rows for the uncached V4L2 mapping (see cam_cr10_unpack_mapped) */
 	uint8_t *scratch;
 
@@ -187,12 +193,12 @@ static int cam_ioctl(int fd, unsigned long req, void *arg)
 	return rc;
 }
 
-static int cam_poll(struct pollfd *p, int timeout_ms)
+static int cam_poll(struct pollfd *p, nfds_t nfds, int timeout_ms)
 {
 	if (g_cam_poll != NULL) return g_cam_poll(p, timeout_ms);
 	int rc;
 	do {
-		rc = poll(p, 1, timeout_ms);
+		rc = poll(p, nfds, timeout_ms);
 	} while (rc < 0 && errno == EINTR);
 	return rc;
 }
@@ -844,9 +850,14 @@ y_open(const alp_camera_config_t *cfg, alp_camera_backend_state_t *st, alp_capab
 	if (cfg->width == 0u || cfg->height == 0u) return ALP_ERR_INVAL;
 	cam_t *c = calloc(1, sizeof(*c));
 	if (c == NULL) return ALP_ERR_NOMEM;
-	st->be_data = c;
+	c->cancel_fd = -1;
+	st->be_data  = c;
 
 	alp_status_t rc = (g_cam_discover != NULL ? g_cam_discover : cam_discover)(cfg->camera_id, c);
+	if (rc == ALP_OK) {
+		c->cancel_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+		if (c->cancel_fd < 0) rc = ALP_ERR_IO;
+	}
 	if (rc == ALP_OK) rc = cam_configure(c, cfg);
 	if (rc == ALP_OK) rc = cam_alloc_buffers(c);
 	if (rc != ALP_OK) {
@@ -911,10 +922,15 @@ y_capture(alp_camera_backend_state_t *st, alp_camera_frame_t *out, uint32_t time
 		if (slot == c->nbuf) return ALP_ERR_BUSY; /* release() a frame first */
 	}
 
-	struct pollfd p  = { .fd = fd, .events = POLLIN };
-	int           to = timeout_ms > (uint32_t)INT_MAX ? -1 : (int)timeout_ms;
-	int           pr = cam_poll(&p, to);
+	/* Poll the cancel eventfd with the video node: a concurrent close()
+	 * writes it, and the woken capture() reports ALP_ERR_NOT_READY. */
+	struct pollfd  pfds[2] = { { .fd = fd, .events = POLLIN },
+		                       { .fd = c->cancel_fd, .events = POLLIN } };
+	struct pollfd *p       = &pfds[0];
+	int            to      = timeout_ms > (uint32_t)INT_MAX ? -1 : (int)timeout_ms;
+	int            pr      = cam_poll(pfds, 2, to);
 	if (pr < 0) return ALP_ERR_IO;
+	if ((pfds[1].revents & POLLIN) != 0) return ALP_ERR_NOT_READY;
 	if (pr == 0) {
 		if (!c->got_frame) {
 			fprintf(stderr,
@@ -924,7 +940,7 @@ y_capture(alp_camera_backend_state_t *st, alp_camera_frame_t *out, uint32_t time
 		}
 		return ALP_ERR_TIMEOUT;
 	}
-	if (p.revents & (POLLERR | POLLNVAL)) return ALP_ERR_IO;
+	if (p->revents & (POLLERR | POLLNVAL)) return ALP_ERR_IO;
 
 	struct v4l2_buffer b;
 	memset(&b, 0, sizeof(b));
@@ -1000,6 +1016,14 @@ static alp_status_t y_configure_isp(alp_camera_backend_state_t    *st,
 	return ALP_ERR_NOSUPPORT;
 }
 
+static void y_cancel(alp_camera_backend_state_t *st)
+{
+	cam_t *c = st->be_data;
+	if (c == NULL || c->cancel_fd < 0) return;
+	uint64_t one = 1;
+	(void)!write(c->cancel_fd, &one, sizeof(one));
+}
+
 static void y_close(alp_camera_backend_state_t *st)
 {
 	cam_t *c = st->be_data;
@@ -1010,6 +1034,7 @@ static void y_close(alp_camera_backend_state_t *st)
 	if (c->vblank_saved) (void)cam_set_ctrl(c->hop[0].fd, V4L2_CID_VBLANK, c->vblank_orig);
 	cam_free_buffers(c);
 	cam_close_hops(c);
+	if (c->cancel_fd >= 0) close(c->cancel_fd);
 	free(c);
 	st->be_data = NULL;
 }
@@ -1021,6 +1046,7 @@ static const alp_camera_ops_t _ops = {
 	.capture       = y_capture,
 	.release       = y_release,
 	.configure_isp = y_configure_isp,
+	.cancel        = y_cancel,
 	.close         = y_close,
 };
 

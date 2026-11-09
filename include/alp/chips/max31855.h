@@ -51,7 +51,8 @@ alp_status_t max31855_init(max31855_t *dev, alp_spi_t *spi);
  * @param tc_milli_c        Output: thermocouple temperature (milli-C).  Optional.
  * @param internal_milli_c  Output: internal cold-junction (milli-C). Optional.
  * @param fault_flags       Output: bitmap of fault flags.            Optional.
- * @return `ALP_OK` on success.
+ * @return `ALP_OK` on success; `ALP_ERR_IO` when the chip reports a fault (D16;
+ *         OC / SCG / SCV), with the outputs still filled in for diagnosis.
  */
 alp_status_t max31855_read(max31855_t *dev,
                            int32_t    *tc_milli_c,

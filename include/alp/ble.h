@@ -315,8 +315,14 @@ alp_status_t alp_ble_disconnect(alp_ble_conn_t *conn);
  *       timeout as a reason to close the connection, not to retry immediately.
  *       Passing @p timeout_ms of 0 is the pathological case: every such call
  *       consumes a slot until its peer replies.
+ * @note A concurrent @ref alp_ble_disconnect on @p conn wakes a blocked call
+ *       on the Zephyr backend, which returns ALP_ERR_NOT_READY (the
+ *       procedure is abandoned exactly as on a timeout).  The CC3501E bridge
+ *       backend cannot interrupt a transaction in flight: there the call
+ *       returns when the bridge answers or @p timeout_ms elapses (Refs #3103).
  *
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT /
+ * @return ALP_OK / ALP_ERR_NOT_READY (closed, or closed while waiting) /
+ *         ALP_ERR_INVAL / ALP_ERR_TIMEOUT /
  *         ALP_ERR_IO / ALP_ERR_BUSY (every concurrent-procedure slot is held by
  *         a still-outstanding read or write, including ones that already timed
  *         out; retry once one completes).
@@ -337,16 +343,18 @@ alp_status_t alp_ble_gatt_read(alp_ble_conn_t       *conn,
  * @param[in] len         Length, ≤ ATT_MTU − 3.
  * @param[in] timeout_ms  Max wait.
  *
- * @note Same non-cancellable timeout semantics as @ref alp_ble_gatt_read -- see
- *       its note.  The BT host may re-read the payload after this call
- *       returns (a long write is sent as a prepare-write sequence, and an
+ * @note Same non-cancellable timeout semantics, and the same wake-up on a
+ *       concurrent @ref alp_ble_disconnect (ALP_ERR_NOT_READY), as
+ *       @ref alp_ble_gatt_read -- see its notes.  The BT host may re-read the
+ *       payload after this call returns (a long write is sent as a prepare-write sequence, and an
  *       encryption-change retry re-encodes the request), so the Zephyr backend
  *       copies @p data -- at most 512 octets, the GATT attribute limit; a
  *       larger @p len returns ALP_ERR_INVAL -- into its own pool slot before
  *       starting the procedure.  The caller's buffer may be reused as soon as
  *       this call returns, even on ALP_ERR_TIMEOUT.
  *
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT /
+ * @return ALP_OK / ALP_ERR_NOT_READY (closed, or closed while waiting) /
+ *         ALP_ERR_INVAL / ALP_ERR_TIMEOUT /
  *         ALP_ERR_IO / ALP_ERR_BUSY (every concurrent-procedure slot is held by
  *         a still-outstanding read or write, including ones that already timed
  *         out; retry once one completes).

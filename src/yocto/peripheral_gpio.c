@@ -399,6 +399,10 @@ alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
 /* close() interrupt the poll() so the thread re-snapshots the slot    */
 /* table and picks up the change.                                      */
 /*                                                                     */
+/* Hot-unplug: on 6.1-cip43 (RZ/V BSP) a removed gpiochip does NOT     */
+/* wake a blocked poll().  The line fd reports POLLERR|POLLHUP at the  */
+/* dispatcher's next wake and that slot is disabled then (no spin).    */
+/*                                                                     */
 /* Callbacks run on the dispatcher thread, but OUTSIDE g_irq.mu (issue */
 /* #756) -- alp_gpio_irq_disable()/alp_gpio_close(), including a       */
 /* self-close/self-disable called from within a callback, may freely   */

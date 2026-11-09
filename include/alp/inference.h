@@ -372,10 +372,18 @@ alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tenso
  * @par DRP-AI3 is one process per board
  * DRP-AI3-only; see ext/renesas/inference.h.  The DX-M1 has no such limit.
  *
- * @par DRP-AI3 failures are not reported
- * The DRP-AI3 runtime's `Run()` returns void, so a job the driver
- * rejected or that timed out still returns @ref ALP_OK here.  Check the
- * output tensors if that matters to the application.
+ * @par DRP-AI3 failures
+ * The DRP-AI3 runtime's `Run()` returns void, so when this process still
+ * holds `/dev/drpai0` open the backend queries the driver
+ * (`DRPAI_GET_STATUS`, one extra open and close; the driver's open count
+ * is above 1, so that open/close do not reset the device): a job still
+ * running maps to @ref ALP_ERR_TIMEOUT, a recorded hardware error, reset or
+ * suspend to @ref ALP_ERR_IO.  A failed query (driver semaphore or
+ * shared-memory lock wait) returns @ref ALP_ERR_TIMEOUT, @ref ALP_ERR_BUSY
+ * or @ref ALP_ERR_IO.  If the runtime holds no fd the extra open would be
+ * the driver's first (init and device resets), so the query is skipped and
+ * the result is @ref ALP_OK.  A start the driver rejects before running is
+ * not seen and also returns @ref ALP_OK.
  *
  * @param[in] inf  Handle from @ref alp_inference_open.
  *

@@ -208,6 +208,9 @@ static int fake_ioctl(int fd, unsigned long req, void *arg)
 static int fake_poll(struct pollfd *p, int timeout_ms)
 {
 	(void)timeout_ms;
+	/* p[1] is the cancel eventfd; it is genuinely pollable, so a cancel
+	 * written before the call shows up as POLLIN exactly as in production. */
+	if (p[1].fd >= 0 && poll(&p[1], 1, 0) > 0) return 1;
 	p->revents = g_poll_ret > 0 ? POLLIN : 0;
 	return g_poll_ret;
 }
@@ -258,6 +261,7 @@ static void reset(void)
 static void make_chain(cam_t *c)
 {
 	memset(c, 0, sizeof(*c));
+	c->cancel_fd       = -1;
 	c->nhop            = 3;
 	c->hop[0].fd       = FD_SENSOR;
 	c->hop[0].src_pad  = 0;
@@ -946,8 +950,42 @@ static void test_walk(void)
 	ALP_ASSERT_EQ_INT(cam_walk(&t, 1, &c), ALP_ERR_NOT_READY);
 }
 
+/* close() cancels a blocked capture: once y_cancel() has written the
+ * eventfd, y_capture() returns NOT_READY instead of waiting (or reading a
+ * frame), and the eventfd stays readable for later calls. */
+static void test_cancel_wakes_capture_not_ready(void)
+{
+	reset();
+	g_sensor_codes[0] = MEDIA_BUS_FMT_Y10_1X10;
+	g_nsensor_codes   = 1;
+	cam_t c;
+	make_chain(&c);
+	alp_camera_config_t cfg = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 0);
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(cam_alloc_buffers(&c), ALP_OK);
+	c.cancel_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+	ALP_ASSERT_TRUE(c.cancel_fd >= 0);
+
+	alp_camera_backend_state_t st;
+	memset(&st, 0, sizeof(st));
+	st.be_data = &c;
+	alp_camera_frame_t fr;
+	ALP_ASSERT_EQ_INT(y_start(&st), ALP_OK);
+
+	g_poll_ret = 1; /* a frame IS ready: the cancel still wins */
+	y_cancel(&st);
+	ALP_ASSERT_EQ_INT(y_capture(&st, &fr, 10), ALP_ERR_NOT_READY);
+	ALP_ASSERT_EQ_INT(y_capture(&st, &fr, UINT32_MAX), ALP_ERR_NOT_READY);
+
+	(void)y_stop(&st);
+	close(c.cancel_fd);
+	cam_free_buffers(&c);
+	cam_close_hops(&c);
+}
+
 int main(void)
 {
+	test_cancel_wakes_capture_not_ready();
 	test_missing_alias_is_not_ready();
 	test_negotiation_y10_grey8();
 	test_negotiation_other_pixfmts();

@@ -250,20 +250,21 @@ alp_status_t alp_wdt_disable(alp_wdt_t *wdt);
 /**
  * @brief Release the handle.  NULL is a no-op.
  *
- * @par What this does NOT do
- * On Zephyr this does **not** disable the watchdog (see docs/abi-markers.md
- * for the v0.17.0 behaviour-change note on why).  The Yocto backend is the
- * exception: it disarms on close (see the backend list below), so portable
- * code that hands supervision off by closing its handle is only protected
- * on Zephyr.  Call @ref alp_wdt_disable
- * explicitly BEFORE close() if a best-effort, SoC-wide disable is
- * genuinely what the caller wants; its documented @ref
- * ALP_ERR_NOSUPPORT return tells you when the hardware can't honour
- * that.
+ * @par Portable contract
+ * Close releases the handle only; the SDK never asks the OS to disarm
+ * the watchdog on close.  Zephyr never stops it: the installed timeout
+ * keeps running, so after close() it must be fed by another owner or
+ * the board resets.  On Linux the watchdog keeps running after close()
+ * only when the driver supports magic close (WDIOF_MAGICCLOSE) or the
+ * kernel is nowayout; otherwise watchdog_release() stops it on close.
+ * Call @ref alp_wdt_disable explicitly BEFORE close() if a
+ * best-effort disable is what the caller wants; its documented
+ * @ref ALP_ERR_NOSUPPORT return tells you when the hardware can't
+ * honour that.  See docs/abi-markers.md for the v0.17.0 behaviour
+ * change.
  *
  * @par Backend-specific behaviour
- *   - Zephyr: releases the handle only.  The installed timeout keeps
- *     running -- Zephyr also has no per-channel *uninstall* -- so a
+ *   - Zephyr: Zephyr also has no per-channel *uninstall*, so a
  *     caller that stops feeding after close() still gets @ref
  *     ALP_WDT_RESET_SOC / @ref ALP_WDT_RESET_CPU (the hardware reset
  *     needs no live handle to fire).  @ref ALP_WDT_INTERRUPT_ONLY asks
@@ -290,10 +291,19 @@ alp_status_t alp_wdt_disable(alp_wdt_t *wdt);
  *     that protection is not restored; the failed @ref alp_wdt_open
  *     call's return does not distinguish this from a reclaim attempt
  *     that never touched the device.
- *   - Yocto: **disarms on close** (unlike Zephyr).  Closes this handle's
- *     own `/dev/watchdogN`, attempting a best-effort disarm (`WDIOS_DISABLECARD`, plus the magic-close
- *     write if the driver advertised it) first -- scoped to this
- *     handle's own device node, never another handle's.
+ *   - Yocto: closes this handle's own `/dev/watchdogN` WITHOUT issuing
+ *     `WDIOS_DISABLECARD` or the magic-close character 'V'.  Whether the
+ *     kernel then keeps the timer running is the driver's call: in
+ *     `watchdog_dev.c` (`watchdog_release`) a close without the magic
+ *     character keeps the watchdog running (and logs "watchdog did not
+ *     stop!") only when the driver advertises `WDIOF_MAGICCLOSE` or the
+ *     kernel is built with `CONFIG_WATCHDOG_NOWAYOUT` or the driver's `nowayout=` parameter.  On a driver that
+ *     advertises neither, the kernel stops the watchdog on close (and on
+ *     process exit or crash), so no reset follows.  A caller that needs
+ *     the guaranteed reset must confirm the board's watchdog driver
+ *     reports `WDIOF_MAGICCLOSE` (`WDIOC_GETSUPPORT`, or
+ *     `/sys/class/watchdog/watchdogN/options`) or runs a nowayout
+ *     kernel.
  *
  * @param[in] wdt  Handle from @ref alp_wdt_open, or NULL.
  */
