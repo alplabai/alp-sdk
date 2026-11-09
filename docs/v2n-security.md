@@ -71,9 +71,13 @@ What an N44 does with a signed image is untested.
    documents (root-of-trust, per-image signing keys and, for `encsign`, an
    image encryption key). Unset, the signing task fails. OP-TEE signs Trusted
    Applications with a *public* development key by default: a secure-boot
-   build refuses it and any other build warns. The TA key is never copied into
+   build refuses it and any other build warns; such an image runs TAs signed
+   by anyone who has that public key, so never ship it. The TA key is never copied into
    the OP-TEE dev kit that other recipes build against (the glue strips it); the
-   TA recipes get it from `ALP_SEC_TA_SIGN_KEY` directly.
+   TA recipes get it from `ALP_SEC_TA_SIGN_KEY` directly. A copy stays in the
+   optee-os work directory (`tmp/work`), which is not shared state; do not
+   archive `tmp/work` from a build that used a production key.
+   The switches take "1" or "0"; any other value stops the build.
 
 `alp-image-*` get `optee-client` when all gates hold. The package's test,
 example and sample tools (the sample can rewrite boot flash) go only into

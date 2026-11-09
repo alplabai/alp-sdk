@@ -5,8 +5,18 @@
 # anywhere else they would be ignored and the build would quietly produce
 # UNSIGNED firmware (or fail late in the wic step on an N44), so refuse.
 # Inherited globally from conf/distro/alp.conf; docs/v2n-security.md.
+# The package itself treats a switch as on when '1' is one of its
+# whitespace-separated words (bb.utils.contains), so test the same way; any
+# other non-empty value (yes, true, y) is refused because the package would
+# silently ignore it.
 python () {
-    on = [v for v in ('TRUSTED_BOARD_BOOT', 'ENABLE_SPD_OPTEE', 'ENABLE_RZ_SCE') if d.getVar(v) == '1']
+    on = []
+    for v in ('TRUSTED_BOARD_BOOT', 'ENABLE_SPD_OPTEE', 'ENABLE_RZ_SCE'):
+        words = (d.getVar(v) or '').split()
+        if any(w not in ('0', '1') for w in words):
+            bb.fatal("%s = \"%s\": use \"1\" or \"0\"; the Renesas security package ignores any other value." % (v, d.getVar(v)))
+        if '1' in words:
+            on.append(v)
     if not on:
         return
     if 'rz-security' in (d.getVar('BBFILE_COLLECTIONS') or '').split() and \

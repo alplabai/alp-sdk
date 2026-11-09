@@ -15,7 +15,7 @@ python alp_sec_check_ta_key () {
     import os
     k = d.getVar('ALP_SEC_TA_SIGN_KEY')
     if not k:
-        if d.getVar('TRUSTED_BOARD_BOOT') == '1':
+        if '1' in (d.getVar('TRUSTED_BOARD_BOOT') or '').split():
             bb.fatal("ALP_SEC_TA_SIGN_KEY is unset: a secure-boot build must not trust TAs signed with OP-TEE's public default key.")
         bb.warn("optee-os: TAs are signed with OP-TEE's PUBLIC default key (set ALP_SEC_TA_SIGN_KEY). Fine for bring-up, never for a product.")
     elif not os.path.isfile(k):
