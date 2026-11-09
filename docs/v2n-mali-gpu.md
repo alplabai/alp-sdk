@@ -76,8 +76,12 @@ measured. A zero-copy path (dma-buf import of the framebuffer) would change
 this and is not attempted here.
 
 Context: a 1x1 pbuffer on `EGL_DEFAULT_DISPLAY`. The Renesas default Mali
-userspace variant is `wayland`, which needs a running compositor; with none,
-open() degrades to the CPU. (The layer also ships an `fbdev` variant;
+userspace variant is `wayland`, whose default display needs a running
+compositor. With none (a headless board, or Weston inactive), the backend
+retries on a GBM display over `/dev/dri/renderD128` or `/dev/dri/card0`
+(`EGL_KHR_platform_gbm`) and logs `[gpu2d/gles] EGL display: GBM on <node>`;
+this needs libgbm at build time (`pkg-config gbm`, provided by
+`mali-library`). Only if both fail does open() degrade to the CPU. (The layer also ships an `fbdev` variant;
 selecting it is a vendor-layer decision, `MALI_BACKEND_DEFAULT`.)
 
 ## Build

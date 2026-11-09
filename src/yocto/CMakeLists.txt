@@ -829,14 +829,17 @@ endif()
 # GPU2D over EGL + GLES 3 (Mali-G31 on RZ/V2N).  ADR 0017 Tier-1.5:   #
 # yocto_gles.c uses only standard Khronos headers, so any conformant   #
 # EGL/GLES3 stack builds it.  The registry entry is a wildcard at      #
-# priority 50 above the CPU fallback; open() degrades to the CPU path   #
-# at run time when no GPU context can be created.                      #
+# priority 50 above the CPU fallback.  With libgbm found, a headless   #
+# board retries on a GBM display; open() degrades to the CPU path only #
+# when no GPU context can be created at all.                           #
 # ------------------------------------------------------------------ #
 if(ALP_SDK_USE_GPU2D_GLES)
     find_package(PkgConfig)
     if(PkgConfig_FOUND)
         pkg_check_modules(ALP_EGL IMPORTED_TARGET egl)
         pkg_check_modules(ALP_GLESV2 IMPORTED_TARGET glesv2)
+        # Optional: lets the backend open EGL headless through GBM.
+        pkg_check_modules(ALP_GBM IMPORTED_TARGET gbm)
     endif()
     if(ALP_EGL_FOUND AND ALP_GLESV2_FOUND)
         target_sources(alp_sdk PRIVATE
@@ -851,6 +854,11 @@ if(ALP_SDK_USE_GPU2D_GLES)
         endif()
         target_link_libraries(alp_sdk ${_alp_gles_vis} PkgConfig::ALP_EGL PkgConfig::ALP_GLESV2)
         set_property(GLOBAL APPEND PROPERTY ALP_SDK_PC_REQUIRES egl glesv2)
+        if(ALP_GBM_FOUND)
+            target_compile_definitions(alp_sdk PRIVATE ALP_SDK_GPU2D_GLES_GBM=1)
+            target_link_libraries(alp_sdk ${_alp_gles_vis} PkgConfig::ALP_GBM)
+            set_property(GLOBAL APPEND PROPERTY ALP_SDK_PC_REQUIRES gbm)
+        endif()
         unset(_alp_gles_vis)
     elseif(ALP_SDK_GPU2D_GLES_REQUIRED)
         message(FATAL_ERROR
