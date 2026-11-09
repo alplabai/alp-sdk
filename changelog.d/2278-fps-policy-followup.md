@@ -25,7 +25,7 @@ The policy is now graded by WHO asked, not by the errno a
     rc maps through the shared errno baseline (`alp_errno.h`) and `open()`
     fails with that mapped status instead of only warning. In TPG mode on
     `alif_isp_pico` (`config->controller == NULL`, no real sensor wired --
-    `src/backends/camera/alif_isp_pico.c:464`
+    `src/backends/camera/alif_isp_pico.c:465`
     ("In TPG mode (config->controller == NULL, no real sensor) isp_pico.c's")),
     `isp_pico.c`'s own `.set_frmival` returns `-ENOSYS`, so an explicit
     nonzero `cfg.fps` against a TPG-only build now fails `open()` with
@@ -43,13 +43,13 @@ The policy is now graded by WHO asked, not by the errno a
     -- reports the original request as a best guess with a `LOG_WRN` that it
     is unverified, and never logs it as an exact settle.
 
-`src/backends/camera/zephyr_video.c:282` ("fps AFTER format, never before:")
-and `src/backends/camera/v2n_n44_isp.c:282`
+`src/backends/camera/zephyr_video.c:283` ("fps AFTER format, never before:")
+and `src/backends/camera/v2n_n44_isp.c:283`
 ("fps AFTER format, same ordering rationale as zephyr_video.c (#2278).")
 call the helper, now right after format setup and before buffer setup, so its
 status can fail `open()`. `alif_isp_pico.c`
 keeps #2338's sensor-agnostic single `video_set_frmival(dev, ...)` on the
-ISP device itself (`src/backends/camera/alif_isp_pico.c:475`
+ISP device itself (`src/backends/camera/alif_isp_pico.c:476`
 ("alp_status_t fps_status = camera_apply_fps(dev, cfg->camera_id, cfg->fps, 10u, NULL);")),
 reaching whichever real sensor a shield wires up through the
 isp -> cam -> csi -> sensor forward chain -- OV5647, IMX296, or IMX335 --
