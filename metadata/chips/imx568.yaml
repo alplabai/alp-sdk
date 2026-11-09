@@ -9,6 +9,13 @@ driver_status:    none              # Linux-only part in this tree: no chips/imx
 display_name:     "Sony IMX568 5.1 MP Pregius S global-shutter MIPI CSI-2 sensor (Vision Components module)"
 vendor:           sony
 
+# Module designations as the Vision Components driver sources name them
+# (vc_mipi_nxp: "IMX568" mono, "IMX568C" colour).  The bare Sony sensor
+# ordering codes are not in any source we hold, so none is listed.
+mpn_population:
+  - "VC MIPI IMX568"
+  - "VC MIPI IMX568C"
+
 datasheet:
   primary:        "Vision Components MIPI CSI-2 camera module documentation (VC MIPI IMX568 / IMX568C)"
 
