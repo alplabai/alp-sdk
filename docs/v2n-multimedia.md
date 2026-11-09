@@ -51,14 +51,42 @@ LICENSE_FLAGS_ACCEPTED += "commercial_ffmpeg commercial_gstreamer1.0-libav comme
 There is no openly licensed hardware H.264 path on V2N: the encoder is reachable
 only through the closed Renesas libraries.
 
+## Encoder limits and speed
+
+Measured on E1M-V2M103 (2026-11-09), NV12/I420 frames from RAM, `sync=false`:
+
+| Encoder | 1920x1080 | 2472x2064 | 3840x2160 |
+|---|---|---|---|
+| `omxh264enc` (VCD) | 126 fps | not supported | not supported |
+| `omxh265enc` (VCD) | 136 fps | 52 fps | 33 fps |
+| `openh264enc` (software, 4 A55 threads) | 12.7 fps | 5.1 fps | not measured |
+
+- H.264 is limited to 1920x1080 by the silicon (RZ/V2N datasheet R01DS0466EJ0130,
+  level 4.2; anything larger fails at OMX port setup). For a larger sensor,
+  encode H.265 or scale to 1080p first (`vspmfilter`, see below).
+- The OMX encoders take NV12 or I420 only.
+- Software encoding is not a practical substitute for the hardware encoder at
+  these sizes.
+
+To build `openh264enc`, append to the plugins-bad PACKAGECONFIG **with a
+trailing space**: `PACKAGECONFIG:append:pn-gstreamer1.0-plugins-bad = " openh264 "`
+and accept `commercial_openh264`. The Renesas `meta-rz-distro` bbappend appends
+`"faac faad"` without a leading space, so an append without the trailing space
+is glued to it (`openh264faac`) and both options are silently dropped.
+
 ## Graphics compute
 
 - **Vulkan is not available.** `meta-rz-graphics` removes the `vulkan`
   DISTRO_FEATURE (`conf/layer.conf:17-19`) and the Mali DDK ships no Vulkan ICD.
   Use GLES or OpenCL.
-- **OpenCL comes from `libmali`**, which installs its own `libOpenCL.so`. Do not
-  also install the Khronos `opencl-icd-loader` without testing for a provider
-  collision.
+- **OpenCL comes from `libmali`**, which installs its own `libOpenCL.so`.
+  Measured on E1M-V2M103: one platform, OpenCL 3.0 (`v1.r54p1`), device
+  `Mali-G31 r0p0`, 1 compute unit at 630 MHz. libmali exports
+  `clIcdGetPlatformIDsKHR` (`cl_khr_icd`), so a Khronos ICD loader also works
+  with an `/etc/OpenCL/vendors/mali.icd` file naming `libmali.so` (not installed
+  by default). Extensions useful for camera work include
+  `cl_ext_image_raw10_raw12`, `cl_ext_yuv_images` and
+  `cl_khr_external_memory_dma_buf`.
 
 ## Camera to encoder (hardware path)
 
