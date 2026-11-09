@@ -365,20 +365,26 @@ static alp_status_t rv3028_clkout_restore(const struct i2c_dt_spec *i2c, bool pr
  * Arming the countdown goes through the chip driver instead (rtc hook,
  * som_power_rv3028.c): that procedure (App Manual Sec. 4.8.2) is not duplicated. */
 
-#define RV3028_REG_SECONDS   0x00u
-#define RV3028_REG_STATUS    0x0Eu
-#define RV3028_REG_CONTROL_2 0x10u
-#define RV3028_STATUS_PORF   0x01u
-#define RV3028_STATUS_EVF    0x02u
-#define RV3028_STATUS_AF     0x04u
-#define RV3028_STATUS_TF     0x08u
-#define RV3028_STATUS_UF     0x10u
-#define RV3028_STATUS_FLAGS  0x7Fu /* every latchable flag; EEbusy (bit7) is read-only */
-#define RV3028_CTRL2_UIE     0x20u
-#define RV3028_CTRL1_TE      0x04u
-#define RV3028_CTRL2_EIE     0x04u
-#define RV3028_CTRL2_AIE     0x08u
-#define RV3028_CTRL2_TIE     0x10u
+#define RV3028_REG_SECONDS    0x00u
+#define RV3028_REG_STATUS     0x0Eu
+#define RV3028_REG_CONTROL_2  0x10u
+#define RV3028_REG_EVENT_CTRL 0x13u
+#define RV3028_EVCTRL_EHL     0x40u
+#define RV3028_EVCTRL_ET      0x30u
+#define RV3028_EVCTRL_ET_3_9  0x10u /* ET = 01: level detect, 3.9 ms filter */
+#define RV3028_EVCTRL_TSS     0x01u
+#define RV3028_CTRL2_TSE      0x80u
+#define RV3028_STATUS_PORF    0x01u
+#define RV3028_STATUS_EVF     0x02u
+#define RV3028_STATUS_AF      0x04u
+#define RV3028_STATUS_TF      0x08u
+#define RV3028_STATUS_UF      0x10u
+#define RV3028_STATUS_FLAGS   0x7Fu /* every latchable flag; EEbusy (bit7) is read-only */
+#define RV3028_CTRL2_UIE      0x20u
+#define RV3028_CTRL1_TE       0x04u
+#define RV3028_CTRL2_EIE      0x04u
+#define RV3028_CTRL2_AIE      0x08u
+#define RV3028_CTRL2_TIE      0x10u
 
 static const struct i2c_dt_spec *rtc_i2c(void)
 {
@@ -526,15 +532,28 @@ alp_status_t alp_som_power_rtc_clear_stale_wake(bool keep_alarm)
 alp_status_t alp_som_power_rtc_evi_arm(void)
 {
 	const struct i2c_dt_spec *i2c = rtc_i2c();
-	uint8_t                   c2  = 0;
+	uint8_t                   c2 = 0, ev = 0;
 
 	if (i2c == NULL) {
 		return ALP_ERR_NOT_READY;
 	}
-	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0) {
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0 ||
+	    i2c_reg_read_byte_dt(i2c, RV3028_REG_EVENT_CTRL, &ev) != 0) {
 		return ALP_ERR_IO;
 	}
 	if ((c2 & RV3028_CTRL2_EIE) == 0u) {
+		/* Active low, level detect with the 3.9 ms filter, source = the EVI pin (TSS 0): a
+		 * request already held low when the sleep starts re-latches EVF and is not missed (an
+		 * edge detector would never see it, App. Manual Rev. 1.4 p.26 and p.71 note 6).  TSOW
+		 * is kept; a time stamp bound to the backup switchover (TSE + TSS) is not taken over. */
+		if ((c2 & RV3028_CTRL2_TSE) != 0u && (ev & RV3028_EVCTRL_TSS) != 0u) {
+			return ALP_ERR_BUSY;
+		}
+		ev = (uint8_t)((ev & ~(RV3028_EVCTRL_EHL | RV3028_EVCTRL_ET | RV3028_EVCTRL_TSS)) |
+		               RV3028_EVCTRL_ET_3_9);
+		if (i2c_reg_write_byte_dt(i2c, RV3028_REG_EVENT_CTRL, ev) != 0) {
+			return ALP_ERR_IO;
+		}
 		if (i2c_reg_write_byte_dt(
 		        i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_EVF)) != 0 ||
 		    i2c_reg_write_byte_dt(i2c, RV3028_REG_CONTROL_2, (uint8_t)(c2 | RV3028_CTRL2_EIE)) !=

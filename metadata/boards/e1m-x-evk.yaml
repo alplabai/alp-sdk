@@ -314,6 +314,8 @@ e1m_routes:
 #     show 0x42 and 0x68 answering next to 0x69. The addresses here are the
 #     as-built ones, after the carrier rework; no ID register was read at
 #     0x42, 0x68 or 0x69 (#2645).
+#   - 2026-10-06: E1M-V2M103 2026W38-0008 (unreworked carrier): 0x42 and 0x68
+#     do not answer; 0x69 answers but WHO_AM_I (0x75) reads 0x00, not 0x67.
 #   - The 3V3 (U21) and 1V8 (U31) monitors read ~0 V on the bus-
 #     voltage register (VBUS-sense wiring under investigation); their
 #     shunt/current path is unaffected.

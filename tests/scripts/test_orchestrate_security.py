@@ -469,3 +469,31 @@ def test_security_psa_attestation_optiga_accepted_when_fitted(
     out = emit_tfm_sysbuild_conf(project)
     assert "CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y" in out
     assert "optiga_trust_m_bridge" in out
+
+
+def test_security_psa_surfaces_a_failing_memory_map_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A resolve_memory_map failure is reported as itself, not swallowed
+    into an empty map that makes the PSA ref fail as 'does not resolve'."""
+    import alp_orchestrate.loader as loader
+
+    def _boom(*_a, **_k):
+        raise ValueError("memory_map.yaml is corrupt")
+
+    monkeypatch.setattr(loader, "resolve_memory_map", _boom)
+    body = """
+        name: test-aen301-its-memmap-boom
+        som:
+          sku: E1M-AEN301
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+        security:
+          psa:
+            its_storage: mram_main
+            tfm: true
+    """
+    with pytest.raises(OrchestratorError, match="memory map failed.*corrupt"):
+        load_board_yaml(_write_board(tmp_path, body))

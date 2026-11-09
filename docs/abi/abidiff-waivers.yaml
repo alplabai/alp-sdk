@@ -24,4 +24,11 @@
 #     reason: removed in the same minor before any release shipped it
 #     issue: "#1234"
 #     until: "0.19"
-[]
+- symbol: alp_yocto_alsa_out_write_core
+  kind: function
+  reason: >-
+    internal test seam of the Yocto ALSA audio backend (declared only in
+    tests/yocto/audio_alsa.c, in no public header); it gained a wait-context
+    parameter so a concurrent close() can wake a blocked write (#2977)
+  issue: "#2977"
+  until: "0.19"

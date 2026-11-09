@@ -15,7 +15,10 @@
 #   flash-release.sh readback OUT.bin                     # step 1
 #   flash-release.sh check-a32                            # step 3
 #   flash-release.sh write SETOOLS_COPY READBACK.bin [--replace-atoc|--atoc-unqueryable] [--no-reset|--reset]
-#                                                          # steps 4-5 (halt once, noreset
+#                                                          # steps 4-5 (runs the check-a32
+#                                                          # test first and refuses on a
+#                                                          # mismatch; refuses a blob outside
+#                                                          # restore's ranges; halt once, noreset
 #                                                          # loadbins, skip bl32 if unchanged,
 #                                                          # fresh-session proof). The session
 #                                                          # ends with a warm pin reset into the
@@ -48,6 +51,10 @@ A32_EXPECT=0x02500000     # the renderer's SRAM1 entry (a32/renderer/renderer.ld
                           # the very sectors about to be rewritten).
 MRAM_LO=0x80000000
 MRAM_LEN=0x580000
+# The ranges `restore` puts back from a read-back, and the ONLY ranges `write` may touch:
+# write refuses any blob whose 16 KiB-sector span leaves them (restore could not undo it).
+RESTORE_RANGES=(0x80000000:0x8000C000 0x80020000:0x800A0000 0x80100000:0x80354000 0x80510000:0x80580000)
+SECTOR=0x4000
 JLINK_ARGS=(bench_jlink_run)
 T="${TMPDIR:-/tmp}/tr-release-flash"
 mkdir -p "$T"
@@ -175,6 +182,33 @@ do_write() { # <tag> <flags...> <file:addr>...
 	fi
 }
 
+# Refuse to continue unless the A32 is confirmed running from SRAM1 (shared by `check-a32` and `write`).
+a32_check() {
+	jlink_read "mem32 $A32_CHECK_ADDR, 1"
+	local got
+	got=$(grep -oiE "^0*${A32_CHECK_ADDR#0x} = [0-9A-Fa-f]+" "$T/read.out" | awk '{print $3}')
+	[ -n "$got" ] || die "could not parse the mem32 read of $A32_CHECK_ADDR from $T/read.out -- read it by eye before proceeding"
+	if [ "$((16#${got}))" -ne "$((A32_EXPECT))" ]; then
+		die "ctrl_entry=0x$got, want $A32_EXPECT -- the A32 is NOT confirmed running from SRAM1. DO NOT WRITE. Halt it (a32/renderer/halt.jlink) and re-check."
+	fi
+	echo "flash-release: A32 check OK -- ctrl_entry=0x$got (running from SRAM1, not MRAM)"
+}
+
+# Die unless the sector-padded span of <name> <addr> <size> lies inside ONE restore range.
+check_in_restore_range() {
+	local name="$1" addr=$(($2)) size="$3" lo hi r
+	local s_lo=$((addr & ~(SECTOR - 1)))
+	local s_hi=$(((addr + size + SECTOR - 1) & ~(SECTOR - 1)))
+	for r in "${RESTORE_RANGES[@]}"; do
+		lo=$((${r%:*}))
+		hi=$((${r#*:}))
+		if [ "$s_lo" -ge "$lo" ] && [ "$s_hi" -le "$hi" ]; then
+			return 0
+		fi
+	done
+	die "$name spans $(printf '0x%08X..0x%08X' "$s_lo" "$s_hi"), outside the restore ranges (${RESTORE_RANGES[*]}) -- restore could not undo it; widen RESTORE_RANGES (and FLASH-RECIPE.md) first"
+}
+
 cmd="${1:-}"
 shift || true
 case "$cmd" in
@@ -185,19 +219,21 @@ readback)
 	echo "MRAM $MRAM_LO..+$MRAM_LEN -> $out  md5 $(md5sum <"$out" | cut -d' ' -f1)"
 	;;
 check-a32)
-	jlink_read "mem32 $A32_CHECK_ADDR, 1"
-	got=$(grep -oiE "^0*${A32_CHECK_ADDR#0x} = [0-9A-Fa-f]+" "$T/read.out" | awk '{print $3}')
-	[ -n "$got" ] || die "could not parse the mem32 read of $A32_CHECK_ADDR from $T/read.out -- read it by eye before proceeding"
-	if [ "$((16#${got}))" -ne "$((A32_EXPECT))" ]; then
-		die "ctrl_entry=0x$got, want $A32_EXPECT -- the A32 is NOT confirmed running from SRAM1. DO NOT WRITE. Halt it (a32/renderer/halt.jlink) and re-check."
-	fi
-	echo "flash-release: A32 check OK -- ctrl_entry=0x$got (running from SRAM1, not MRAM)"
+	a32_check
 	;;
 write)
 	st="$(realpath "${1:?SETOOLS_COPY}")"
 	rb="$(realpath "${2:?READBACK.bin, from the readback step and build-release.sh 3rd arg}")"
 	shift 2
 	[ "$(stat -c %s "$rb")" -eq $((MRAM_LEN)) ] || die "$rb is not a full $MRAM_LEN B read-back"
+	# The A32 must not be fetching from MRAM while it is rewritten: require the check-a32
+	# precondition here instead of trusting the operator to have run it. A dry run has no
+	# board attached, so it skips the (J-Link) check.
+	if [ -z "${FLOWD_DRY_RUN:-}" ]; then
+		a32_check
+	else
+		echo "flash-release: DRY RUN -- skipping the A32 check (a real write runs it first)" >&2
+	fi
 	fd="$st/build/flowd"
 	[ -d "$fd" ] || die "$fd missing -- run build-release.sh SETOOLS_COPY HE_BUILD \"$rb\" first (3rd arg: sector-merged blobs)"
 	# This flow is for the HP_VISION release specifically -- refuse a package
@@ -230,6 +266,7 @@ write)
 		if [[ "$name" == bl32-* ]]; then
 			die "$name differs from the live read-back -- refusing to write a changed bl32 (this release does not update the bootloader)"
 		fi
+		check_in_restore_range "$name" "$addr" "$sz"
 		blobs+=("$f:$addr")
 	done
 	[ "${#blobs[@]}" -gt 0 ] || die "nothing to write (everything matched the read-back?)"
@@ -244,11 +281,9 @@ restore)
 	rb="$(realpath "${1:?READBACK.bin}")"
 	shift
 	[ "$(stat -c %s "$rb")" -eq $((MRAM_LEN)) ] || die "$rb is not a full $MRAM_LEN B read-back"
-	# Restores the four ranges this release ever touches. If a future
-	# release adds a fifth item, extend this list (or read it from a saved
-	# flowd/recipe.txt instead of hardcoding it here).
+	# Restores exactly RESTORE_RANGES -- the ranges `write` refuses to leave.
 	blobs=()
-	for r in 0x80000000:0x8000C000 0x80020000:0x800A0000 0x80100000:0x80354000 0x80510000:0x80580000; do
+	for r in "${RESTORE_RANGES[@]}"; do
 		lo=${r%:*} hi=${r#*:}
 		f="$T/restore-$lo.bin"
 		dd if="$rb" of="$f" bs=16384 skip=$(((lo - MRAM_LO) / 16384)) count=$(((hi - lo) / 16384)) status=none

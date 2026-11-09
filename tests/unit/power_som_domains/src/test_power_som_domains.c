@@ -967,15 +967,31 @@ ZTEST(power_som_domains, test_rtc_evi_arm_clears_stale_evf_before_setting_eie)
 	/* Stale EVF, EIE off: EVF cleared (constant mask, 0 only for EVF), then EIE set. */
 	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF | RTC_SF_PORF;
 	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_UIE_BIT;
+	rtc_regs()[0x13]             = 0x73u; /* EHL, ET = 11, TSOW, TSS: all but TSOW replaced */
 	zassert_ok(alp_som_power_rtc_evi_arm());
 	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~RTC_SF_EVF);
 	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], RTC_C2_UIE_BIT | RTC_C2_EIE);
+	/* Event Control 13h: active low, level detect with the 3.9 ms filter (ET = 01), TSS 0;
+	 * TSOW (bit 1) is kept. */
+	zassert_equal(rtc_regs()[0x13], 0x10u | 0x02u);
 
 	/* EIE already on: nothing is touched, a latched EVF is the wake and survives. */
 	rtc_regs()[RTC_STATUS_REG] = RTC_SF_EVF;
 	zassert_ok(alp_som_power_rtc_evi_arm());
 	zassert_equal(rtc_regs()[RTC_STATUS_REG], RTC_SF_EVF);
 	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], RTC_C2_UIE_BIT | RTC_C2_EIE);
+}
+
+ZTEST(power_som_domains, test_rtc_evi_arm_refuses_a_backup_switchover_time_stamp)
+{
+	/* TSE with TSS = 1: the time stamp belongs to the backup switchover; nothing is written. */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF;
+	rtc_regs()[RTC_CONTROL2_REG] = 0x80u;
+	rtc_regs()[0x13]             = 0x01u;
+	zassert_equal(alp_som_power_rtc_evi_arm(), ALP_ERR_BUSY);
+	zassert_equal(rtc_regs()[0x13], 0x01u);
+	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], 0x80u);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], RTC_SF_EVF);
 }
 
 ZTEST(power_som_domains, test_rtc_evi_disarm_clears_eie_and_evf)

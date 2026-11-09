@@ -26,7 +26,9 @@ PACKAGE_CLASSES = "package_ipk"
 # The feed line is the SDK major.minor (0.17.0~rc2 -> 0.17); one signed feed per
 # line and per MACHINE (alp-sdk is PACKAGE_ARCH = MACHINE_ARCH). Override
 # ALP_DEVKIT_FEED_URL to host the feed elsewhere (e.g. a file:// mirror).
-ALP_DEVKIT_FEED_LINE ?= "${@'.'.join(d.getVar('DISTRO_VERSION').split('~')[0].split('.')[:2])}"
+# ALP_SDK_VERSION is set only by the alp distro; under another distro DISTRO_VERSION
+# would silently be that distro's version and name the wrong feed.
+ALP_DEVKIT_FEED_LINE ?= "${@'.'.join(d.getVar('ALP_SDK_VERSION').split('~')[0].split('.')[:2]) if d.getVar('ALP_SDK_VERSION') else bb.fatal('alp-devkit-feed.inc needs DISTRO = "alp" (ALP_SDK_VERSION unset); or set ALP_DEVKIT_FEED_LINE')}"
 ALP_DEVKIT_FEED_TAG  ?= "feed-v${ALP_DEVKIT_FEED_LINE}-${MACHINE}"
 ALP_DEVKIT_FEED_URL  ?= "https://github.com/alplabai/alp-sdk/releases/download/${ALP_DEVKIT_FEED_TAG}"
 

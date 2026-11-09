@@ -322,7 +322,9 @@ opkg update && opkg upgrade alp-sdk
 `opkg update` fails if the index signature does not verify; there is no
 unsigned fallback.
 
-**Where it lives.** The feed of release line `0.17` for machine
+**Where it lives.** One feed is built per MACHINE of the image:
+`e1m-v2n101-a55`, `e1m-v2n102-a55`, `e1m-v2n103-a55`, `e1m-v2m101-a55`,
+`e1m-v2m102-a55` and `e1m-v2m103-a55`. The feed of release line `0.17` for machine
 `e1m-v2n101-a55` is the GitHub Release tagged `feed-v0.17-e1m-v2n101-a55`
 (`feed-v<major.minor>-<MACHINE>`). opkg needs `<base>/Packages.gz` and every
 `<base>/<ipk>` by name under one base URL, and a release's assets are a flat
@@ -350,12 +352,13 @@ MACHINE_ARCH (#2850 item 2). The packager fails when an allowlisted package is
 missing from the index, a stanza has no `SHA256sum:`, an ipk name falls outside
 `[A-Za-z0-9._-]`, or there are more assets than a GitHub release allows (1000).
 
-**Building and signing (release builder only).** Signing uses Yocto's
-`sign_package_feed` (`PACKAGE_FEED_SIGN`, `PACKAGE_FEED_GPG_NAME`,
-`PACKAGE_FEED_GPG_PASSPHRASE_FILE`, `PACKAGE_FEED_GPG_SIGNATURE_TYPE`), enabled
-by `require conf/distro/include/alp-devkit-feed-sign.inc` plus
-`GPG_PATH = "<gnupg home holding the key>"`. It is opt-in so a customer build is
-never forced to sign. The private key lives only in `alp-sdk-internal/signing/`
+**Building and signing (release builder only).** The published signature is
+made by `scripts/package_devkit_feed.sh` (below), with its own `--gnupghome` and
+`--key`. `conf/distro/include/alp-devkit-feed-sign.inc` plus
+`GPG_PATH = "<gnupg home holding the key>"` is optional: it turns on Yocto's
+`sign_package_feed` for the per-arch `Packages` indexes, and those per-arch
+signatures are not published or read by anything. A customer build needs
+neither. The private key lives only in `alp-sdk-internal/signing/`
 and in the internal runner's secret store; signing never runs in public
 Actions. After `bitbake alp-image-edge package-index`,
 `scripts/package_devkit_feed.sh --ipk-dir tmp/deploy/ipk --machine <MACHINE> --tag <tag> --out <dir>`

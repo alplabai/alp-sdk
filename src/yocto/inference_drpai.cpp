@@ -145,6 +145,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <time.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <linux/drpai.h>
 #include <sys/ioctl.h>
@@ -267,6 +268,107 @@ alp_status_t _drpai_mem_start(uint64_t &out, uint64_t &out_size)
 
 	out      = area.address;
 	out_size = area.size;
+	return ALP_OK;
+}
+
+/** True if this process already has /dev/drpai0 open (the runtime's fd).
+ *
+ *  The driver counts opens: the first open runs drpai_open_process() (CPG
+ *  init, status reset to IDLE, two device resets, shared-memory lock) and
+ *  the close that leaves one fd runs drpai_close_process() (another device
+ *  reset).  Our status query must therefore never be the first open: that
+ *  would reset a device the runtime is about to use and wipe the job result.
+ *  Only this process is checked; DRP-AI is one process per board (flock). */
+bool _drpai_fd_held()
+{
+#ifdef ALP_DRPAI_TEST_FD_HELD
+	return ALP_DRPAI_TEST_FD_HELD;
+#else
+	DIR *d = ::opendir("/proc/self/fd");
+	if (d == nullptr) {
+		return false;
+	}
+	const int self = ::dirfd(d);
+	bool      held = false;
+	char      link[64], target[64];
+	while (const struct dirent *e = ::readdir(d)) {
+		if (e->d_name[0] == '.' || atoi(e->d_name) == self) {
+			continue;
+		}
+		std::snprintf(link, sizeof link, "/proc/self/fd/%s", e->d_name);
+		const ssize_t n = ::readlink(link, target, sizeof target - 1);
+		if (n > 0) {
+			target[n] = '\0';
+			if (std::strcmp(target, kDrpAiDevice) == 0) {
+				held = true;
+				break;
+			}
+		}
+	}
+	::closedir(d);
+	return held;
+#endif
+}
+
+/** Read the driver's record of the job the runtime just ran.
+ *
+ *  MeraDrpRuntimeWrapper::Run() is void.  The driver keeps the job result in
+ *  device-global state (priv->drpai_status), not per fd; DRPAI_GET_STATUS
+ *  reads it.
+ *
+ *  Our open/close are only safe while another fd of this process holds the
+ *  device (driver refcount >= 2 at our open, >= 3 at our close): then
+ *  drpai_open_process() / drpai_close_process() do not run, and the query
+ *  only waits on the driver semaphore (up to 1000 ms each for the open,
+ *  the ioctl and the close) and the shared-memory lock.  A semaphore
+ *  timeout in our open or close leaves the driver semaphore one count too
+ *  high (the vendor driver releases it on that path too), so after an
+ *  ALP_ERR_TIMEOUT from the query later driver calls are no longer
+ *  serialised.  If the runtime holds no fd,
+ *  our open would be the first (CPG init, status reset to IDLE, two device
+ *  resets, and a failure there is -EIO/-ETIMEDOUT for a job that ran fine)
+ *  and our close the last-but-one (another reset).  In that case nothing is
+ *  queried and the result is ALP_OK, as before this check existed.
+ *
+ *  Detected: a job still in RUN after Run() returned, and a DRP/AIMAC error,
+ *  reset or suspend the driver recorded.  NOT detected: a DRPAI_START the
+ *  driver rejects before it starts the job (not ready, busy, bad argument,
+ *  semaphore timeout): the driver clears the result and sets RUN only after
+ *  those checks, so the previous result reads as success.  A runtime that
+ *  resets the NPU on its own wait timeout reads as ALP_ERR_IO, not TIMEOUT.
+ *  Whether the closed MERA2 runtime keeps its fd open during Run() is not
+ *  bench-verified; if it does not, the check never runs.
+ *
+ *  @return ALP_OK (also when no runtime fd is held); otherwise
+ *          ALP_ERR_TIMEOUT (job still RUN, or a semaphore wait timed out),
+ *          ALP_ERR_BUSY (shared-memory lock held by another user), or
+ *          ALP_ERR_IO (recorded job error, or any other query failure). */
+alp_status_t _drpai_job_status()
+{
+	if (!_drpai_fd_held()) {
+		return ALP_OK;
+	}
+	const int fd = ::open(kDrpAiDevice, O_RDWR | O_CLOEXEC);
+	if (fd < 0) {
+		return _drpai_errno_to_status(errno);
+	}
+
+	drpai_status_t st = {};
+	const int      rc = ::ioctl(fd, DRPAI_GET_STATUS, &st);
+	const int      e  = errno;
+	::close(fd);
+
+	/* The driver fills @st even when it fails the call (-EBUSY while RUN,
+	 * -EIO on a hardware error, -EAGAIN after suspend). */
+	if (st.status == DRPAI_STATUS_RUN) {
+		return ALP_ERR_TIMEOUT;
+	}
+	if (st.err != DRPAI_ERRINFO_SUCCESS) {
+		return ALP_ERR_IO;
+	}
+	if (rc != 0) {
+		return _drpai_errno_to_status(e);
+	}
 	return ALP_OK;
 }
 
@@ -708,16 +810,10 @@ extern "C" alp_status_t alp_inference_drpai_invoke(struct alp_inference *h_)
 		}
 	}
 
-	/* Run() is void and blocks until DRP-AI completes; it reports
-     * hard faults via its own logging/abort path, not a return code.
-	 * A failed job therefore CANNOT be detected here: this returns ALP_OK
-	 * even if the driver rejected DRPAI_START or timed out.  A driver status
-	 * query is not a cheap fix -- it needs another open() of /dev/drpai0,
-	 * which takes the driver semaphore (up to 1000 ms) and the shared-memory
-	 * lock and can itself fail -- so none is made.  Callers must sanity-check
-	 * outputs (see <alp/inference.h> and docs/bring-up-drpai-v2n.md). */
+	/* Run() is void and blocks until DRP-AI completes, so ask the driver
+	 * what it recorded (see _drpai_job_status() for what that can miss). */
 	st->runtime.Run();
-	return ALP_OK;
+	return _drpai_job_status();
 }
 
 extern "C" void alp_inference_drpai_close(struct alp_inference *h_)

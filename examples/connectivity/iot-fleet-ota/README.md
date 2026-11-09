@@ -73,7 +73,7 @@ config:
   `INHERIT += "mender-full"`, `MENDER_ARTIFACT_NAME`,
   `MENDER_SERVER_URL`, `MENDER_TENANT_TOKEN`,
   `MENDER_STORAGE_DEVICE_BASE`, `MENDER_BOOT_PART_SIZE_MB`,
-  `MENDER_STORAGE_TOTAL_SIZE_MB`, and `MENDER_INVENTORY_INTERVAL`
+  `MENDER_STORAGE_TOTAL_SIZE_MB`, and `MENDER_UPDATE_POLL_INTERVAL_SECONDS`
   weak-assignments (`?=`) into `local.conf` -- hand-edited
   build-dir values still win. On Zephyr slices the
   mender-mcu-client west module reads the same fields at app
