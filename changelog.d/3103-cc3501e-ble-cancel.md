@@ -1,0 +1,3 @@
+### Changed — CC3501E GATT read/write take a cancel flag and wake on `alp_ble_disconnect()` (#3103)
+
+**Breaking: `cc3501e_ble_gatt_read()` and `cc3501e_ble_gatt_write()` in `<alp/chips/cc3501e/ble.h>` gain a trailing `const bool *cancel` parameter (pass `NULL` for none).** A `alp_ble_gatt_read()`/`alp_ble_gatt_write()` blocked on the CC3501E bridge now returns `ALP_ERR_NOT_READY` within one bridge attempt plus one poll gap (<= 50 ms) of another thread calling `alp_ble_disconnect()`, instead of polling until its timeout. The retry loop behind every bridge op (`poll_by_repeat_seq()`) reads the flag with an acquire load before each attempt, and the BLE backend points it at the connection's closing flag. The v0.18 ABI snapshot is regenerated for the two new signatures.

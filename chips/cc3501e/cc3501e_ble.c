@@ -276,12 +276,13 @@ alp_status_t cc3501e_ble_gatt_notify(cc3501e_t     *ctx,
 	    ctx, ALP_CC3501E_CMD_BLE_GATT_NOTIFY, buf, 2u + len, NULL, 0, NULL, timeout_ms);
 }
 
-alp_status_t cc3501e_ble_gatt_read(cc3501e_t *ctx,
-                                   uint16_t   handle,
-                                   uint8_t   *out,
-                                   size_t     cap,
-                                   size_t    *out_len,
-                                   uint32_t   timeout_ms)
+alp_status_t cc3501e_ble_gatt_read(cc3501e_t  *ctx,
+                                   uint16_t    handle,
+                                   uint8_t    *out,
+                                   size_t      cap,
+                                   size_t     *out_len,
+                                   uint32_t    timeout_ms,
+                                   const bool *cancel)
 {
 	if (out == NULL && cap > 0u) return ALP_ERR_INVAL;
 	if (out_len != NULL) *out_len = 0;
@@ -292,15 +293,23 @@ alp_status_t cc3501e_ble_gatt_read(cc3501e_t *ctx,
 	uint8_t req[2];
 	req[0] = (uint8_t)(handle & 0xFFu);
 	req[1] = (uint8_t)((handle >> 8) & 0xFFu);
-	return poll_by_repeat(
-	    ctx, ALP_CC3501E_CMD_BLE_GATT_READ, req, sizeof(req), out, cap, out_len, timeout_ms);
+	return poll_by_repeat_cancel(ctx,
+	                             ALP_CC3501E_CMD_BLE_GATT_READ,
+	                             req,
+	                             sizeof(req),
+	                             out,
+	                             cap,
+	                             out_len,
+	                             timeout_ms,
+	                             cancel);
 }
 
 alp_status_t cc3501e_ble_gatt_write(cc3501e_t     *ctx,
                                     uint16_t       handle,
                                     const uint8_t *data,
                                     size_t         len,
-                                    uint32_t       timeout_ms)
+                                    uint32_t       timeout_ms,
+                                    const bool    *cancel)
 {
 	if (data == NULL && len > 0u) return ALP_ERR_INVAL;
 	/* #2035: leave room for the MAJOR-4 CRC trailer cc3501e_request() appends --
@@ -312,6 +321,6 @@ alp_status_t cc3501e_ble_gatt_write(cc3501e_t     *ctx,
 	buf[0] = (uint8_t)(handle & 0xFFu);
 	buf[1] = (uint8_t)((handle >> 8) & 0xFFu);
 	if (len > 0u) memcpy(&buf[2], data, len);
-	return poll_by_repeat(
-	    ctx, ALP_CC3501E_CMD_BLE_GATT_WRITE, buf, 2u + len, NULL, 0, NULL, timeout_ms);
+	return poll_by_repeat_cancel(
+	    ctx, ALP_CC3501E_CMD_BLE_GATT_WRITE, buf, 2u + len, NULL, 0, NULL, timeout_ms, cancel);
 }

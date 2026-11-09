@@ -646,7 +646,8 @@ alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
 	                                    timeout_ms,
 	                                    candidate_seq,
 	                                    true,
-	                                    handle);
+	                                    handle,
+	                                    NULL);
 	ctx->sock_busy = false;
 	if (s != ALP_OK) return s;
 	if (got < CC3501E_SOCK_RECV_RESP_HDR) return ALP_ERR_IO; /* short reply header */

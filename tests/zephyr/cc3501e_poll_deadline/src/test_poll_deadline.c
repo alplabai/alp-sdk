@@ -27,8 +27,10 @@
  *     issue #1953 describes -- exactly the cost the old sleep-only budget
  *     never charged.
  *
- * No real time passes, so the test is fast and deterministic: it proves
- * the deadline MATH, not a timing-sensitive race against a real clock.
+ * The deadline math runs on that fake clock, so it is deterministic and
+ * not a race against a real clock.  `alp_delay_ms()` additionally yields
+ * the CPU for 1 ms of real time so the #3103 cancel test can run a second
+ * thread; no assertion depends on that real time.
  */
 
 #include <string.h>
@@ -58,6 +60,8 @@ uint64_t alp_uptime_us(void)
 void alp_delay_ms(uint32_t ms)
 {
 	g_fake_now_ms += ms;
+	/* Let a second thread run (the cancel test); simulated time only. */
+	k_msleep(1);
 }
 
 void alp_delay_us(uint32_t us)
@@ -111,7 +115,7 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	 * time no sleep-only budget ever charged. */
 	g_fake_now_ms += CC3501E_ATTEMPT_COST_MS;
 	g_transceive_calls++;
-	if (len == 0u) {
+	if (len == 0u || rx == NULL) { /* rx == NULL: a request payload phase, nothing to model */
 		return ALP_OK;
 	}
 	switch (g_phase) {
@@ -197,6 +201,47 @@ ZTEST(cc3501e_poll_deadline, test_zero_timeout_still_makes_one_attempt_1953)
 	              "zero timeout_ms must make exactly one attempt, no more (got %u transceive "
 	              "calls)",
 	              g_transceive_calls);
+}
+
+/* #3103: a GATT read blocked with an unbounded timeout must return
+ * ALP_ERR_NOT_READY once another thread sets the cancel flag. */
+static K_THREAD_STACK_DEFINE(cancel_stack, 16384);
+static struct k_thread cancel_thread;
+static alp_status_t    cancel_rc = ALP_OK;
+static bool            cancel_flag;
+
+static void cancel_entry(void *a, void *b, void *c)
+{
+	(void)a;
+	(void)b;
+	(void)c;
+	uint8_t out[4];
+	size_t  n = 0;
+	cancel_rc = cc3501e_ble_gatt_read(&fw, 0x0042u, out, sizeof(out), &n, UINT32_MAX, &cancel_flag);
+}
+
+ZTEST(cc3501e_poll_deadline, test_cancel_wakes_blocked_gatt_read_3103)
+{
+	__atomic_store_n(&cancel_flag, false, __ATOMIC_RELAXED);
+	cancel_rc = ALP_OK;
+	k_thread_create(&cancel_thread,
+	                cancel_stack,
+	                K_THREAD_STACK_SIZEOF(cancel_stack),
+	                cancel_entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(5),
+	                0,
+	                K_NO_WAIT);
+	k_msleep(100);
+	zassert_not_equal(k_thread_join(&cancel_thread, K_NO_WAIT), 0, "read must still be blocked");
+	__atomic_store_n(&cancel_flag, true, __ATOMIC_RELEASE);
+	if (k_thread_join(&cancel_thread, K_SECONDS(2)) != 0) {
+		k_thread_abort(&cancel_thread);
+		zassert_unreachable("cancel must wake the read");
+	}
+	zassert_equal(cancel_rc, ALP_ERR_NOT_READY, "cancelled read -> NOT_READY (got %d)", cancel_rc);
 }
 
 ZTEST_SUITE(cc3501e_poll_deadline, NULL, NULL, reset_before, NULL, NULL);

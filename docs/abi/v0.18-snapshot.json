@@ -2990,16 +2990,16 @@
           "signature": "alp_status_t cc3501e_ble_gatt_notify(cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms);"
         },
         "cc3501e_ble_gatt_read": {
-          "hash": "8ae7be08ff3c1ab0",
-          "signature": "alp_status_t cc3501e_ble_gatt_read(cc3501e_t *ctx, uint16_t handle, uint8_t *out, size_t cap, size_t *out_len, uint32_t timeout_ms);"
+          "hash": "359e46cb16264146",
+          "signature": "alp_status_t cc3501e_ble_gatt_read(cc3501e_t *ctx, uint16_t handle, uint8_t *out, size_t cap, size_t *out_len, uint32_t timeout_ms, const bool *cancel);"
         },
         "cc3501e_ble_gatt_register": {
           "hash": "cc1dfeee7c99dd1a",
           "signature": "alp_status_t cc3501e_ble_gatt_register(cc3501e_t *ctx, const uint8_t *descriptor, size_t len, uint16_t *handles_out, size_t handles_cap, size_t *num_handles_out, uint32_t timeout_ms);"
         },
         "cc3501e_ble_gatt_write": {
-          "hash": "2f85524f7e1a32fe",
-          "signature": "alp_status_t cc3501e_ble_gatt_write(cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms);"
+          "hash": "f72070663e1e2c1d",
+          "signature": "alp_status_t cc3501e_ble_gatt_write(cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms, const bool *cancel);"
         },
         "cc3501e_ble_scan": {
           "hash": "86e2819557a0c4b3",

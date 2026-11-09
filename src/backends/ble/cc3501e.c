@@ -325,7 +325,8 @@ static alp_status_t cc35_gatt_read(alp_ble_conn_state_t *conn_state,
 {
 	cc35_ble_be_t *be = (cc35_ble_be_t *)conn_state->be_data;
 	if (be == NULL || !be->enabled) return ALP_ERR_NOT_READY;
-	return cc3501e_ble_gatt_read(be->ctx, handle, out, out_cap, out_len, timeout_ms);
+	return cc3501e_ble_gatt_read(
+	    be->ctx, handle, out, out_cap, out_len, timeout_ms, &conn_state->closing);
 }
 
 static alp_status_t cc35_gatt_write(alp_ble_conn_state_t *conn_state,
@@ -336,7 +337,7 @@ static alp_status_t cc35_gatt_write(alp_ble_conn_state_t *conn_state,
 {
 	cc35_ble_be_t *be = (cc35_ble_be_t *)conn_state->be_data;
 	if (be == NULL || !be->enabled) return ALP_ERR_NOT_READY;
-	return cc3501e_ble_gatt_write(be->ctx, handle, data, len, timeout_ms);
+	return cc3501e_ble_gatt_write(be->ctx, handle, data, len, timeout_ms, &conn_state->closing);
 }
 
 static const alp_ble_ops_t _ops = {

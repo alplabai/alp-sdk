@@ -72,6 +72,19 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
                             size_t           *rx_len,
                             uint32_t          timeout_ms);
 
+/* poll_by_repeat() with a cancel flag: @p cancel (may be NULL) is polled
+ * before every attempt, and once *cancel is true the loop returns
+ * ALP_ERR_NOT_READY without sending (BLE GATT waits, #3103). */
+alp_status_t poll_by_repeat_cancel(cc3501e_t        *ctx,
+                                   alp_cc3501e_cmd_t cmd,
+                                   const uint8_t    *tx_payload,
+                                   size_t            tx_len,
+                                   uint8_t          *rx_buf,
+                                   size_t            rx_cap,
+                                   size_t           *rx_len,
+                                   uint32_t          timeout_ms,
+                                   const bool       *cancel);
+
 /* Same retry loop as poll_by_repeat() above, but the caller supplies the
  * retry seq instead of it being allocated from the shared ctx->req_seq
  * (alp-sdk#2108) -- SOCK_RECV uses this with ctx->sock_recv_seq so its seq
@@ -92,7 +105,11 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
  * concurrent recovery to land in. Non-socket callers pass check_epoch =
  * false (handle then unused) and see no behaviour change -- this is
  * poll_by_repeat_handle()'s job, not a new burden on poll_by_repeat()'s
- * existing 50+ non-socket call sites. */
+ * existing 50+ non-socket call sites.
+ *
+ * @p cancel (may be NULL) is polled before every attempt; once *cancel is
+ * true the loop returns ALP_ERR_NOT_READY without sending (BLE GATT waits,
+ * #3103). */
 alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
                                 alp_cc3501e_cmd_t cmd,
                                 const uint8_t    *tx_payload,
@@ -103,7 +120,8 @@ alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
                                 uint32_t          timeout_ms,
                                 uint8_t           req_seq,
                                 bool              check_epoch,
-                                uint16_t          handle);
+                                uint16_t          handle,
+                                const bool       *cancel);
 
 /* Same retry loop as poll_by_repeat() above (own ctx->req_seq allocation),
  * but with the per-attempt epoch re-check (see poll_by_repeat_seq()'s

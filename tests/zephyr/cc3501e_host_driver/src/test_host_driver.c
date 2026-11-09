@@ -4446,8 +4446,9 @@ ZTEST(cc3501e_host_driver, test_ble_connect_encodes_addr_type_first)
 ZTEST(cc3501e_host_driver, test_ble_gatt_write_encodes_handle_and_value)
 {
 	const uint8_t val[3] = { 0x11, 0x22, 0x33 };
-	zassert_equal(
-	    cc3501e_ble_gatt_write(&fw, 0x0042u, val, sizeof(val), 100u), ALP_OK, "GATT_WRITE -> OK");
+	zassert_equal(cc3501e_ble_gatt_write(&fw, 0x0042u, val, sizeof(val), 100u, NULL),
+	              ALP_OK,
+	              "GATT_WRITE -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_BLE_GATT_WRITE, "opcode 0x3B");
 	zassert_equal(slave.req_len, 2u + 3u, "payload = handle(LE16) + value");
 	zassert_equal(slave.req_pl[0], 0x42u, "handle lo");
@@ -4460,8 +4461,9 @@ ZTEST(cc3501e_host_driver, test_ble_gatt_read_decodes_value)
 {
 	uint8_t out[8] = { 0 };
 	size_t  n      = 0u;
-	zassert_equal(
-	    cc3501e_ble_gatt_read(&fw, 0x0042u, out, sizeof(out), &n, 100u), ALP_OK, "GATT_READ -> OK");
+	zassert_equal(cc3501e_ble_gatt_read(&fw, 0x0042u, out, sizeof(out), &n, 100u, NULL),
+	              ALP_OK,
+	              "GATT_READ -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_BLE_GATT_READ, "opcode 0x3A");
 	zassert_equal(slave.req_len, 2u, "request = handle(LE16)");
 	zassert_equal(slave.req_pl[0], 0x42u, "handle lo");
