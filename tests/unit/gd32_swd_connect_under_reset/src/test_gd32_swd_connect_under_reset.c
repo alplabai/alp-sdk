@@ -40,6 +40,7 @@ enum ev_type {
 	EV_NRST_WRITE,  /* val = level */
 	EV_SWCLK_FIRST, /* first SWCLK write of the session */
 	EV_MEMW,        /* pin = unused, addr/val of a target memory write */
+	EV_ABORT,       /* val = value written to DP ABORT */
 };
 
 struct ev {
@@ -87,6 +88,7 @@ static bool     g_fail_mem;    /* the target FAULTs writes to g_fail_addr */
 static uint32_t g_fail_addr;
 static bool     g_dbs;     /* FMC_OBCTL reads back with DBS (bit 22) set */
 static bool     g_wait_ap; /* the target answers WAIT to every AP read */
+static uint32_t g_sr;      /* FMC_SR as the target holds it */
 
 /* ---- bit-level SW-DP target -------------------------------------------------- */
 
@@ -152,6 +154,7 @@ static void decode_header(void)
 			/* DHCSR reads S_HALT (bit 17) once the core stopped at the vector. */
 			T.rdbuff = (T.addr == 0x0Cu && T.tar == 0xE000EDF0u && T.halted) ? (1u << 17) | 1u : 0u;
 			if (T.addr == 0x0Cu && T.tar == 0x40022020u && g_dbs) T.rdbuff = 1u << 22;
+			if (T.addr == 0x0Cu && T.tar == 0x40022010u) T.rdbuff = g_sr;
 		}
 	}
 }
@@ -159,6 +162,7 @@ static void decode_header(void)
 static void apply_write(void)
 {
 	if (!T.ap) {
+		if (T.addr == 0x00u) log_ev(EV_ABORT, 0, 0u, T.wdata);
 		if (T.addr == 0x04u) T.ctrlstat = T.wdata;
 		if (T.addr == 0x08u) T.select = T.wdata;
 		return;
@@ -167,6 +171,7 @@ static void apply_write(void)
 	if (T.addr == 0x04u) T.tar = T.wdata;
 	if (T.addr == 0x0Cu) {
 		log_ev(EV_MEMW, 0, T.tar, T.wdata);
+		if (T.tar == 0x40022010u) g_sr &= ~T.wdata; /* write-1-clear */
 		if (T.tar == 0xE000EDFCu && (T.wdata & 1u)) T.vc_armed = true;
 	}
 }
@@ -390,6 +395,7 @@ static void each_before(void *unused)
 	g_fail_mem        = false;
 	g_dbs             = false;
 	g_wait_ap         = false;
+	g_sr              = 0u;
 	memset(g_latch, 0, sizeof(g_latch));
 	memset(g_is_out, 0, sizeof(g_is_out));
 	g_latch[2]         = true; /* NRST: stale-high latch left by an older image */
@@ -629,5 +635,49 @@ ZTEST(gd32_swd_connect_under_reset, test_ap_read_that_only_gets_wait_times_out)
 	zassert_equal(gd32_swd_connect(&swd), ALP_OK);
 	g_wait_ap = true;
 	zassert_equal(gd32_swd_flash_erase(&swd, 0x0807F800u, 64u), ALP_ERR_TIMEOUT);
+	gd32_swd_deinit(&swd);
+}
+
+/* ---- sticky errors (#2986) ------------------------------------------------------- */
+
+/* A FAULT latches STICKYERR: the driver must clear it through DP ABORT. */
+ZTEST(gd32_swd_connect_under_reset, test_fault_ack_clears_the_sticky_flags_through_abort)
+{
+	gd32_swd_t swd;
+	zassert_equal(gd32_swd_init(&swd), ALP_OK);
+	zassert_equal(gd32_swd_connect(&swd), ALP_OK);
+	g_fail_mem  = true;
+	g_fail_addr = 0x40022014u; /* FMC_CR */
+	zassert_equal(gd32_swd_flash_erase(&swd, 0x0807F800u, 64u), ALP_ERR_IO);
+	zassert_true(find_ev(EV_ABORT, -1, 0x1Eu, 0) >= 0, "STKCMPCLR|STKERRCLR|WDERRCLR|ORUNERRCLR");
+	gd32_swd_deinit(&swd);
+}
+
+/* An exhausted WAIT retry cancels the pending transaction with DAPABORT. */
+ZTEST(gd32_swd_connect_under_reset, test_wait_exhaustion_writes_dapabort)
+{
+	gd32_swd_t swd;
+	zassert_equal(gd32_swd_init(&swd), ALP_OK);
+	zassert_equal(gd32_swd_connect(&swd), ALP_OK);
+	g_wait_ap = true;
+	zassert_equal(gd32_swd_flash_erase(&swd, 0x0807F800u, 64u), ALP_ERR_TIMEOUT);
+	zassert_true(find_ev(EV_ABORT, -1, 0x01u, 0) >= 0, "ABORT = DAPABORT");
+	gd32_swd_deinit(&swd);
+}
+
+/* An error bit left in FMC_SR must not fail the next erase / program. */
+ZTEST(gd32_swd_connect_under_reset, test_stale_fmc_error_bit_is_cleared_before_erase_and_program)
+{
+	static const uint8_t data[8] = { 0 };
+	gd32_swd_t           swd;
+	zassert_equal(gd32_swd_init(&swd), ALP_OK);
+	zassert_equal(gd32_swd_connect(&swd), ALP_OK);
+	g_sr = 0x10u; /* WRPERR */
+	zassert_equal(gd32_swd_flash_erase(&swd, 0x0807F800u, 64u), ALP_OK);
+	zassert_equal(g_sr, 0u);
+	const int i = find_memw(0x40022010u);
+	zassert_true(i >= 0 && g_ev[i].val == 0xF8u, "only the error bits are cleared, never BSY");
+	g_sr = 0x10u;
+	zassert_equal(gd32_swd_flash_write(&swd, 0x0807F000u, data, sizeof(data)), ALP_OK);
 	gd32_swd_deinit(&swd);
 }
