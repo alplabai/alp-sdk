@@ -2,8 +2,7 @@
 # linux-kernel-drivers-v1).  The camera completeness gate checks every camera
 # module's chip `drivers.linux` against this list, and that each named patch
 # file exists.  Native entries were read from the 6.1.141-cip43 tree
-# (drivers/media/i2c).  Patches 0028-0030 are PENDING -- their branches are not
-# merged yet, so the files do not exist in meta-alp-sdk until they land.
+# (drivers/media/i2c).
 schema_version: 1
 kernels:
   "6.1.141-cip43":
@@ -33,3 +32,8 @@ kernels:
         native:     false
         patches:    [0028-media-i2c-add-imx296-backport.patch]
         notes:      "Not in 6.1; v6.6 backport (pending)."
+      - compatible: "vc,vc_mipi"
+        kconfig:    CONFIG_VIDEO_VC_MIPI
+        native:     false
+        patches:    [0036-media-i2c-add-vision-components-mipi-csi-2-camera-module-driver.patch]
+        notes:      "Not in 6.1; Vision Components vendor driver (GPL-2.0), NXP flavour adapted to 6.1, adds V4L2_CID_PIXEL_RATE for rzg2l-csi2."

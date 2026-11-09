@@ -54,6 +54,10 @@ KNOWN_MANIFEST_NO_DRIVER = {
     # tier ladder (Tier 1, upstream-native, plus one small repo patch --
     # no alp-sdk-authored driver code of its own).
     "imx335",
+    # Sony IMX568 on the Vision Components MIPI modules: Linux-only, streaming
+    # is the vendor V4L2 driver in kernel patch 0036 (no chips/ stub, no Zephyr
+    # driver); catalogue-only so the camera module metadata has a chip to name.
+    "imx568",
     # OmniVision OV5647 (issue #2287 camera sweep): same shape as IMX296 --
     # streaming lives entirely in zephyr/drivers/video/ov5647.c, no chips/
     # portable stub. This manifest is catalogue-only so the part is
