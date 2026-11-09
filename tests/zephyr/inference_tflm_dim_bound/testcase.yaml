@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+
+tests:
+  alp_sdk.inference.tflm_dim_bound:
+    # tflite-micro is in Zephyr's disabled "optional" group: a plain
+    # upstream-Zephyr workspace (pr-twister.yml) does not have it, so twister
+    # skips this scenario there; an alp-sdk-manifest workspace has it and runs
+    # it.
+    modules:
+      - tflite-micro
+    platform_allow:
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - inference

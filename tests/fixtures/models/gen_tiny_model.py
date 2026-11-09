@@ -3,7 +3,10 @@
 
 Run to (re)create tiny_int8.tflite:
     py -3.14 tests/fixtures/models/gen_tiny_model.py
-Requires the `model-compile` extra (tflite + flatbuffers)."""
+Requires the `model-compile` extra (tflite + flatbuffers).
+
+Note: tests/zephyr/inference_tflm_dim_bound/gen_models.py imports the private
+_tensor/_offvec/_ivec/_buffer helpers below; keep it in step on a rename."""
 from __future__ import annotations
 from pathlib import Path
 

@@ -171,6 +171,20 @@ typedef enum { ALP_MQTT_QOS_0 = 0, ALP_MQTT_QOS_1 = 1, ALP_MQTT_QOS_2 = 2 } alp_
  * blocks until the loop call -- and this callback -- have returned).
  * Do not perform long-blocking work here; it runs inline on whichever
  * thread is driving @ref alp_mqtt_loop.
+ *
+ * @par Payload length is bounded, and silently, by a backend-defined
+ *      buffer (#1645)
+ * @p len is capped at the backend's per-client receive scratch size
+ * (`CONFIG_ALP_SDK_MQTT_BUF_SIZE` on the Zephyr backend, 256 bytes by
+ * default) -- a broker message larger than that is delivered here
+ * TRUNCATED to that size, with @p len reflecting only what actually
+ * arrived in @p payload.  This signature is
+ * [ABI-STABLE] (see this header's top-of-file note), so a truncation
+ * flag cannot be added to it; the backend instead logs a warning (a
+ * `LOG_WRN` on Zephyr) and drops the remainder off the wire so the
+ * connection does not wedge.  A subscriber that cannot tolerate a
+ * truncated payload must compare @p len against its own expected
+ * size and treat a short delivery as an error.
  */
 typedef void (*alp_mqtt_msg_cb_t)(const char    *topic,
                                   const uint8_t *payload,
@@ -237,6 +251,11 @@ alp_status_t alp_mqtt_publish(alp_mqtt_t    *m,
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO /
  *         ALP_ERR_NOSUPPORT.
+ *
+ * @par A message larger than the receive buffer arrives truncated (#1645)
+ * See @ref alp_mqtt_msg_cb_t's own doc comment: @p cb's @p len is
+ * bounded by a backend-defined buffer, not by the broker message's
+ * actual size.
  */
 alp_status_t alp_mqtt_subscribe(alp_mqtt_t       *m,
                                 const char       *topic_filter,
