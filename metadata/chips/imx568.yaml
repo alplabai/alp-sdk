@@ -1,0 +1,74 @@
+# Alp SDK chip manifest: Sony IMX568 5.1 MP Pregius S global-shutter MIPI CSI-2 sensor,
+# as fitted to the Vision Components (VC) MIPI camera modules (mono IMX568, colour IMX568C).
+schema_version:   1
+chip_id:          imx568
+driver_status:    none              # Linux-only part in this tree: no chips/imx568/ portable stub and
+                                     # no Zephyr driver.  Streaming lives in the VC vendor V4L2 driver
+                                     # carried by kernel patch 0036.  Catalogue-only, allowlisted in
+                                     # scripts/check_chip_manifest_parity.py's KNOWN_MANIFEST_NO_DRIVER.
+display_name:     "Sony IMX568 5.1 MP Pregius S global-shutter MIPI CSI-2 sensor (Vision Components module)"
+vendor:           sony
+mpn_population:
+  - "IMX568-AAMR"
+  - "IMX568-AAQR"
+
+datasheet:
+  primary:        "Vision Components MIPI CSI-2 camera module documentation (VC MIPI IMX568 / IMX568C)"
+
+notes: |
+  The sensor is not driven directly: the Vision Components module puts its own
+  controller (I2C 0x10) in front of the sensor (I2C 0x1a) and describes the
+  sensor type, mono/colour variant, lane counts, lane data rates and mode table
+  in the module's descriptor.  The Linux driver (kernel patch
+  0036-media-i2c-add-vision-components-mipi-csi-2-camera-module-driver.patch,
+  vendor GPL-2.0 vc_mipi) reads that at probe, so the mono and colour modules
+  share one DT node and one driver.
+
+  Modes the vendor core defines for IMX568 (full frame 2464x2064): RAW8, RAW10,
+  RAW12 on 2 or 4 lanes, with and without 2x2 binning.  Trigger: external,
+  pulse-width, self-trigger and single-shot through the module's XTRIG/FLASH
+  I/O (V4L2 controls "Trigger Mode", "IO Mode", "Single Trigger").
+
+  On RZ/V2N the CSI-2 receiver has no Y12 entry, so a mono module streams RAW8
+  (Y8) and RAW10 (Y10) only; a colour module streams RAW8/10/12 (Bayer).
+  X-EVK CAM0 carries 2 lanes, so only the 2-lane modules have a fragment.
+
+  BENCH-UNVERIFIED: no IMX568 module has been run on this SoC.
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x1A, scope: "sensor behind the VC module controller (the driver binds here)" }
+    - { addr_7bit: 0x10, scope: "VC module controller (default; found by the driver, not a DT node)" }
+  max_clock_hz:   400000
+
+mipi:
+  lanes_supported: [2, 4]
+  role:            csi2_tx
+
+drivers:
+  linux:
+    compatible:    "vc,vc_mipi"       # alp kernel patch 0036 (Vision Components vc_mipi driver)
+    kconfig:       CONFIG_VIDEO_VC_MIPI
+    # No link_freqs: the driver takes the lane rate from the module descriptor and
+    # reports it through V4L2_CID_LINK_FREQ / V4L2_CID_PIXEL_RATE; it parses no
+    # link-frequencies and needs no clock or supply from DT.
+    xclk_supported_hz: [74250000]     # the module's pixel clock (clk_pixel in the vendor core)
+
+resolutions:
+  max:            [2464, 2064]
+  features:       [global_shutter, 2x2_binning, external_trigger]
+
+kconfig:
+  zephyr:         n/a               # no Zephyr driver
+  baremetal:      n/a
+
+families:
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    none
+tracking:
+  blocker: "no IMX568 module on the bench; deferred until one is available"
