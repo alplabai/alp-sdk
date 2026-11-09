@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * Example product carrier on an E1M-V2N SoM. Composition: SoC dtsi (via the
+ * SoM dtsi) -> SoM dtsi -> carrier dtsi -> ownership dtsi, which stays LAST.
+ */
+
+/dts-v1/;
+
+#include "e1m-v2n-som.dtsi"
+#include "example-carrier.dtsi"
+
+/ {
+	model = "Example product on E1M-V2N";
+	compatible = "example,product-v2n",
+		     "renesas,r9a09g056n48", "renesas,r9a09g056";
+
+	memory@48000000 {
+		device_type = "memory";
+		/* No-fixup fallback only: U-Boot rewrites the size from its
+		 * own control DT inside the FIP. */
+		reg = <0x0 0x48000000 0x1 0xf8000000>;
+	};
+};
+
+/* No PCIe endpoint on this carrier. */
+&pcie0 {
+	status = "disabled";
+};
+
+/* Core ownership of the assignable peripherals. Keep this include last so
+ * nothing above can re-enable a CM33-owned instance. */
+#include "e1m-v2n-ownership.dtsi"

@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * Minimal carrier: debug console + the two SoM management I2C buses. Add the
+ * carrier's own peripherals below. Pad rules (never PA6/P80/P95 on V2N-M1,
+ * stay off P96/P97 and the other CM33 pads) are in docs/v2n-custom-carrier.md.
+ *
+ * Pin groups are redefined here because they live in e1m-x-evk.dtsi, which a
+ * custom carrier does not include.
+ */
+
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	aliases {
+		i2c0 = &i2c0;
+		serial0 = &scif;
+	};
+
+	chosen {
+		bootargs = "ignore_loglevel";
+		stdout-path = "serial0:115200n8";
+	};
+};
+
+/* I2C0 (P30/P31): on-module identity EEPROM. Keep it enabled at 100 kHz. */
+&i2c0 {
+	pinctrl-0 = <&i2c0_pins>;
+	pinctrl-names = "default";
+	clock-frequency = <100000>;
+	status = "okay";
+};
+
+/* I2C8 (P06/P07, BRD_I2C): GD32 bridge and the DA9292 (0x1E, programmed by
+ * U-Boot). Keep it enabled and do not bind a Linux driver to 0x1E. */
+&i2c8 {
+	pinctrl-0 = <&i2c8_pins>;
+	pinctrl-names = "default";
+	clock-frequency = <400000>;
+	status = "okay";
+};
+
+&scif {
+	pinctrl-0 = <&scif_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&pinctrl {
+	i2c0_pins: i2c0 {
+		pinmux = <RZV2N_PORT_PINMUX(3, 0, 1)>, /* I2C0_SDA */
+			 <RZV2N_PORT_PINMUX(3, 1, 1)>; /* I2C0_SCL */
+		bias-pull-up;
+	};
+
+	i2c8_pins: i2c8 {
+		pinmux = <RZV2N_PORT_PINMUX(0, 6, 1)>, /* I2C8_SDA */
+			 <RZV2N_PORT_PINMUX(0, 7, 1)>; /* I2C8_SCL */
+		bias-pull-up;
+	};
+
+	scif_pins: scif {
+		pins = "SCIF_TXD", "SCIF_RXD";
+		renesas,output-impedance = <1>;
+	};
+};
